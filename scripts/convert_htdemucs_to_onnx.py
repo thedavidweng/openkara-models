@@ -39,10 +39,23 @@ DUMMY_SECONDS = 10
 
 
 def load_htdemucs():
-    """Load the pretrained htdemucs model."""
+    """Load the pretrained htdemucs model.
+
+    get_model() may return a BagOfModels wrapper whose forward() raises
+    NotImplementedError. We unwrap it to get the raw HDemucs instance
+    with a working forward() method.
+    """
     from demucs.pretrained import get_model
 
-    model = get_model("htdemucs")
+    bag = get_model("htdemucs")
+
+    # Unwrap BagOfModels if needed
+    if hasattr(bag, "models"):
+        model = bag.models[0]
+        print(f"Unwrapped BagOfModels → {type(model).__name__}")
+    else:
+        model = bag
+
     model.eval()
     model.cpu()
     print(f"Loaded htdemucs model: {sum(p.numel() for p in model.parameters())} parameters")

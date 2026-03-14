@@ -25,10 +25,21 @@ MSE_THRESHOLD = 1e-4
 
 
 def load_pytorch_model():
-    """Load the pretrained htdemucs PyTorch model."""
+    """Load the pretrained htdemucs PyTorch model.
+
+    Unwraps BagOfModels to get the raw HDemucs instance with a working
+    forward() method (BagOfModels.forward() raises NotImplementedError).
+    """
     from demucs.pretrained import get_model
 
-    model = get_model("htdemucs")
+    bag = get_model("htdemucs")
+
+    if hasattr(bag, "models"):
+        model = bag.models[0]
+        print(f"Unwrapped BagOfModels → {type(model).__name__}")
+    else:
+        model = bag
+
     model.eval()
     model.cpu()
     return model
