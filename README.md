@@ -10,7 +10,7 @@ Converts the pretrained [Demucs htdemucs](https://github.com/facebookresearch/de
 |----------|-------|
 | Source model | `htdemucs` (Hybrid Transformer Demucs) |
 | Input | `[1, 2, frame_count]` — stereo audio at 44.1 kHz |
-| Output | `[4, 2, frame_count]` — drums, bass, other, vocals |
+| Output | `[1, 4, 2, frame_count]` — batch, stems (drums/bass/other/vocals), stereo, samples |
 | Format | ONNX (opset 17) |
 
 ## Usage
@@ -31,6 +31,26 @@ python scripts/validate_onnx.py
 ```
 
 Output: `models/htdemucs.onnx`
+
+## Integrate with OpenKara
+
+After a release is published, update these files in [OpenKara](https://github.com/thedavidweng/OpenKara):
+
+**`src-tauri/src/separator/model.rs`** — model filename:
+```rust
+pub const EMBEDDED_MODEL_FILENAME: &str = "htdemucs.onnx";
+```
+
+**`src-tauri/src/separator/bootstrap.rs`** — download URL and checksum:
+```rust
+pub const MODEL_DOWNLOAD_URL: &str =
+    "https://github.com/thedavidweng/openkara-models/releases/download/model-v1.0.0/htdemucs.onnx";
+pub const MODEL_SHA256: &str = "<sha256 from htdemucs.onnx.sha256>";
+```
+
+**`scripts/setup.sh`** and **`.github/workflows/ci.yml`** — same URL and SHA-256 values.
+
+The SHA-256 checksum is published alongside the model in each release (`htdemucs.onnx.sha256`).
 
 ## How it works
 
