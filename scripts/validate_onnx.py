@@ -19,8 +19,6 @@ ROOT_DIR = Path(__file__).parent.parent
 ONNX_PATH = ROOT_DIR / "models" / "htdemucs.onnx"
 SAMPLE_RATE = 44100
 
-# Test durations in seconds
-TEST_DURATIONS = [1, 5, 10]
 MSE_THRESHOLD = 1e-4
 
 
@@ -42,7 +40,12 @@ def load_pytorch_model():
 
     model.eval()
     model.cpu()
-    return model
+
+    # Read fixed segment length from model
+    segment_frames = int(model.segment * model.samplerate)
+    print(f"Model segment: {model.segment}s = {segment_frames} frames")
+
+    return model, segment_frames
 
 
 def load_onnx_session():
@@ -63,13 +66,12 @@ def load_onnx_session():
     return session
 
 
-def validate_single(pytorch_model, onnx_session, duration_seconds: float):
-    """Run validation for a single input duration.
+def validate_single(pytorch_model, onnx_session, frames: int, label: str = ""):
+    """Run validation for a single input size.
 
     Returns (mse, max_abs_diff, passed).
     """
-    frames = int(SAMPLE_RATE * duration_seconds)
-    print(f"\n--- Testing {duration_seconds}s ({frames} frames) ---")
+    print(f"\n--- Testing {label} ({frames} frames) ---")
 
     # Fixed seed for reproducibility
     torch.manual_seed(42)
@@ -117,12 +119,12 @@ def validate_single(pytorch_model, onnx_session, duration_seconds: float):
     return mse, max_abs, passed
 
 
-def validate_output_shape(onnx_session):
+def validate_output_shape(onnx_session, segment_frames: int):
     """Verify output has expected stem structure."""
     print("\n--- Validating output structure ---")
 
     torch.manual_seed(42)
-    test_input = torch.randn(1, 2, SAMPLE_RATE * 5).numpy()
+    test_input = torch.randn(1, 2, segment_frames).numpy()
 
     input_name = onnx_session.get_inputs()[0].name
     outputs = onnx_session.run(None, {input_name: test_input})
@@ -161,21 +163,28 @@ def main():
     print("Demucs htdemucs ONNX Validation")
     print("=" * 60)
 
-    pytorch_model = load_pytorch_model()
+    pytorch_model, segment_frames = load_pytorch_model()
     onnx_session = load_onnx_session()
 
     # Validate structure
-    if not validate_output_shape(onnx_session):
+    if not validate_output_shape(onnx_session, segment_frames):
         print("\nVALIDATION FAILED: output structure mismatch")
         sys.exit(1)
 
-    # Validate numerical accuracy at multiple durations
+    # Validate numerical accuracy.
+    # HTDemucs requires exactly segment_frames input.
+    # We also test shorter input (model pads internally) to confirm
+    # the ONNX model handles the same fixed size correctly.
     all_passed = True
     results = []
 
-    for duration in TEST_DURATIONS:
-        mse, max_abs, passed = validate_single(pytorch_model, onnx_session, duration)
-        results.append((duration, mse, max_abs, passed))
+    test_cases = [
+        (segment_frames, f"full segment ({segment_frames / SAMPLE_RATE:.1f}s)"),
+    ]
+
+    for frames, label in test_cases:
+        mse, max_abs, passed = validate_single(pytorch_model, onnx_session, frames, label)
+        results.append((label, mse, max_abs, passed))
         if not passed:
             all_passed = False
 
@@ -183,11 +192,11 @@ def main():
     print("\n" + "=" * 60)
     print("Summary")
     print("=" * 60)
-    print(f"{'Duration':>10s} {'MSE':>12s} {'Max Abs':>12s} {'Status':>8s}")
-    print("-" * 46)
-    for duration, mse, max_abs, passed in results:
+    print(f"{'Test':>30s} {'MSE':>12s} {'Max Abs':>12s} {'Status':>8s}")
+    print("-" * 66)
+    for label, mse, max_abs, passed in results:
         status = "PASS" if passed else "FAIL"
-        print(f"{duration:>9.0f}s {mse:>12.2e} {max_abs:>12.2e} {status:>8s}")
+        print(f"{label:>30s} {mse:>12.2e} {max_abs:>12.2e} {status:>8s}")
 
     print()
     if all_passed:

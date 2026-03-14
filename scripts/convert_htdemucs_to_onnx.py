@@ -35,7 +35,6 @@ OUTPUT_PATH = ROOT_DIR / "models" / "htdemucs.onnx"
 N_FFT = 4096
 HOP_LENGTH = 1024
 SAMPLE_RATE = 44100
-DUMMY_SECONDS = 10
 
 
 def load_htdemucs():
@@ -59,7 +58,16 @@ def load_htdemucs():
     model.eval()
     model.cpu()
     print(f"Loaded htdemucs model: {sum(p.numel() for p in model.parameters())} parameters")
-    return model
+
+    # Read the model's fixed segment length
+    # HTDemucs.forward() requires input of EXACTLY this many frames.
+    # Longer inputs cause a reshape failure at the time-branch output.
+    # Shorter inputs are padded internally, but the ONNX graph is traced
+    # with a fixed size so we must use the exact training segment.
+    segment_frames = int(model.segment * model.samplerate)
+    print(f"Model segment: {model.segment}s = {segment_frames} frames")
+
+    return model, segment_frames
 
 
 def try_direct_export(model, dummy_input):
@@ -71,17 +79,16 @@ def try_direct_export(model, dummy_input):
     print("Attempting direct ONNX export (opset 17)...")
 
     # HDemucs.forward() returns (batch, sources, channels, frames)
-    # = (1, 4, 2, frames)
+    # = (1, 4, 2, segment_frames)
+    # No dynamic_axes: HTDemucs requires fixed segment length internally
+    # (reshape at time-branch output hardcodes training_length).
+    # The consumer (OpenKara) handles chunking for longer audio.
     torch.onnx.export(
         model,
         (dummy_input,),
         str(OUTPUT_PATH),
         input_names=["audio"],
         output_names=["stems"],
-        dynamic_axes={
-            "audio": {2: "frame_count"},
-            "stems": {3: "frame_count"},
-        },
         opset_version=17,
         do_constant_folding=True,
     )
@@ -157,10 +164,6 @@ def try_patched_export(model, dummy_input):
             str(OUTPUT_PATH),
             input_names=["audio"],
             output_names=["stems"],
-            dynamic_axes={
-                "audio": {2: "frame_count"},
-                "stems": {3: "frame_count"},
-            },
             opset_version=17,
             do_constant_folding=True,
         )
@@ -200,18 +203,20 @@ def compute_sha256():
 def main():
     os.makedirs(OUTPUT_PATH.parent, exist_ok=True)
 
-    # Load model
-    model = load_htdemucs()
+    # Load model and get its fixed segment length
+    model, segment_frames = load_htdemucs()
 
-    # Create dummy input: stereo audio at 44.1kHz
-    dummy_input = torch.randn(1, 2, SAMPLE_RATE * DUMMY_SECONDS)
+    # Create dummy input matching the model's exact segment length.
+    # HTDemucs.forward() requires input of exactly segment_frames;
+    # it cannot handle longer audio (reshape failure in time branch).
+    dummy_input = torch.randn(1, 2, segment_frames)
     print(f"Dummy input shape: {dummy_input.shape}")
 
     # Quick forward pass to verify model works
     with torch.no_grad():
         output = model(dummy_input)
     print(f"PyTorch output shape: {output.shape}")
-    # Expected: (1, 4, 2, 441000)
+    # Expected: (1, 4, 2, segment_frames)
 
     # Try export strategies
     try:

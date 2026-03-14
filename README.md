@@ -9,8 +9,8 @@ Converts the pretrained [Demucs htdemucs](https://github.com/facebookresearch/de
 | Property | Value |
 |----------|-------|
 | Source model | `htdemucs` (Hybrid Transformer Demucs) |
-| Input | `[1, 2, frame_count]` — stereo audio at 44.1 kHz |
-| Output | `[1, 4, 2, frame_count]` — batch, stems (drums/bass/other/vocals), stereo, samples |
+| Input | `[1, 2, 343980]` — stereo audio at 44.1 kHz (fixed 7.8s segment) |
+| Output | `[1, 4, 2, 343980]` — batch, stems (drums/bass/other/vocals), stereo, samples |
 | Format | ONNX (opset 17) |
 
 ## Usage
