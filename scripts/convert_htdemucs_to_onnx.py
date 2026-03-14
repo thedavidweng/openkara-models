@@ -3,12 +3,12 @@
 Convert pretrained Demucs htdemucs model from PyTorch to ONNX format.
 
 The main challenge is that ONNX does not natively support complex-valued
-STFT/ISTFT operations. This script uses two strategies:
+STFT/ISTFT operations, and newer PyTorch ONNX export paths choke on Demucs'
+data-dependent asserts. This script uses two strategies:
 
-1. Direct export (PyTorch 2.1+ / opset 17): torch.stft maps to ONNX STFT op,
-   and complex tensors are decomposed automatically.
-2. Fallback: monkey-patch torch.stft/istft with conv1d-based real-valued
-   implementations from onnx_stft.py, so the tracer captures exportable ops.
+1. Direct export with the legacy TorchScript-based ONNX exporter.
+2. Fallback: replace Demucs' complex spectrogram path with a fully
+   real-valued conv1d/conv_transpose1d implementation from onnx_stft.py.
 
 References:
 - https://github.com/sevagh/demucs.onnx
@@ -19,10 +19,11 @@ References:
 import os
 import sys
 import hashlib
+import math
+import types
 from pathlib import Path
 
 import torch
-import numpy as np
 
 # Add scripts directory to path for local imports
 SCRIPTS_DIR = Path(__file__).parent
@@ -71,12 +72,13 @@ def load_htdemucs():
 
 
 def try_direct_export(model, dummy_input):
-    """Attempt direct ONNX export using PyTorch's built-in STFT/complex support.
+    """Attempt direct ONNX export using the legacy TorchScript exporter.
 
-    Works with PyTorch 2.1+ and opset 17 which has native STFT op and
-    automatic complex tensor decomposition.
+    PyTorch 2.9+ defaults torch.onnx.export() to the newer torch.export-based
+    exporter, which currently trips over data-dependent asserts inside Demucs.
+    We explicitly keep the legacy exporter here for reproducibility.
     """
-    print("Attempting direct ONNX export (opset 17)...")
+    print("Attempting direct ONNX export with legacy exporter (opset 17)...")
 
     # HDemucs.forward() returns (batch, sources, channels, frames)
     # = (1, 4, 2, segment_frames)
@@ -91,72 +93,90 @@ def try_direct_export(model, dummy_input):
         output_names=["stems"],
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     print("Direct export succeeded.")
 
 
-def try_patched_export(model, dummy_input):
-    """Export with monkey-patched STFT/ISTFT using conv1d-based implementations.
+def bind_real_valued_export_patch(model):
+    """Replace Demucs' complex spectrogram path with real-valued equivalents.
 
-    Replaces torch.stft and torch.istft at the module level during export
-    so the ONNX tracer captures conv1d operations instead of unsupported
-    complex STFT ops.
+    HTDemucs with `cac=True` packs real/imag bins into the channel dimension.
+    For export we keep that representation explicit and avoid creating complex
+    tensors entirely, because the legacy ONNX exporter cannot lower
+    `view_as_complex`.
     """
+    import torch.nn.functional as F
+    from demucs.hdemucs import pad1d
     from onnx_stft import OnnxSTFT, OnnxISTFT
 
-    print("Attempting patched export with conv1d-based STFT/ISTFT...")
+    if not model.cac:
+        raise RuntimeError("Real-valued export patch expects an HTDemucs model with cac=True")
 
-    stft_module = OnnxSTFT(n_fft=N_FFT, hop_length=HOP_LENGTH)
-    istft_module = OnnxISTFT(n_fft=N_FFT, hop_length=HOP_LENGTH)
+    stft_module = OnnxSTFT(n_fft=model.nfft, hop_length=model.hop_length)
+    istft_module = OnnxISTFT(n_fft=model.nfft, hop_length=model.hop_length)
 
-    # Save originals
-    orig_stft = torch.stft
-    orig_istft = torch.istft
+    originals = {
+        "_spec": model._spec,
+        "_ispec": model._ispec,
+        "_magnitude": model._magnitude,
+        "_mask": model._mask,
+    }
 
-    def patched_stft(input, n_fft, hop_length=None, win_length=None,
-                     window=None, center=True, pad_mode='reflect',
-                     normalized=False, onesided=None, return_complex=None):
-        """Replacement for torch.stft that uses conv1d internally."""
-        # Our OnnxSTFT handles center padding and windowing
-        if input.dim() == 1:
-            input = input.unsqueeze(0)
-        if input.dim() == 2:
-            input = input.unsqueeze(0)
-        # Returns (batch, channels, freq, time, 2) with last dim = [real, imag]
-        spec = stft_module(input)
-        # Flatten batch/channel dims back to match torch.stft output
-        batch, ch, freq, time, ri = spec.shape
-        spec = spec.reshape(batch * ch, freq, time, ri)
-        if batch * ch == 1:
-            spec = spec.squeeze(0)
-        # Convert to complex if requested (for compatibility with downstream code)
-        if return_complex:
-            return torch.view_as_complex(spec.contiguous())
-        return spec
+    def exportable_spec(self, x):
+        hl = self.hop_length
+        nfft = self.nfft
+        assert hl == nfft // 4
+        le = int(math.ceil(x.shape[-1] / hl))
+        pad = hl // 2 * 3
+        x = pad1d(x, (pad, pad + le * hl - x.shape[-1]), mode="reflect")
+        z = stft_module(x)[:, :, :-1, :, :]
+        assert z.shape[-2] == le + 4, (z.shape, x.shape, le)
+        z = z[:, :, :, 2: 2 + le, :]
+        return z.permute(0, 1, 4, 2, 3).contiguous()
 
-    def patched_istft(input, n_fft, hop_length=None, win_length=None,
-                      window=None, center=True, normalized=False,
-                      onesided=None, length=None, return_complex=False):
-        """Replacement for torch.istft that uses conv_transpose1d internally."""
-        if torch.is_complex(input):
-            input = torch.view_as_real(input)
-        if input.dim() == 3:
-            # (freq, time, 2) -> (1, 1, freq, time, 2)
-            input = input.unsqueeze(0).unsqueeze(0)
-        elif input.dim() == 4:
-            # (batch, freq, time, 2) -> (batch, 1, freq, time, 2)
-            input = input.unsqueeze(1)
-        signal = istft_module(input, length=length or 0)
-        # Flatten back
-        batch, ch, frames = signal.shape
-        signal = signal.reshape(batch * ch, frames)
-        if batch * ch == 1:
-            signal = signal.squeeze(0)
-        return signal
+    def exportable_ispec(self, z, length=None, scale=0):
+        assert scale == 0, "Scaled ISTFT export is not implemented"
+        hl = self.hop_length
+        z = F.pad(z, (0, 0, 0, 1))
+        z = F.pad(z, (2, 2))
+        pad = hl // 2 * 3
+        le = hl * int(math.ceil(length / hl)) + 2 * pad
 
+        batch, sources, channels, _, freqs, frames = z.shape
+        z = z.permute(0, 1, 2, 4, 5, 3).contiguous()
+        z = z.view(batch * sources, channels, freqs, frames, 2)
+        x = istft_module(z, length=le)
+        x = x.view(batch, sources, channels, le)
+        return x[..., pad: pad + length]
+
+    def exportable_magnitude(self, z):
+        batch, channels, _, freqs, frames = z.shape
+        return z.reshape(batch, channels * 2, freqs, frames)
+
+    def exportable_mask(self, z, m):
+        batch, sources, _, freqs, frames = m.shape
+        return m.view(batch, sources, -1, 2, freqs, frames).contiguous()
+
+    model._spec = types.MethodType(exportable_spec, model)
+    model._ispec = types.MethodType(exportable_ispec, model)
+    model._magnitude = types.MethodType(exportable_magnitude, model)
+    model._mask = types.MethodType(exportable_mask, model)
+
+    def restore():
+        for name, method in originals.items():
+            setattr(model, name, method)
+
+    return restore
+
+
+def try_patched_export(model, dummy_input):
+    """Export with a real-valued conv1d/conv_transpose1d STFT fallback."""
+    print("Attempting patched export with real-valued STFT/ISTFT...")
+
+    restore = None
     try:
-        torch.stft = patched_stft
-        torch.istft = patched_istft
+        restore = bind_real_valued_export_patch(model)
 
         torch.onnx.export(
             model,
@@ -166,12 +186,12 @@ def try_patched_export(model, dummy_input):
             output_names=["stems"],
             opset_version=17,
             do_constant_folding=True,
+            dynamo=False,
         )
         print("Patched export succeeded.")
     finally:
-        # Restore originals
-        torch.stft = orig_stft
-        torch.istft = orig_istft
+        if restore is not None:
+            restore()
 
 
 def verify_onnx():
@@ -230,7 +250,7 @@ def main():
             print(f"Patched export also failed: {e2}")
             print()
             print("Both export strategies failed.")
-            print("Please check PyTorch version (need 2.1+) and report this issue.")
+            print("Please inspect the exporter logs above and update the fallback path.")
             sys.exit(1)
 
     # Verify

@@ -162,8 +162,10 @@ class OnnxISTFT(nn.Module):
         self.register_buffer("cos_filters", cos_filters)
         self.register_buffer("sin_filters", sin_filters)
 
-        # Window squared for overlap-add normalization
-        self.register_buffer("window_sq", window * window)
+        # Overlap-add normalization depends only on the window, not on the
+        # Fourier basis. Using the squared synthesis filters here introduces a
+        # scale error in the reconstructed waveform.
+        self.register_buffer("window_sq_kernel", (window * window).view(1, 1, n_fft))
 
     def forward(self, spec: torch.Tensor, length: int = 0) -> torch.Tensor:
         """Compute ISTFT to reconstruct time-domain signal.
@@ -194,11 +196,13 @@ class OnnxISTFT(nn.Module):
         signal = F.conv_transpose1d(real, cos_f, stride=self.hop_length)
         signal = signal - F.conv_transpose1d(imag, sin_f, stride=self.hop_length)
 
-        # Compute window normalization envelope
-        ones = torch.ones(1, n_freqs, time_steps, device=spec.device, dtype=spec.dtype)
-        win_env_cos = F.conv_transpose1d(ones, cos_f * cos_f, stride=self.hop_length)
-        win_env_sin = F.conv_transpose1d(ones, sin_f * sin_f, stride=self.hop_length)
-        window_envelope = win_env_cos + win_env_sin
+        # Compute the standard overlap-add normalization envelope.
+        ones = torch.ones(batch * channels, 1, time_steps, device=spec.device, dtype=spec.dtype)
+        window_envelope = F.conv_transpose1d(
+            ones,
+            self.window_sq_kernel,
+            stride=self.hop_length,
+        )
 
         # Avoid division by zero
         window_envelope = torch.clamp(window_envelope, min=1e-8)
