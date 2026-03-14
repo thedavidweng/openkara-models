@@ -1,0 +1,69 @@
+name: Convert and Release
+
+on:
+  push:
+    tags: ["model-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only PyTorch
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Convert model to ONNX
+        run: python scripts/convert_htdemucs_to_onnx.py
+
+      - name: Validate ONNX model
+        run: python scripts/validate_onnx.py
+
+      - name: Generate checksum
+        run: |
+          cd models
+          sha256sum htdemucs.onnx > htdemucs.onnx.sha256
+          echo "Checksum:"
+          cat htdemucs.onnx.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: htdemucs-onnx
+          path: |
+            models/htdemucs.onnx
+            models/htdemucs.onnx.sha256
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            models/htdemucs.onnx
+            models/htdemucs.onnx.sha256
+          body: |
+            ## HTDemucs ONNX Model
+
+            Converted from the pretrained [Demucs htdemucs](https://github.com/facebookresearch/demucs) PyTorch model.
+
+            **Model spec:**
+            - Input: `[1, 2, frame_count]` (stereo audio at 44.1 kHz)
+            - Output: `[1, 4, 2, frame_count]` (drums, bass, other, vocals)
+            - Format: ONNX opset 17
+
+            **Verification:** SHA-256 checksum included in `htdemucs.onnx.sha256`.
+            Validated against PyTorch reference output (MSE < 1e-4).
+          generate_release_notes: true
