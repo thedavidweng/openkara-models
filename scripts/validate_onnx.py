@@ -7,12 +7,12 @@ then compares outputs to ensure numerical equivalence (MSE < 1e-4).
 """
 
 import argparse
+import gc
 import sys
 from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 import onnxruntime as ort
 
 ROOT_DIR = Path(__file__).parent.parent
@@ -23,44 +23,17 @@ MSE_THRESHOLD = 1e-4
 SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
 
 
-class EnsembleHTDemucs(nn.Module):
-    """Wrapper that runs multiple HTDemucs sub-models and averages their outputs."""
-
-    def __init__(self, models):
-        super().__init__()
-        self.models = nn.ModuleList(models)
-        first = models[0]
-        self.segment = first.segment
-        self.samplerate = first.samplerate
-
-    def forward(self, x):
-        outputs = [m(x) for m in self.models]
-        return torch.stack(outputs).mean(dim=0)
-
-
 def load_pytorch_model(model_name):
-    """Load the pretrained PyTorch model.
-
-    For htdemucs: unwraps BagOfModels to get the single HDemucs instance.
-    For htdemucs_ft: wraps all sub-models in EnsembleHTDemucs for averaging.
-    """
+    """Load the pretrained PyTorch model (single model, unwrapped)."""
     from demucs.pretrained import get_model
 
     bag = get_model(model_name)
 
-    if model_name == "htdemucs_ft":
-        if hasattr(bag, "models"):
-            models = list(bag.models)
-            print(f"Loaded {model_name}: BagOfModels with {len(models)} sub-models")
-            model = EnsembleHTDemucs(models)
-        else:
-            model = bag
+    if hasattr(bag, "models"):
+        model = bag.models[0]
+        print(f"Unwrapped BagOfModels → {type(model).__name__}")
     else:
-        if hasattr(bag, "models"):
-            model = bag.models[0]
-            print(f"Unwrapped BagOfModels → {type(model).__name__}")
-        else:
-            model = bag
+        model = bag
 
     model.eval()
     model.cpu()
@@ -69,6 +42,44 @@ def load_pytorch_model(model_name):
     print(f"Model segment: {model.segment}s = {segment_frames} frames")
 
     return model, segment_frames
+
+
+def compute_pytorch_ensemble_output(model_name, test_input):
+    """Compute ensemble output by running sub-models one at a time.
+
+    Loads each sub-model sequentially and averages their outputs,
+    keeping memory usage low.
+    """
+    from demucs.pretrained import get_model
+
+    bag = get_model(model_name)
+    if not hasattr(bag, "models"):
+        raise RuntimeError(f"{model_name} is not a BagOfModels")
+
+    n_models = len(bag.models)
+    segment_frames = int(bag.models[0].segment * bag.models[0].samplerate)
+    # Keep models list but process one at a time
+    models = list(bag.models)
+    del bag
+    gc.collect()
+
+    print(f"Computing ensemble output from {n_models} sub-models...")
+    accumulated = None
+
+    for i, sub_model in enumerate(models):
+        sub_model.eval()
+        sub_model.cpu()
+        with torch.no_grad():
+            out = sub_model(test_input)
+        print(f"  Sub-model {i} output shape: {out.shape}")
+        if accumulated is None:
+            accumulated = out.clone()
+        else:
+            accumulated += out
+        del out
+
+    result = accumulated / n_models
+    return result, segment_frames
 
 
 def load_onnx_session(onnx_path):
@@ -89,45 +100,38 @@ def load_onnx_session(onnx_path):
     return session
 
 
-def validate_single(pytorch_model, onnx_session, frames: int, label: str = ""):
-    """Run validation for a single input size.
+def validate_single(pytorch_np, onnx_session, test_input_np, label):
+    """Compare PyTorch output against ONNX output.
 
     Returns (mse, max_abs_diff, passed).
     """
-    print(f"\n--- Testing {label} ({frames} frames) ---")
-
-    # Fixed seed for reproducibility
-    torch.manual_seed(42)
-    test_input = torch.randn(1, 2, frames)
-
-    # PyTorch inference
-    with torch.no_grad():
-        pytorch_output = pytorch_model(test_input)
-    pytorch_np = pytorch_output.numpy()
+    print(f"\n--- Testing {label} ---")
     print(f"  PyTorch output shape: {pytorch_np.shape}")
 
     # ONNX inference
     input_name = onnx_session.get_inputs()[0].name
-    onnx_output = onnx_session.run(None, {input_name: test_input.numpy()})
+    onnx_output = onnx_session.run(None, {input_name: test_input_np})
     onnx_np = onnx_output[0]
     print(f"  ONNX output shape:    {onnx_np.shape}")
 
     # Handle potential shape differences
-    if pytorch_np.shape != onnx_np.shape:
-        if pytorch_np.ndim == 4 and onnx_np.ndim == 3:
-            pytorch_np = pytorch_np.squeeze(0)
-        elif pytorch_np.ndim == 3 and onnx_np.ndim == 4:
-            onnx_np = onnx_np.squeeze(0)
+    pt = pytorch_np
+    ox = onnx_np
+    if pt.shape != ox.shape:
+        if pt.ndim == 4 and ox.ndim == 3:
+            pt = pt.squeeze(0)
+        elif pt.ndim == 3 and ox.ndim == 4:
+            ox = ox.squeeze(0)
 
-        if pytorch_np.shape != onnx_np.shape:
-            min_frames = min(pytorch_np.shape[-1], onnx_np.shape[-1])
-            pytorch_np = pytorch_np[..., :min_frames]
-            onnx_np = onnx_np[..., :min_frames]
+        if pt.shape != ox.shape:
+            min_frames = min(pt.shape[-1], ox.shape[-1])
+            pt = pt[..., :min_frames]
+            ox = ox[..., :min_frames]
 
     # Compute metrics
-    mse = np.mean((pytorch_np - onnx_np) ** 2)
-    max_abs = np.max(np.abs(pytorch_np - onnx_np))
-    mean_abs = np.mean(np.abs(pytorch_np - onnx_np))
+    mse = np.mean((pt - ox) ** 2)
+    max_abs = np.max(np.abs(pt - ox))
+    mean_abs = np.mean(np.abs(pt - ox))
 
     passed = mse < MSE_THRESHOLD
 
@@ -139,7 +143,7 @@ def validate_single(pytorch_model, onnx_session, frames: int, label: str = ""):
     return mse, max_abs, passed
 
 
-def validate_output_shape(onnx_session, segment_frames: int):
+def validate_output_shape(onnx_session, segment_frames):
     """Verify output has expected stem structure."""
     print("\n--- Validating output structure ---")
 
@@ -150,7 +154,6 @@ def validate_output_shape(onnx_session, segment_frames: int):
     outputs = onnx_session.run(None, {input_name: test_input})
     output = outputs[0]
 
-    # Expected: (1, 4, 2, frames) or (4, 2, frames)
     if output.ndim == 4:
         n_stems = output.shape[1]
         n_channels = output.shape[2]
@@ -198,7 +201,31 @@ def main():
     print(f"Demucs {model_name} ONNX Validation")
     print("=" * 60)
 
-    pytorch_model, segment_frames = load_pytorch_model(model_name)
+    # Fixed seed for reproducibility
+    torch.manual_seed(42)
+
+    if model_name == "htdemucs_ft":
+        # For ensemble: compute reference by averaging sub-model outputs
+        # Use a small test input first to get segment_frames
+        from demucs.pretrained import get_model
+        bag = get_model(model_name)
+        segment_frames = int(bag.models[0].segment * bag.models[0].samplerate)
+        del bag
+        gc.collect()
+
+        torch.manual_seed(42)
+        test_input = torch.randn(1, 2, segment_frames)
+
+        pytorch_output, _ = compute_pytorch_ensemble_output(model_name, test_input)
+        pytorch_np = pytorch_output.numpy()
+    else:
+        pytorch_model, segment_frames = load_pytorch_model(model_name)
+        torch.manual_seed(42)
+        test_input = torch.randn(1, 2, segment_frames)
+        with torch.no_grad():
+            pytorch_output = pytorch_model(test_input)
+        pytorch_np = pytorch_output.numpy()
+
     onnx_session = load_onnx_session(onnx_path)
 
     # Validate structure
@@ -207,18 +234,10 @@ def main():
         sys.exit(1)
 
     # Validate numerical accuracy
-    all_passed = True
-    results = []
-
-    test_cases = [
-        (segment_frames, f"full segment ({segment_frames / SAMPLE_RATE:.1f}s)"),
-    ]
-
-    for frames, label in test_cases:
-        mse, max_abs, passed = validate_single(pytorch_model, onnx_session, frames, label)
-        results.append((label, mse, max_abs, passed))
-        if not passed:
-            all_passed = False
+    label = f"full segment ({segment_frames / SAMPLE_RATE:.1f}s)"
+    torch.manual_seed(42)
+    test_input_np = torch.randn(1, 2, segment_frames).numpy()
+    mse, max_abs, passed = validate_single(pytorch_np, onnx_session, test_input_np, label)
 
     # Summary
     print("\n" + "=" * 60)
@@ -226,12 +245,11 @@ def main():
     print("=" * 60)
     print(f"{'Test':>30s} {'MSE':>12s} {'Max Abs':>12s} {'Status':>8s}")
     print("-" * 66)
-    for label, mse, max_abs, passed in results:
-        status = "PASS" if passed else "FAIL"
-        print(f"{label:>30s} {mse:>12.2e} {max_abs:>12.2e} {status:>8s}")
+    status = "PASS" if passed else "FAIL"
+    print(f"{label:>30s} {mse:>12.2e} {max_abs:>12.2e} {status:>8s}")
 
     print()
-    if all_passed:
+    if passed:
         print("VALIDATION PASSED - all tests within MSE threshold")
     else:
         print(f"VALIDATION FAILED - MSE threshold: {MSE_THRESHOLD:.0e}")

@@ -10,6 +10,10 @@ data-dependent asserts. This script uses two strategies:
 2. Fallback: replace Demucs' complex spectrogram path with a fully
    real-valued conv1d/conv_transpose1d implementation from onnx_stft.py.
 
+For htdemucs_ft (4-model ensemble), sub-models are exported one at a time
+to stay within CI runner memory limits, then merged into a single ONNX
+graph with an averaging output.
+
 References:
 - https://github.com/sevagh/demucs.onnx
 - https://mixxx.org/news/2025-10-27-gsoc2025-demucs-to-onnx-dhunstack/
@@ -17,10 +21,12 @@ References:
 """
 
 import argparse
+import gc
 import os
 import sys
 import hashlib
 import math
+import tempfile
 import types
 from pathlib import Path
 
@@ -40,67 +46,58 @@ HOP_LENGTH = 1024
 SAMPLE_RATE = 44100
 
 
-class EnsembleHTDemucs(nn.Module):
-    """Wrapper that runs multiple HTDemucs sub-models and averages their outputs.
-
-    Used for htdemucs_ft which is a BagOfModels containing 4 fine-tuned
-    HTDemucs instances. This wrapper makes the ensemble exportable as a
-    single ONNX graph with the same interface as a single HTDemucs model.
-    """
-
-    def __init__(self, models):
-        super().__init__()
-        self.models = nn.ModuleList(models)
-        # Copy attributes from the first sub-model for compatibility
-        first = models[0]
-        self.segment = first.segment
-        self.samplerate = first.samplerate
-        self.nfft = first.nfft
-        self.hop_length = first.hop_length
-        self.cac = first.cac
-
-    def forward(self, x):
-        outputs = [m(x) for m in self.models]
-        return torch.stack(outputs).mean(dim=0)
-
-
-def load_model(model_name):
-    """Load a pretrained Demucs model.
-
-    For htdemucs: unwraps BagOfModels to get the single HDemucs instance.
-    For htdemucs_ft: wraps all sub-models in EnsembleHTDemucs for averaging.
-    """
+def load_single_model(model_name):
+    """Load a single pretrained Demucs model (unwrapped from BagOfModels)."""
     from demucs.pretrained import get_model
 
     bag = get_model(model_name)
 
-    if model_name == "htdemucs_ft":
-        if hasattr(bag, "models"):
-            models = list(bag.models)
-            print(f"Loaded {model_name}: BagOfModels with {len(models)} sub-models")
-            model = EnsembleHTDemucs(models)
-        else:
-            # Unexpected: htdemucs_ft should always be a BagOfModels
-            model = bag
-            print(f"Warning: {model_name} is not a BagOfModels, using as-is")
+    if hasattr(bag, "models"):
+        model = bag.models[0]
+        print(f"Unwrapped BagOfModels → {type(model).__name__}")
     else:
-        # htdemucs: unwrap BagOfModels to get single model
-        if hasattr(bag, "models"):
-            model = bag.models[0]
-            print(f"Unwrapped BagOfModels → {type(model).__name__}")
-        else:
-            model = bag
+        model = bag
 
     model.eval()
     model.cpu()
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Loaded {model_name} model: {total_params:,} parameters")
 
-    # Read the model's fixed segment length
     segment_frames = int(model.segment * model.samplerate)
     print(f"Model segment: {model.segment}s = {segment_frames} frames")
 
     return model, segment_frames
+
+
+def load_sub_model(model_name, index):
+    """Load a single sub-model from a BagOfModels by index.
+
+    Loads the full BagOfModels, extracts the requested sub-model,
+    and discards the rest to conserve memory.
+    """
+    from demucs.pretrained import get_model
+
+    bag = get_model(model_name)
+
+    if not hasattr(bag, "models"):
+        raise RuntimeError(f"{model_name} is not a BagOfModels")
+
+    n_models = len(bag.models)
+    if index >= n_models:
+        raise RuntimeError(f"Sub-model index {index} >= {n_models}")
+
+    model = bag.models[index]
+    # Discard the bag to free memory
+    del bag
+    gc.collect()
+
+    model.eval()
+    model.cpu()
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Loaded sub-model {index}: {total_params:,} parameters")
+
+    segment_frames = int(model.segment * model.samplerate)
+    return model, segment_frames, n_models
 
 
 def try_direct_export(model, dummy_input, output_path):
@@ -120,92 +117,68 @@ def try_direct_export(model, dummy_input, output_path):
     print("Direct export succeeded.")
 
 
-def _get_sub_models(model):
-    """Get the list of HDemucs instances to patch.
-
-    For EnsembleHTDemucs, returns all sub-models.
-    For a single HDemucs, returns [model].
-    """
-    if isinstance(model, EnsembleHTDemucs):
-        return list(model.models)
-    return [model]
-
-
 def bind_real_valued_export_patch(model):
-    """Replace Demucs' complex spectrogram path with real-valued equivalents.
-
-    Patches all sub-models if the model is an EnsembleHTDemucs.
-    """
+    """Replace Demucs' complex spectrogram path with real-valued equivalents."""
     import torch.nn.functional as F
     from demucs.hdemucs import pad1d
     from onnx_stft import OnnxSTFT, OnnxISTFT
 
-    sub_models = _get_sub_models(model)
-    all_originals = []
+    if not model.cac:
+        raise RuntimeError("Real-valued export patch expects an HTDemucs model with cac=True")
 
-    for sub_model in sub_models:
-        if not sub_model.cac:
-            raise RuntimeError("Real-valued export patch expects an HTDemucs model with cac=True")
+    stft_module = OnnxSTFT(n_fft=model.nfft, hop_length=model.hop_length)
+    istft_module = OnnxISTFT(n_fft=model.nfft, hop_length=model.hop_length)
 
-        stft_module = OnnxSTFT(n_fft=sub_model.nfft, hop_length=sub_model.hop_length)
-        istft_module = OnnxISTFT(n_fft=sub_model.nfft, hop_length=sub_model.hop_length)
+    originals = {
+        "_spec": model._spec,
+        "_ispec": model._ispec,
+        "_magnitude": model._magnitude,
+        "_mask": model._mask,
+    }
 
-        originals = {
-            "_spec": sub_model._spec,
-            "_ispec": sub_model._ispec,
-            "_magnitude": sub_model._magnitude,
-            "_mask": sub_model._mask,
-        }
-        all_originals.append((sub_model, originals))
+    def exportable_spec(self, x):
+        hl = self.hop_length
+        nfft = self.nfft
+        assert hl == nfft // 4
+        le = int(math.ceil(x.shape[-1] / hl))
+        pad = hl // 2 * 3
+        x = pad1d(x, (pad, pad + le * hl - x.shape[-1]), mode="reflect")
+        z = stft_module(x)[:, :, :-1, :, :]
+        assert z.shape[-2] == le + 4, (z.shape, x.shape, le)
+        z = z[:, :, :, 2: 2 + le, :]
+        return z.permute(0, 1, 4, 2, 3).contiguous()
 
-        def make_exportable_spec(stft_mod):
-            def exportable_spec(self, x):
-                hl = self.hop_length
-                nfft = self.nfft
-                assert hl == nfft // 4
-                le = int(math.ceil(x.shape[-1] / hl))
-                pad = hl // 2 * 3
-                x = pad1d(x, (pad, pad + le * hl - x.shape[-1]), mode="reflect")
-                z = stft_mod(x)[:, :, :-1, :, :]
-                assert z.shape[-2] == le + 4, (z.shape, x.shape, le)
-                z = z[:, :, :, 2: 2 + le, :]
-                return z.permute(0, 1, 4, 2, 3).contiguous()
-            return exportable_spec
+    def exportable_ispec(self, z, length=None, scale=0):
+        assert scale == 0, "Scaled ISTFT export is not implemented"
+        hl = self.hop_length
+        z = F.pad(z, (0, 0, 0, 1))
+        z = F.pad(z, (2, 2))
+        pad = hl // 2 * 3
+        le = hl * int(math.ceil(length / hl)) + 2 * pad
 
-        def make_exportable_ispec(istft_mod):
-            def exportable_ispec(self, z, length=None, scale=0):
-                assert scale == 0, "Scaled ISTFT export is not implemented"
-                hl = self.hop_length
-                z = F.pad(z, (0, 0, 0, 1))
-                z = F.pad(z, (2, 2))
-                pad = hl // 2 * 3
-                le = hl * int(math.ceil(length / hl)) + 2 * pad
+        batch, sources, channels, _, freqs, frames = z.shape
+        z = z.permute(0, 1, 2, 4, 5, 3).contiguous()
+        z = z.view(batch * sources, channels, freqs, frames, 2)
+        x = istft_module(z, length=le)
+        x = x.view(batch, sources, channels, le)
+        return x[..., pad: pad + length]
 
-                batch, sources, channels, _, freqs, frames = z.shape
-                z = z.permute(0, 1, 2, 4, 5, 3).contiguous()
-                z = z.view(batch * sources, channels, freqs, frames, 2)
-                x = istft_mod(z, length=le)
-                x = x.view(batch, sources, channels, le)
-                return x[..., pad: pad + length]
-            return exportable_ispec
+    def exportable_magnitude(self, z):
+        batch, channels, _, freqs, frames = z.shape
+        return z.reshape(batch, channels * 2, freqs, frames)
 
-        def exportable_magnitude(self, z):
-            batch, channels, _, freqs, frames = z.shape
-            return z.reshape(batch, channels * 2, freqs, frames)
+    def exportable_mask(self, z, m):
+        batch, sources, _, freqs, frames = m.shape
+        return m.view(batch, sources, -1, 2, freqs, frames).contiguous()
 
-        def exportable_mask(self, z, m):
-            batch, sources, _, freqs, frames = m.shape
-            return m.view(batch, sources, -1, 2, freqs, frames).contiguous()
-
-        sub_model._spec = types.MethodType(make_exportable_spec(stft_module), sub_model)
-        sub_model._ispec = types.MethodType(make_exportable_ispec(istft_module), sub_model)
-        sub_model._magnitude = types.MethodType(exportable_magnitude, sub_model)
-        sub_model._mask = types.MethodType(exportable_mask, sub_model)
+    model._spec = types.MethodType(exportable_spec, model)
+    model._ispec = types.MethodType(exportable_ispec, model)
+    model._magnitude = types.MethodType(exportable_magnitude, model)
+    model._mask = types.MethodType(exportable_mask, model)
 
     def restore():
-        for sub_model, originals in all_originals:
-            for name, method in originals.items():
-                setattr(sub_model, name, method)
+        for name, method in originals.items():
+            setattr(model, name, method)
 
     return restore
 
@@ -232,6 +205,220 @@ def try_patched_export(model, dummy_input, output_path):
     finally:
         if restore is not None:
             restore()
+
+
+def export_single_model(model, dummy_input, output_path):
+    """Export a single HTDemucs model to ONNX, trying direct then patched."""
+    try:
+        try_direct_export(model, dummy_input, output_path)
+    except Exception as e:
+        print(f"Direct export failed: {e}")
+        print()
+        try_patched_export(model, dummy_input, output_path)
+
+
+def merge_ensemble_onnx(sub_model_paths, output_path, n_models):
+    """Merge multiple ONNX sub-model graphs into a single ensemble graph.
+
+    Creates a combined ONNX model that:
+    1. Feeds the same input to all sub-models
+    2. Averages their outputs
+    3. Produces a single output with the same shape as any individual model
+
+    Each sub-model graph is namespaced (prefixed) to avoid node name collisions.
+    """
+    import onnx
+    from onnx import helper, TensorProto, numpy_helper
+    import numpy as np
+
+    print(f"\nMerging {n_models} sub-model ONNX files into ensemble...")
+
+    # Load all sub-models
+    sub_models = []
+    for i, path in enumerate(sub_model_paths):
+        m = onnx.load(str(path))
+        onnx.checker.check_model(m)
+        sub_models.append(m)
+        print(f"  Loaded sub-model {i}: {path}")
+
+    # Use the first model as reference for input/output shapes
+    ref = sub_models[0]
+    ref_input = ref.graph.input[0]
+    ref_output = ref.graph.output[0]
+
+    # Collect all initializers and nodes from each sub-model, prefixed
+    all_initializers = []
+    all_nodes = []
+    sub_output_names = []
+
+    for i, m in enumerate(sub_models):
+        prefix = f"sub{i}_"
+
+        # Build a rename map for this sub-model
+        # All internal names get prefixed, but the input name maps to shared input
+        internal_names = set()
+        for node in m.graph.node:
+            for name in list(node.input) + list(node.output):
+                internal_names.add(name)
+        for init in m.graph.initializer:
+            internal_names.add(init.name)
+        for inp in m.graph.input:
+            internal_names.add(inp.name)
+        for out in m.graph.output:
+            internal_names.add(out.name)
+
+        input_name = m.graph.input[0].name
+        output_name = m.graph.output[0].name
+        prefixed_output = prefix + output_name
+        sub_output_names.append(prefixed_output)
+
+        def rename(name):
+            if name == input_name:
+                return "audio"  # Shared input
+            return prefix + name
+
+        # Prefix initializers
+        for init in m.graph.initializer:
+            new_init = onnx.TensorProto()
+            new_init.CopyFrom(init)
+            new_init.name = rename(init.name)
+            all_initializers.append(new_init)
+
+        # Prefix nodes
+        for node in m.graph.node:
+            new_node = helper.make_node(
+                node.op_type,
+                inputs=[rename(n) for n in node.input],
+                outputs=[rename(n) for n in node.output],
+                name=prefix + node.name if node.name else "",
+                domain=node.domain,
+            )
+            # Copy attributes
+            for attr in node.attribute:
+                new_node.attribute.append(attr)
+            all_nodes.append(new_node)
+
+    # Add averaging nodes:
+    # 1. Concat all sub-model outputs along a new dim 0: (n_models, 1, 4, 2, frames)
+    concat_output = "ensemble_concat"
+    all_nodes.append(helper.make_node(
+        "Unsqueeze",
+        inputs=[sub_output_names[0], "unsqueeze_axes"],
+        outputs=["unsqueeze_0"],
+    ))
+    for i in range(1, n_models):
+        all_nodes.append(helper.make_node(
+            "Unsqueeze",
+            inputs=[sub_output_names[i], "unsqueeze_axes"],
+            outputs=[f"unsqueeze_{i}"],
+        ))
+
+    all_nodes.append(helper.make_node(
+        "Concat",
+        inputs=[f"unsqueeze_{i}" for i in range(n_models)],
+        outputs=[concat_output],
+        axis=0,
+    ))
+
+    # 2. ReduceMean along axis 0
+    all_nodes.append(helper.make_node(
+        "ReduceMean",
+        inputs=[concat_output, "reduce_axes"],
+        outputs=["stems"],
+        keepdims=0,
+    ))
+
+    # Add constant tensors for axes
+    axes_0 = numpy_helper.from_array(np.array([0], dtype=np.int64), name="unsqueeze_axes")
+    reduce_axes = numpy_helper.from_array(np.array([0], dtype=np.int64), name="reduce_axes")
+    all_initializers.extend([axes_0, reduce_axes])
+
+    # Build the ensemble graph
+    ensemble_input = helper.make_tensor_value_info(
+        "audio",
+        TensorProto.FLOAT,
+        [d.dim_value if d.dim_value else d.dim_param
+         for d in ref_input.type.tensor_type.shape.dim],
+    )
+    ensemble_output = helper.make_tensor_value_info(
+        "stems",
+        TensorProto.FLOAT,
+        [d.dim_value if d.dim_value else d.dim_param
+         for d in ref_output.type.tensor_type.shape.dim],
+    )
+
+    graph = helper.make_graph(
+        all_nodes,
+        "htdemucs_ft_ensemble",
+        [ensemble_input],
+        [ensemble_output],
+        initializer=all_initializers,
+    )
+
+    # Copy opset from reference model
+    opset_imports = [helper.make_opsetid(op.domain, op.version) for op in ref.opset_import]
+
+    ensemble_model = helper.make_model(graph, opset_imports=opset_imports)
+    ensemble_model.ir_version = ref.ir_version
+
+    # Save
+    onnx.save(ensemble_model, str(output_path))
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    print(f"Ensemble model saved: {output_path} ({size_mb:.1f} MB)")
+
+    # Verify
+    print("Verifying ensemble model...")
+    loaded = onnx.load(str(output_path))
+    onnx.checker.check_model(loaded, full_check=True)
+    print("Ensemble ONNX checker passed.")
+
+
+def convert_ensemble(model_name, output_path):
+    """Convert htdemucs_ft by exporting sub-models one at a time then merging.
+
+    This approach keeps peak memory usage comparable to a single htdemucs export,
+    allowing it to run on standard CI runners with ~7GB RAM.
+    """
+    # First, discover how many sub-models and get segment_frames
+    model_0, segment_frames, n_models = load_sub_model(model_name, 0)
+    del model_0
+    gc.collect()
+    print(f"\nEnsemble has {n_models} sub-models, segment_frames={segment_frames}")
+
+    dummy_input = torch.randn(1, 2, segment_frames)
+
+    sub_model_paths = []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(n_models):
+            print(f"\n{'='*60}")
+            print(f"Exporting sub-model {i+1}/{n_models}")
+            print(f"{'='*60}")
+
+            # Load only this sub-model
+            sub_model, _, _ = load_sub_model(model_name, i)
+
+            # Quick forward pass
+            with torch.no_grad():
+                out = sub_model(dummy_input)
+            print(f"  PyTorch output shape: {out.shape}")
+            del out
+
+            # Export to temp file
+            tmp_path = Path(tmpdir) / f"sub_{i}.onnx"
+            export_single_model(sub_model, dummy_input, tmp_path)
+
+            sub_model_paths.append(tmp_path)
+
+            # Free memory before next sub-model
+            del sub_model
+            gc.collect()
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Merge all sub-models into one ensemble ONNX
+        merge_ensemble_onnx(sub_model_paths, output_path, n_models)
+
+    return segment_frames
 
 
 def verify_onnx(output_path):
@@ -279,32 +466,21 @@ def main():
 
     os.makedirs(output_path.parent, exist_ok=True)
 
-    # Load model and get its fixed segment length
-    model, segment_frames = load_model(model_name)
+    if model_name == "htdemucs_ft":
+        # Ensemble: export sub-models one-by-one then merge
+        convert_ensemble(model_name, output_path)
+    else:
+        # Single model
+        model, segment_frames = load_single_model(model_name)
 
-    # Create dummy input matching the model's exact segment length.
-    dummy_input = torch.randn(1, 2, segment_frames)
-    print(f"Dummy input shape: {dummy_input.shape}")
+        dummy_input = torch.randn(1, 2, segment_frames)
+        print(f"Dummy input shape: {dummy_input.shape}")
 
-    # Quick forward pass to verify model works
-    with torch.no_grad():
-        output = model(dummy_input)
-    print(f"PyTorch output shape: {output.shape}")
+        with torch.no_grad():
+            output = model(dummy_input)
+        print(f"PyTorch output shape: {output.shape}")
 
-    # Try export strategies
-    try:
-        try_direct_export(model, dummy_input, output_path)
-    except Exception as e:
-        print(f"Direct export failed: {e}")
-        print()
-        try:
-            try_patched_export(model, dummy_input, output_path)
-        except Exception as e2:
-            print(f"Patched export also failed: {e2}")
-            print()
-            print("Both export strategies failed.")
-            print("Please inspect the exporter logs above and update the fallback path.")
-            sys.exit(1)
+        export_single_model(model, dummy_input, output_path)
 
     # Verify
     verify_onnx(output_path)
