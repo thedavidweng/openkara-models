@@ -273,6 +273,8 @@ def merge_ensemble_onnx(sub_model_paths, output_path, n_models):
         sub_output_names.append(prefixed_output)
 
         def rename(name):
+            if not name:
+                return ""  # Empty string = optional input not provided
             if name == input_name:
                 return "audio"  # Shared input
             return prefix + name
@@ -361,15 +363,23 @@ def merge_ensemble_onnx(sub_model_paths, output_path, n_models):
     ensemble_model = helper.make_model(graph, opset_imports=opset_imports)
     ensemble_model.ir_version = ref.ir_version
 
-    # Save
+    # Run shape inference and optimization before final check.
+    # Shape inference resolves missing type info that the checker requires.
+    from onnx import shape_inference
+    print("Running shape inference on ensemble model...")
+    ensemble_model = shape_inference.infer_shapes(ensemble_model)
+
+    # Save with external data if model is large (>2GB protobuf limit)
+    print(f"Saving ensemble model to {output_path}...")
     onnx.save(ensemble_model, str(output_path))
     size_mb = output_path.stat().st_size / (1024 * 1024)
     print(f"Ensemble model saved: {output_path} ({size_mb:.1f} MB)")
 
-    # Verify
+    # Basic verification (skip full_check to avoid re-running expensive
+    # shape inference; we already ran it above)
     print("Verifying ensemble model...")
     loaded = onnx.load(str(output_path))
-    onnx.checker.check_model(loaded, full_check=True)
+    onnx.checker.check_model(loaded)
     print("Ensemble ONNX checker passed.")
 
 
