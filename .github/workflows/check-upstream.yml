@@ -1,0 +1,73 @@
+name: Check Upstream Demucs Updates
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Every Monday at 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for new Demucs version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get latest version from PyPI
+          LATEST=$(curl -s https://pypi.org/pypi/demucs/json | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])")
+          echo "Latest demucs on PyPI: $LATEST"
+
+          # Get pinned minimum from requirements.txt
+          PINNED=$(grep 'demucs' requirements.txt | sed 's/demucs>=//' | sed 's/,.*//')
+          echo "Pinned minimum: $PINNED"
+
+          # Store latest version for comparison across runs
+          VERSION_FILE=".demucs-version"
+          if [ -f "$VERSION_FILE" ]; then
+            LAST_KNOWN=$(cat "$VERSION_FILE")
+          else
+            LAST_KNOWN="$PINNED"
+          fi
+          echo "Last known: $LAST_KNOWN"
+
+          if [ "$LATEST" != "$LAST_KNOWN" ]; then
+            echo "New version detected: $LAST_KNOWN -> $LATEST"
+
+            # Check if an open issue already exists
+            EXISTING=$(gh issue list --label "upstream-update" --state open --json number --jq 'length')
+            if [ "$EXISTING" -gt "0" ]; then
+              echo "Open issue already exists, skipping."
+              exit 0
+            fi
+
+            gh issue create \
+              --title "Upstream Demucs updated to $LATEST" \
+              --label "upstream-update" \
+              --body "$(cat <<EOF
+          A new version of [Demucs](https://github.com/adefossez/demucs) has been published to PyPI.
+
+          - **Previous version:** $LAST_KNOWN
+          - **New version:** $LATEST
+          - **PyPI:** https://pypi.org/project/demucs/$LATEST/
+          - **Changelog:** https://github.com/adefossez/demucs/releases
+
+          ### Action items
+
+          - [ ] Review changelog for breaking changes or new models
+          - [ ] Test conversion scripts with new version: \`pip install demucs==$LATEST\`
+          - [ ] Update \`requirements.txt\` if needed
+          - [ ] Re-run conversion and validation for both models
+          - [ ] Tag new releases if models have changed
+          EOF
+          )"
+            echo "Issue created."
+          else
+            echo "No new version detected."
+          fi

@@ -2,9 +2,11 @@
 
 Reproducible ONNX model conversion pipeline for [OpenKara](https://github.com/thedavidweng/OpenKara).
 
-Converts the pretrained [Demucs htdemucs](https://github.com/facebookresearch/demucs) PyTorch model to ONNX format for cross-platform audio stem separation.
+Converts the pretrained [Demucs](https://github.com/adefossez/demucs) PyTorch models to ONNX format for cross-platform audio stem separation.
 
-## Model Details
+## Models
+
+### htdemucs (default)
 
 | Property | Value |
 |----------|-------|
@@ -13,11 +15,23 @@ Converts the pretrained [Demucs htdemucs](https://github.com/facebookresearch/de
 | Output | `[1, 4, 2, 343980]` — batch, stems (drums/bass/other/vocals), stereo, samples |
 | Format | ONNX (opset 17) |
 
+### htdemucs_ft (fine-tuned, higher quality)
+
+| Property | Value |
+|----------|-------|
+| Source model | `htdemucs_ft` (Fine-tuned Hybrid Transformer Demucs, 4-model ensemble) |
+| Input | `[1, 2, 343980]` — stereo audio at 44.1 kHz (fixed 7.8s segment) |
+| Output | `[1, 4, 2, 343980]` — batch, stems (drums/bass/other/vocals), stereo, samples |
+| Format | ONNX (opset 17) |
+| Note | Ensemble of 4 fine-tuned models averaged into a single ONNX graph (~300MB+) |
+
 ## Usage
 
-### Download pre-built model
+### Download pre-built models
 
-Grab `htdemucs.onnx` and `htdemucs.onnx.sha256` from the [Releases](https://github.com/thedavidweng/openkara-models/releases) page.
+Grab model files from the [Releases](https://github.com/thedavidweng/openkara-models/releases) page:
+- **htdemucs**: `htdemucs.onnx` + `htdemucs.onnx.sha256` (tags: `model-v*`)
+- **htdemucs_ft**: `htdemucs_ft.onnx` + `htdemucs_ft.onnx.sha256` (tags: `model-ft-v*`)
 
 ### Build locally
 
@@ -26,11 +40,16 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
+# htdemucs (default)
 python scripts/convert_htdemucs_to_onnx.py
 python scripts/validate_onnx.py
+
+# htdemucs_ft (fine-tuned)
+python scripts/convert_htdemucs_to_onnx.py --model htdemucs_ft
+python scripts/validate_onnx.py --model htdemucs_ft
 ```
 
-Output: `models/htdemucs.onnx`
+Output: `models/htdemucs.onnx` or `models/htdemucs_ft.onnx`
 
 ## Integrate with OpenKara
 
@@ -58,10 +77,15 @@ ONNX does not support complex-valued STFT/ISTFT operations used by Demucs. The c
 
 ## CI/CD
 
-Pushing a tag matching `model-v*` triggers GitHub Actions to:
-1. Convert the model
-2. Validate ONNX output against PyTorch (MSE < 1e-4)
-3. Publish the ONNX file + SHA-256 checksum as a GitHub Release
+- Pushing a tag matching `model-v*` triggers conversion and release of **htdemucs**.
+- Pushing a tag matching `model-ft-v*` triggers conversion and release of **htdemucs_ft**.
+
+Each workflow:
+1. Converts the model to ONNX
+2. Validates ONNX output against PyTorch (MSE < 1e-4)
+3. Publishes the ONNX file + SHA-256 checksum as a GitHub Release
+
+A weekly check (every Monday) monitors PyPI for new Demucs versions and opens an issue labeled `upstream-update` when a new release is detected.
 
 ## License
 

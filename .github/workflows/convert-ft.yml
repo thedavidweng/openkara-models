@@ -1,0 +1,70 @@
+name: Convert and Release (htdemucs_ft)
+
+on:
+  push:
+    tags: ["model-ft-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only PyTorch
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Convert model to ONNX
+        run: python scripts/convert_htdemucs_to_onnx.py --model htdemucs_ft
+
+      - name: Validate ONNX model
+        run: python scripts/validate_onnx.py --model htdemucs_ft
+
+      - name: Generate checksum
+        run: |
+          cd models
+          sha256sum htdemucs_ft.onnx > htdemucs_ft.onnx.sha256
+          echo "Checksum:"
+          cat htdemucs_ft.onnx.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: htdemucs-ft-onnx
+          path: |
+            models/htdemucs_ft.onnx
+            models/htdemucs_ft.onnx.sha256
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            models/htdemucs_ft.onnx
+            models/htdemucs_ft.onnx.sha256
+          body: |
+            ## HTDemucs Fine-Tuned ONNX Model
+
+            Converted from the pretrained [Demucs htdemucs_ft](https://github.com/adefossez/demucs) PyTorch model.
+            This is an ensemble of 4 fine-tuned HTDemucs models averaged into a single ONNX graph for higher separation quality.
+
+            **Model spec:**
+            - Input: `[1, 2, frame_count]` (stereo audio at 44.1 kHz)
+            - Output: `[1, 4, 2, frame_count]` (drums, bass, other, vocals)
+            - Format: ONNX opset 17
+
+            **Verification:** SHA-256 checksum included in `htdemucs_ft.onnx.sha256`.
+            Validated against PyTorch reference output (MSE < 1e-4).
+          generate_release_notes: true

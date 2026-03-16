@@ -2,64 +2,87 @@
 """
 Validate the converted ONNX model against PyTorch reference output.
 
-Runs the same input through both the PyTorch htdemucs model and the ONNX
-model, then compares outputs to ensure numerical equivalence (MSE < 1e-4).
-
-Tests multiple input lengths to verify dynamic axes work correctly.
+Runs the same input through both the PyTorch model and the ONNX model,
+then compares outputs to ensure numerical equivalence (MSE < 1e-4).
 """
 
+import argparse
 import sys
 from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 import onnxruntime as ort
 
 ROOT_DIR = Path(__file__).parent.parent
-ONNX_PATH = ROOT_DIR / "models" / "htdemucs.onnx"
 SAMPLE_RATE = 44100
 
 MSE_THRESHOLD = 1e-4
 
+SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
 
-def load_pytorch_model():
-    """Load the pretrained htdemucs PyTorch model.
 
-    Unwraps BagOfModels to get the raw HDemucs instance with a working
-    forward() method (BagOfModels.forward() raises NotImplementedError).
+class EnsembleHTDemucs(nn.Module):
+    """Wrapper that runs multiple HTDemucs sub-models and averages their outputs."""
+
+    def __init__(self, models):
+        super().__init__()
+        self.models = nn.ModuleList(models)
+        first = models[0]
+        self.segment = first.segment
+        self.samplerate = first.samplerate
+
+    def forward(self, x):
+        outputs = [m(x) for m in self.models]
+        return torch.stack(outputs).mean(dim=0)
+
+
+def load_pytorch_model(model_name):
+    """Load the pretrained PyTorch model.
+
+    For htdemucs: unwraps BagOfModels to get the single HDemucs instance.
+    For htdemucs_ft: wraps all sub-models in EnsembleHTDemucs for averaging.
     """
     from demucs.pretrained import get_model
 
-    bag = get_model("htdemucs")
+    bag = get_model(model_name)
 
-    if hasattr(bag, "models"):
-        model = bag.models[0]
-        print(f"Unwrapped BagOfModels → {type(model).__name__}")
+    if model_name == "htdemucs_ft":
+        if hasattr(bag, "models"):
+            models = list(bag.models)
+            print(f"Loaded {model_name}: BagOfModels with {len(models)} sub-models")
+            model = EnsembleHTDemucs(models)
+        else:
+            model = bag
     else:
-        model = bag
+        if hasattr(bag, "models"):
+            model = bag.models[0]
+            print(f"Unwrapped BagOfModels → {type(model).__name__}")
+        else:
+            model = bag
 
     model.eval()
     model.cpu()
 
-    # Read fixed segment length from model
     segment_frames = int(model.segment * model.samplerate)
     print(f"Model segment: {model.segment}s = {segment_frames} frames")
 
     return model, segment_frames
 
 
-def load_onnx_session():
+def load_onnx_session(onnx_path):
     """Load the ONNX model for inference."""
-    if not ONNX_PATH.exists():
-        print(f"ERROR: ONNX model not found at {ONNX_PATH}")
+    if not onnx_path.exists():
+        print(f"ERROR: ONNX model not found at {onnx_path}")
         print("Run convert_htdemucs_to_onnx.py first.")
         sys.exit(1)
 
     sess_options = ort.SessionOptions()
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    session = ort.InferenceSession(str(ONNX_PATH), sess_options)
+    session = ort.InferenceSession(str(onnx_path), sess_options)
 
-    print(f"ONNX model loaded: {ONNX_PATH}")
+    print(f"ONNX model loaded: {onnx_path}")
     print(f"  Inputs:  {[inp.name for inp in session.get_inputs()]}")
     print(f"  Outputs: {[out.name for out in session.get_outputs()]}")
 
@@ -90,16 +113,13 @@ def validate_single(pytorch_model, onnx_session, frames: int, label: str = ""):
     print(f"  ONNX output shape:    {onnx_np.shape}")
 
     # Handle potential shape differences
-    # PyTorch: (1, 4, 2, frames), ONNX might be (4, 2, frames) or (1, 4, 2, frames)
     if pytorch_np.shape != onnx_np.shape:
-        # Try squeezing batch dim
         if pytorch_np.ndim == 4 and onnx_np.ndim == 3:
             pytorch_np = pytorch_np.squeeze(0)
         elif pytorch_np.ndim == 3 and onnx_np.ndim == 4:
             onnx_np = onnx_np.squeeze(0)
 
         if pytorch_np.shape != onnx_np.shape:
-            # Trim to matching frame count (minor padding differences)
             min_frames = min(pytorch_np.shape[-1], onnx_np.shape[-1])
             pytorch_np = pytorch_np[..., :min_frames]
             onnx_np = onnx_np[..., :min_frames]
@@ -131,8 +151,6 @@ def validate_output_shape(onnx_session, segment_frames: int):
     output = outputs[0]
 
     # Expected: (1, 4, 2, frames) or (4, 2, frames)
-    # 4 stems: drums, bass, other, vocals
-    # 2 channels: stereo
     if output.ndim == 4:
         n_stems = output.shape[1]
         n_channels = output.shape[2]
@@ -158,23 +176,37 @@ def validate_output_shape(onnx_session, segment_frames: int):
     return True
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Validate ONNX model against PyTorch reference."
+    )
+    parser.add_argument(
+        "--model",
+        choices=SUPPORTED_MODELS,
+        default="htdemucs",
+        help="Model to validate (default: htdemucs)",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    model_name = args.model
+    onnx_path = ROOT_DIR / "models" / f"{model_name}.onnx"
+
     print("=" * 60)
-    print("Demucs htdemucs ONNX Validation")
+    print(f"Demucs {model_name} ONNX Validation")
     print("=" * 60)
 
-    pytorch_model, segment_frames = load_pytorch_model()
-    onnx_session = load_onnx_session()
+    pytorch_model, segment_frames = load_pytorch_model(model_name)
+    onnx_session = load_onnx_session(onnx_path)
 
     # Validate structure
     if not validate_output_shape(onnx_session, segment_frames):
         print("\nVALIDATION FAILED: output structure mismatch")
         sys.exit(1)
 
-    # Validate numerical accuracy.
-    # HTDemucs requires exactly segment_frames input.
-    # We also test shorter input (model pads internally) to confirm
-    # the ONNX model handles the same fixed size correctly.
+    # Validate numerical accuracy
     all_passed = True
     results = []
 

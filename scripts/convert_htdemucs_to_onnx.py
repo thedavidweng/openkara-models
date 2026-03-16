@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert pretrained Demucs htdemucs model from PyTorch to ONNX format.
+Convert pretrained Demucs htdemucs/htdemucs_ft model from PyTorch to ONNX format.
 
 The main challenge is that ONNX does not natively support complex-valued
 STFT/ISTFT operations, and newer PyTorch ONNX export paths choke on Demucs'
@@ -16,6 +16,7 @@ References:
 - https://github.com/adefossez/demucs/pull/10
 """
 
+import argparse
 import os
 import sys
 import hashlib
@@ -24,13 +25,14 @@ import types
 from pathlib import Path
 
 import torch
+import torch.nn as nn
 
 # Add scripts directory to path for local imports
 SCRIPTS_DIR = Path(__file__).parent
 ROOT_DIR = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-OUTPUT_PATH = ROOT_DIR / "models" / "htdemucs.onnx"
+SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
 
 # htdemucs default STFT parameters
 N_FFT = 4096
@@ -38,57 +40,77 @@ HOP_LENGTH = 1024
 SAMPLE_RATE = 44100
 
 
-def load_htdemucs():
-    """Load the pretrained htdemucs model.
+class EnsembleHTDemucs(nn.Module):
+    """Wrapper that runs multiple HTDemucs sub-models and averages their outputs.
 
-    get_model() may return a BagOfModels wrapper whose forward() raises
-    NotImplementedError. We unwrap it to get the raw HDemucs instance
-    with a working forward() method.
+    Used for htdemucs_ft which is a BagOfModels containing 4 fine-tuned
+    HTDemucs instances. This wrapper makes the ensemble exportable as a
+    single ONNX graph with the same interface as a single HTDemucs model.
+    """
+
+    def __init__(self, models):
+        super().__init__()
+        self.models = nn.ModuleList(models)
+        # Copy attributes from the first sub-model for compatibility
+        first = models[0]
+        self.segment = first.segment
+        self.samplerate = first.samplerate
+        self.nfft = first.nfft
+        self.hop_length = first.hop_length
+        self.cac = first.cac
+
+    def forward(self, x):
+        outputs = [m(x) for m in self.models]
+        return torch.stack(outputs).mean(dim=0)
+
+
+def load_model(model_name):
+    """Load a pretrained Demucs model.
+
+    For htdemucs: unwraps BagOfModels to get the single HDemucs instance.
+    For htdemucs_ft: wraps all sub-models in EnsembleHTDemucs for averaging.
     """
     from demucs.pretrained import get_model
 
-    bag = get_model("htdemucs")
+    bag = get_model(model_name)
 
-    # Unwrap BagOfModels if needed
-    if hasattr(bag, "models"):
-        model = bag.models[0]
-        print(f"Unwrapped BagOfModels → {type(model).__name__}")
+    if model_name == "htdemucs_ft":
+        if hasattr(bag, "models"):
+            models = list(bag.models)
+            print(f"Loaded {model_name}: BagOfModels with {len(models)} sub-models")
+            model = EnsembleHTDemucs(models)
+        else:
+            # Unexpected: htdemucs_ft should always be a BagOfModels
+            model = bag
+            print(f"Warning: {model_name} is not a BagOfModels, using as-is")
     else:
-        model = bag
+        # htdemucs: unwrap BagOfModels to get single model
+        if hasattr(bag, "models"):
+            model = bag.models[0]
+            print(f"Unwrapped BagOfModels → {type(model).__name__}")
+        else:
+            model = bag
 
     model.eval()
     model.cpu()
-    print(f"Loaded htdemucs model: {sum(p.numel() for p in model.parameters())} parameters")
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Loaded {model_name} model: {total_params:,} parameters")
 
     # Read the model's fixed segment length
-    # HTDemucs.forward() requires input of EXACTLY this many frames.
-    # Longer inputs cause a reshape failure at the time-branch output.
-    # Shorter inputs are padded internally, but the ONNX graph is traced
-    # with a fixed size so we must use the exact training segment.
     segment_frames = int(model.segment * model.samplerate)
     print(f"Model segment: {model.segment}s = {segment_frames} frames")
 
     return model, segment_frames
 
 
-def try_direct_export(model, dummy_input):
-    """Attempt direct ONNX export using the legacy TorchScript exporter.
-
-    PyTorch 2.9+ defaults torch.onnx.export() to the newer torch.export-based
-    exporter, which currently trips over data-dependent asserts inside Demucs.
-    We explicitly keep the legacy exporter here for reproducibility.
-    """
+def try_direct_export(model, dummy_input, output_path):
+    """Attempt direct ONNX export using the legacy TorchScript exporter."""
     print("Attempting direct ONNX export with legacy exporter (opset 17)...")
 
-    # HDemucs.forward() returns (batch, sources, channels, frames)
-    # = (1, 4, 2, segment_frames)
-    # No dynamic_axes: HTDemucs requires fixed segment length internally
-    # (reshape at time-branch output hardcodes training_length).
-    # The consumer (OpenKara) handles chunking for longer audio.
     torch.onnx.export(
         model,
         (dummy_input,),
-        str(OUTPUT_PATH),
+        str(output_path),
         input_names=["audio"],
         output_names=["stems"],
         opset_version=17,
@@ -98,79 +120,97 @@ def try_direct_export(model, dummy_input):
     print("Direct export succeeded.")
 
 
+def _get_sub_models(model):
+    """Get the list of HDemucs instances to patch.
+
+    For EnsembleHTDemucs, returns all sub-models.
+    For a single HDemucs, returns [model].
+    """
+    if isinstance(model, EnsembleHTDemucs):
+        return list(model.models)
+    return [model]
+
+
 def bind_real_valued_export_patch(model):
     """Replace Demucs' complex spectrogram path with real-valued equivalents.
 
-    HTDemucs with `cac=True` packs real/imag bins into the channel dimension.
-    For export we keep that representation explicit and avoid creating complex
-    tensors entirely, because the legacy ONNX exporter cannot lower
-    `view_as_complex`.
+    Patches all sub-models if the model is an EnsembleHTDemucs.
     """
     import torch.nn.functional as F
     from demucs.hdemucs import pad1d
     from onnx_stft import OnnxSTFT, OnnxISTFT
 
-    if not model.cac:
-        raise RuntimeError("Real-valued export patch expects an HTDemucs model with cac=True")
+    sub_models = _get_sub_models(model)
+    all_originals = []
 
-    stft_module = OnnxSTFT(n_fft=model.nfft, hop_length=model.hop_length)
-    istft_module = OnnxISTFT(n_fft=model.nfft, hop_length=model.hop_length)
+    for sub_model in sub_models:
+        if not sub_model.cac:
+            raise RuntimeError("Real-valued export patch expects an HTDemucs model with cac=True")
 
-    originals = {
-        "_spec": model._spec,
-        "_ispec": model._ispec,
-        "_magnitude": model._magnitude,
-        "_mask": model._mask,
-    }
+        stft_module = OnnxSTFT(n_fft=sub_model.nfft, hop_length=sub_model.hop_length)
+        istft_module = OnnxISTFT(n_fft=sub_model.nfft, hop_length=sub_model.hop_length)
 
-    def exportable_spec(self, x):
-        hl = self.hop_length
-        nfft = self.nfft
-        assert hl == nfft // 4
-        le = int(math.ceil(x.shape[-1] / hl))
-        pad = hl // 2 * 3
-        x = pad1d(x, (pad, pad + le * hl - x.shape[-1]), mode="reflect")
-        z = stft_module(x)[:, :, :-1, :, :]
-        assert z.shape[-2] == le + 4, (z.shape, x.shape, le)
-        z = z[:, :, :, 2: 2 + le, :]
-        return z.permute(0, 1, 4, 2, 3).contiguous()
+        originals = {
+            "_spec": sub_model._spec,
+            "_ispec": sub_model._ispec,
+            "_magnitude": sub_model._magnitude,
+            "_mask": sub_model._mask,
+        }
+        all_originals.append((sub_model, originals))
 
-    def exportable_ispec(self, z, length=None, scale=0):
-        assert scale == 0, "Scaled ISTFT export is not implemented"
-        hl = self.hop_length
-        z = F.pad(z, (0, 0, 0, 1))
-        z = F.pad(z, (2, 2))
-        pad = hl // 2 * 3
-        le = hl * int(math.ceil(length / hl)) + 2 * pad
+        def make_exportable_spec(stft_mod):
+            def exportable_spec(self, x):
+                hl = self.hop_length
+                nfft = self.nfft
+                assert hl == nfft // 4
+                le = int(math.ceil(x.shape[-1] / hl))
+                pad = hl // 2 * 3
+                x = pad1d(x, (pad, pad + le * hl - x.shape[-1]), mode="reflect")
+                z = stft_mod(x)[:, :, :-1, :, :]
+                assert z.shape[-2] == le + 4, (z.shape, x.shape, le)
+                z = z[:, :, :, 2: 2 + le, :]
+                return z.permute(0, 1, 4, 2, 3).contiguous()
+            return exportable_spec
 
-        batch, sources, channels, _, freqs, frames = z.shape
-        z = z.permute(0, 1, 2, 4, 5, 3).contiguous()
-        z = z.view(batch * sources, channels, freqs, frames, 2)
-        x = istft_module(z, length=le)
-        x = x.view(batch, sources, channels, le)
-        return x[..., pad: pad + length]
+        def make_exportable_ispec(istft_mod):
+            def exportable_ispec(self, z, length=None, scale=0):
+                assert scale == 0, "Scaled ISTFT export is not implemented"
+                hl = self.hop_length
+                z = F.pad(z, (0, 0, 0, 1))
+                z = F.pad(z, (2, 2))
+                pad = hl // 2 * 3
+                le = hl * int(math.ceil(length / hl)) + 2 * pad
 
-    def exportable_magnitude(self, z):
-        batch, channels, _, freqs, frames = z.shape
-        return z.reshape(batch, channels * 2, freqs, frames)
+                batch, sources, channels, _, freqs, frames = z.shape
+                z = z.permute(0, 1, 2, 4, 5, 3).contiguous()
+                z = z.view(batch * sources, channels, freqs, frames, 2)
+                x = istft_mod(z, length=le)
+                x = x.view(batch, sources, channels, le)
+                return x[..., pad: pad + length]
+            return exportable_ispec
 
-    def exportable_mask(self, z, m):
-        batch, sources, _, freqs, frames = m.shape
-        return m.view(batch, sources, -1, 2, freqs, frames).contiguous()
+        def exportable_magnitude(self, z):
+            batch, channels, _, freqs, frames = z.shape
+            return z.reshape(batch, channels * 2, freqs, frames)
 
-    model._spec = types.MethodType(exportable_spec, model)
-    model._ispec = types.MethodType(exportable_ispec, model)
-    model._magnitude = types.MethodType(exportable_magnitude, model)
-    model._mask = types.MethodType(exportable_mask, model)
+        def exportable_mask(self, z, m):
+            batch, sources, _, freqs, frames = m.shape
+            return m.view(batch, sources, -1, 2, freqs, frames).contiguous()
+
+        sub_model._spec = types.MethodType(make_exportable_spec(stft_module), sub_model)
+        sub_model._ispec = types.MethodType(make_exportable_ispec(istft_module), sub_model)
+        sub_model._magnitude = types.MethodType(exportable_magnitude, sub_model)
+        sub_model._mask = types.MethodType(exportable_mask, sub_model)
 
     def restore():
-        for name, method in originals.items():
-            setattr(model, name, method)
+        for sub_model, originals in all_originals:
+            for name, method in originals.items():
+                setattr(sub_model, name, method)
 
     return restore
 
 
-def try_patched_export(model, dummy_input):
+def try_patched_export(model, dummy_input, output_path):
     """Export with a real-valued conv1d/conv_transpose1d STFT fallback."""
     print("Attempting patched export with real-valued STFT/ISTFT...")
 
@@ -181,7 +221,7 @@ def try_patched_export(model, dummy_input):
         torch.onnx.export(
             model,
             (dummy_input,),
-            str(OUTPUT_PATH),
+            str(output_path),
             input_names=["audio"],
             output_names=["stems"],
             opset_version=17,
@@ -194,25 +234,24 @@ def try_patched_export(model, dummy_input):
             restore()
 
 
-def verify_onnx():
+def verify_onnx(output_path):
     """Run basic ONNX model validation."""
     import onnx
 
-    print(f"Verifying {OUTPUT_PATH}...")
-    onnx_model = onnx.load(str(OUTPUT_PATH))
+    print(f"Verifying {output_path}...")
+    onnx_model = onnx.load(str(output_path))
     onnx.checker.check_model(onnx_model, full_check=True)
     print("ONNX checker passed.")
 
-    # Print model info
     print(f"  Inputs:  {[inp.name for inp in onnx_model.graph.input]}")
     print(f"  Outputs: {[out.name for out in onnx_model.graph.output]}")
     print(f"  Opset:   {onnx_model.opset_import[0].version}")
 
 
-def compute_sha256():
+def compute_sha256(output_path):
     """Compute and save SHA-256 checksum."""
     sha256 = hashlib.sha256()
-    with open(OUTPUT_PATH, "rb") as f:
+    with open(output_path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
             sha256.update(chunk)
     digest = sha256.hexdigest()
@@ -220,15 +259,30 @@ def compute_sha256():
     return digest
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Convert Demucs model to ONNX format."
+    )
+    parser.add_argument(
+        "--model",
+        choices=SUPPORTED_MODELS,
+        default="htdemucs",
+        help="Model to convert (default: htdemucs)",
+    )
+    return parser.parse_args()
+
+
 def main():
-    os.makedirs(OUTPUT_PATH.parent, exist_ok=True)
+    args = parse_args()
+    model_name = args.model
+    output_path = ROOT_DIR / "models" / f"{model_name}.onnx"
+
+    os.makedirs(output_path.parent, exist_ok=True)
 
     # Load model and get its fixed segment length
-    model, segment_frames = load_htdemucs()
+    model, segment_frames = load_model(model_name)
 
     # Create dummy input matching the model's exact segment length.
-    # HTDemucs.forward() requires input of exactly segment_frames;
-    # it cannot handle longer audio (reshape failure in time branch).
     dummy_input = torch.randn(1, 2, segment_frames)
     print(f"Dummy input shape: {dummy_input.shape}")
 
@@ -236,16 +290,15 @@ def main():
     with torch.no_grad():
         output = model(dummy_input)
     print(f"PyTorch output shape: {output.shape}")
-    # Expected: (1, 4, 2, segment_frames)
 
     # Try export strategies
     try:
-        try_direct_export(model, dummy_input)
+        try_direct_export(model, dummy_input, output_path)
     except Exception as e:
         print(f"Direct export failed: {e}")
         print()
         try:
-            try_patched_export(model, dummy_input)
+            try_patched_export(model, dummy_input, output_path)
         except Exception as e2:
             print(f"Patched export also failed: {e2}")
             print()
@@ -254,16 +307,16 @@ def main():
             sys.exit(1)
 
     # Verify
-    verify_onnx()
+    verify_onnx(output_path)
 
     # File size
-    size_mb = OUTPUT_PATH.stat().st_size / (1024 * 1024)
+    size_mb = output_path.stat().st_size / (1024 * 1024)
     print(f"Model size: {size_mb:.1f} MB")
 
     # SHA-256
-    compute_sha256()
+    compute_sha256(output_path)
 
-    print(f"\nConversion complete: {OUTPUT_PATH}")
+    print(f"\nConversion complete: {output_path}")
 
 
 if __name__ == "__main__":
