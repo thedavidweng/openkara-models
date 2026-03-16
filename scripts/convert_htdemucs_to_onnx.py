@@ -322,18 +322,18 @@ def merge_ensemble_onnx(sub_model_paths, output_path, n_models):
         axis=0,
     ))
 
-    # 2. ReduceMean along axis 0
+    # 2. ReduceMean along axis 0 (use attribute form for opset < 18)
     all_nodes.append(helper.make_node(
         "ReduceMean",
-        inputs=[concat_output, "reduce_axes"],
+        inputs=[concat_output],
         outputs=["stems"],
+        axes=[0],
         keepdims=0,
     ))
 
-    # Add constant tensors for axes
+    # Add constant tensor for Unsqueeze axes (opset 13+ takes axes as input)
     axes_0 = numpy_helper.from_array(np.array([0], dtype=np.int64), name="unsqueeze_axes")
-    reduce_axes = numpy_helper.from_array(np.array([0], dtype=np.int64), name="reduce_axes")
-    all_initializers.extend([axes_0, reduce_axes])
+    all_initializers.append(axes_0)
 
     # Build the ensemble graph
     ensemble_input = helper.make_tensor_value_info(
