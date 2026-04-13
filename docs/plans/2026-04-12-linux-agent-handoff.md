@@ -112,6 +112,115 @@ The handoff is successful only if all of these are true:
 - GitHub Actions workflows still match the real artifact pipeline,
 - any follow-up optimization proposal is evidence-backed, not speculative.
 
+## Strict Acceptance Checklist
+
+Treat every item in this section as required unless an item is explicitly marked optional.
+
+### A. Environment proof
+
+- Record the exact OS and Python version.
+- Record the exact dependency install command used.
+- Confirm that `onnx` and `onnxruntime` import successfully before running conversion.
+
+Required evidence:
+
+- output of `python --version`
+- output of `python -c "import onnx, onnxruntime; print('ok')"`
+
+### B. htdemucs conversion proof
+
+Run:
+
+```bash
+python scripts/convert_htdemucs_to_onnx.py
+python scripts/validate_onnx.py
+```
+
+Must prove all of the following:
+
+- conversion completed without error,
+- validation completed without error,
+- operator inventory was printed,
+- final `models/htdemucs.onnx` exists,
+- metadata keys exist in the final artifact,
+- final artifact is the optimized model, not the raw intermediate.
+
+Required evidence:
+
+- terminal output snippets for convert and validate
+- final file size
+- metadata dump or validation output showing:
+  - `openkara.model_cache_key`
+  - `openkara.optimized_by=onnxruntime`
+
+### C. htdemucs_ft conversion proof
+
+Run:
+
+```bash
+python scripts/convert_htdemucs_to_onnx.py --model htdemucs_ft
+python scripts/validate_onnx.py --model htdemucs_ft
+```
+
+Must prove the same set of conditions as section B.
+
+If this model fails because of memory, time, or workflow limits, report the exact failure point and the smallest viable fix.
+
+### D. Raw vs optimized artifact inspection
+
+You must inspect whether ORT optimization materially changed the model artifact.
+
+At minimum report:
+
+- raw export size vs optimized artifact size,
+- whether node count changes before/after optimization,
+- whether top operators change before/after optimization,
+- any warnings from ONNX Runtime during optimization.
+
+If exact before/after graph stats are hard to capture with the current scripts, add the smallest script change needed to print them.
+
+### E. Workflow alignment proof
+
+Confirm the release workflow assumptions remain true:
+
+- workflows still call the scripts instead of duplicating graph optimization logic,
+- artifact names still match the files produced by the scripts,
+- checksum generation still works with the optimized artifact,
+- release notes still describe the shipped file accurately.
+
+Required evidence:
+
+- file references for any workflow/docs changes made
+- a short explanation of why the current workflow is or is not aligned
+
+### F. Rewrite proposal gate
+
+Do not propose semantic rewrites unless you can point to graph evidence.
+
+Any rewrite proposal must include:
+
+- the exact operator or subgraph pattern observed,
+- why ORT offline optimization did not already handle it,
+- why the rewrite is likely to help OpenKara runtime behavior,
+- what numerical-risk validation would be required.
+
+If you do not have that evidence, the correct outcome is: no rewrite proposed yet.
+
+## Required final report format
+
+Your final report must contain these sections in this order:
+
+1. `Environment`
+2. `Commands Run`
+3. `htdemucs Results`
+4. `htdemucs_ft Results`
+5. `Raw vs Optimized Comparison`
+6. `Workflow Alignment`
+7. `Recommended Next Step`
+8. `Open Risks`
+
+Do not answer with a generic summary. Include concrete outputs, sizes, file paths, and failures.
+
 ## Files To Inspect First
 
 - `scripts/convert_htdemucs_to_onnx.py`
@@ -137,3 +246,7 @@ When you finish, report:
 - any warnings/errors encountered,
 - whether the optimized artifacts differ materially from raw exports,
 - any recommended next optimization work, with evidence.
+
+## Ready-To-Send Prompt
+
+If you are handing this to another Linux-based agent, use `docs/plans/2026-04-12-linux-agent-prompt.md`.
