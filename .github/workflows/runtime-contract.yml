@@ -1,0 +1,28 @@
+name: Runtime contract (official ORT)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install onnx + onnxruntime (no torch)
+        run: |
+          pip install "onnx>=1.14" "onnxruntime>=1.23,<2"
+
+      - name: Domain gate self-test
+        run: python scripts/onnx_runtime_contract.py --self-test
+
+      - name: Syntax check scripts
+        run: python -m compileall -q scripts

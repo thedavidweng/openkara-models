@@ -39,6 +39,8 @@ SCRIPTS_DIR = Path(__file__).parent
 ROOT_DIR = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+from onnx_runtime_contract import assert_release_onnx_compatible_with_official_ort
+
 SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
 
 # htdemucs default STFT parameters
@@ -484,11 +486,19 @@ def annotate_optimized_model(output_path):
 
 
 def optimize_onnx_with_ort(input_path, output_path):
-    """Run ONNX Runtime offline graph optimization and emit the final model."""
+    """Run ONNX Runtime offline graph optimization and emit the final model.
+
+    Uses ORT_ENABLE_EXTENDED (not ORT_ENABLE_ALL) so layout passes such as NCHWc
+    are skipped. ORT_ENABLE_ALL can bake com.microsoft.nchwc ops into the ONNX
+    file, which official macOS arm64 ORT builds may not register — see
+    docs/runtime-contract.md.
+    """
     import onnxruntime as ort
 
     sess_options = ort.SessionOptions()
-    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess_options.graph_optimization_level = (
+        ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    )
     sess_options.optimized_model_filepath = str(output_path)
 
     ort.InferenceSession(
@@ -500,6 +510,7 @@ def optimize_onnx_with_ort(input_path, output_path):
     if not output_path.exists():
         raise RuntimeError(f"ORT optimization did not write {output_path}")
 
+    assert_release_onnx_compatible_with_official_ort(output_path)
     print(f"Optimized ONNX written to {output_path}")
 
 

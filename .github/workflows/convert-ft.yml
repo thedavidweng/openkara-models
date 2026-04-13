@@ -32,6 +32,9 @@ jobs:
       - name: Validate ONNX model
         run: python scripts/validate_onnx.py --model htdemucs_ft
 
+      - name: Runtime contract (protobuf + ORT CPU session)
+        run: python scripts/onnx_runtime_contract.py --model models/htdemucs_ft.onnx --ort-session
+
       - name: Generate checksum
         run: |
           cd models
