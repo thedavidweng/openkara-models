@@ -2,6 +2,8 @@
 
 This document defines what “standard” ONNX assets published from **openkara-models** must satisfy so that [OpenKara](https://github.com/thedavidweng/OpenKara) can load them with **official, pre-built ONNX Runtime** shared libraries on all supported desktop platforms—without requiring a custom ORT build or extra CMake flags.
 
+**OpenKara default pins** (URLs + SHA-256 that the app ships) are documented in the root [README.md](../README.md) under **Integrate with OpenKara**; as of the contract fix for Apple Silicon, standard assets use at least **`model-v2.0.1`** / **`model-ft-v2.0.1`**. Do not use **`model-v2.0.0`** as the default standard download.
+
 ## Target platforms and runtime
 
 Standard ONNX artifacts MUST be loadable with **official ONNX Runtime release packages** for at least:

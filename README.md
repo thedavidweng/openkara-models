@@ -69,25 +69,52 @@ The first shipping optimization pass is intentionally structural and determinist
 
 ## Integrate with OpenKara
 
-After a release is published, update these files in [OpenKara](https://github.com/thedavidweng/OpenKara):
+After a release is published, update the pinned **download URL**, **SHA-256**, and (when needed)
+**GitHub release tag** in [OpenKara](https://github.com/thedavidweng/OpenKara). Copy exact values
+from the release assets (`htdemucs.onnx.sha256`, `htdemucs_ft.onnx.sha256`).
 
-**`src-tauri/src/separator/model.rs`** — model filename:
+**Current default standard pin (contract-compliant, Apple Silicon–safe):**
+
+| Variant      | Release tag        | Asset file        |
+| ------------ | ------------------ | ----------------- |
+| `htdemucs`   | `model-v2.0.1`     | `htdemucs.onnx`   |
+| `htdemucs_ft`| `model-ft-v2.0.1`  | `htdemucs_ft.onnx`|
+
+**`src-tauri/src/separator/model.rs`** — embedded filename (unchanged unless you rename assets):
 
 ```rust
 pub const EMBEDDED_MODEL_FILENAME: &str = "htdemucs.onnx";
 ```
 
-**`src-tauri/src/separator/bootstrap.rs`** — download URL and checksum:
+**`src-tauri/src/separator/bootstrap.rs`** — `ModelDescriptor` entries (URL + SHA must match the
+release you ship; `MODEL_DOWNLOAD_URL` / `MODEL_SHA256` are aliases of `HTDEMUCS`):
 
 ```rust
-pub const MODEL_DOWNLOAD_URL: &str =
-    "https://github.com/thedavidweng/openkara-models/releases/download/model-v1.0.0/htdemucs.onnx";
-pub const MODEL_SHA256: &str = "<sha256 from htdemucs.onnx.sha256>";
+pub const HTDEMUCS: ModelDescriptor = ModelDescriptor {
+    filename: "htdemucs.onnx",
+    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.0.1/htdemucs.onnx",
+    sha256: "8fa3dab679c59aeb049dd229f57a212c9339b3fc17ebf50541daad9e799364a1",
+};
+
+pub const HTDEMUCS_FT: ModelDescriptor = ModelDescriptor {
+    filename: "htdemucs_ft.onnx",
+    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.0.1/htdemucs_ft.onnx",
+    sha256: "0f2efbd7044182c10a6e8169b670392a3a91f904635e29329d6a3667375f5c94",
+};
 ```
 
-**`scripts/setup.sh`** and **`.github/workflows/ci.yml`** — same URL and SHA-256 values.
+**`scripts/setup.sh`** — `MODEL_URL` / `MODEL_SHA256` for the standard `htdemucs.onnx` dev cache
+(same URL and SHA as `HTDEMUCS` above).
 
-The SHA-256 checksum is published alongside the model in each release (`htdemucs.onnx.sha256`).
+**`.github/workflows/ci.yml`** — `MODEL_URL` / `MODEL_SHA256` env vars for the Verify job model
+cache (same as `HTDEMUCS`).
+
+**`docs/references/contracts/phase-6-model-bootstrap-contract.md`** — pinned release paths in the
+bootstrap contract section.
+
+Do **not** point default onboarding at **`model-v2.0.0`**: those artifacts could embed
+`com.microsoft.nchwc` and fail on official macOS arm64 ONNX Runtime. Prefer **`v2.0.1`** or any
+newer tag whose CI passed the [runtime contract](docs/runtime-contract.md) gates.
 
 ## How it works
 
