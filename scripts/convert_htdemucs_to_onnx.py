@@ -21,6 +21,7 @@ References:
 """
 
 import argparse
+import collections
 import gc
 import os
 import sys
@@ -44,6 +45,8 @@ SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
 N_FFT = 4096
 HOP_LENGTH = 1024
 SAMPLE_RATE = 44100
+MODEL_CACHE_KEY_METADATA = "openkara.model_cache_key"
+MODEL_OPTIMIZED_BY_METADATA = "openkara.optimized_by"
 
 
 def load_single_model(model_name):
@@ -443,6 +446,61 @@ def verify_onnx(output_path):
     print(f"  Inputs:  {[inp.name for inp in onnx_model.graph.input]}")
     print(f"  Outputs: {[out.name for out in onnx_model.graph.output]}")
     print(f"  Opset:   {onnx_model.opset_import[0].version}")
+    print_operator_inventory(onnx_model)
+
+
+def print_operator_inventory(onnx_model):
+    counts = collections.Counter(node.op_type for node in onnx_model.graph.node)
+    print("  Top ops:")
+    for op_type, count in counts.most_common(12):
+        print(f"    - {op_type}: {count}")
+
+
+def upsert_metadata_prop(onnx_model, key, value):
+    for prop in onnx_model.metadata_props:
+        if prop.key == key:
+            prop.value = value
+            return
+    prop = onnx_model.metadata_props.add()
+    prop.key = key
+    prop.value = value
+
+
+def annotate_optimized_model(output_path):
+    """Attach deterministic metadata to the final optimized ONNX artifact.
+
+    The cache key is derived from the optimized model bytes before metadata is
+    injected so it changes whenever graph structure or weights change.
+    """
+    import onnx
+
+    cache_key = hashlib.sha256(output_path.read_bytes()).hexdigest()
+    onnx_model = onnx.load(str(output_path))
+    upsert_metadata_prop(onnx_model, MODEL_CACHE_KEY_METADATA, cache_key)
+    upsert_metadata_prop(onnx_model, MODEL_OPTIMIZED_BY_METADATA, "onnxruntime")
+    onnx.save(onnx_model, str(output_path))
+    print(f"Metadata: {MODEL_CACHE_KEY_METADATA}={cache_key}")
+    return cache_key
+
+
+def optimize_onnx_with_ort(input_path, output_path):
+    """Run ONNX Runtime offline graph optimization and emit the final model."""
+    import onnxruntime as ort
+
+    sess_options = ort.SessionOptions()
+    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess_options.optimized_model_filepath = str(output_path)
+
+    ort.InferenceSession(
+        str(input_path),
+        sess_options,
+        providers=["CPUExecutionProvider"],
+    )
+
+    if not output_path.exists():
+        raise RuntimeError(f"ORT optimization did not write {output_path}")
+
+    print(f"Optimized ONNX written to {output_path}")
 
 
 def compute_sha256(output_path):
@@ -476,23 +534,31 @@ def main():
 
     os.makedirs(output_path.parent, exist_ok=True)
 
-    if model_name == "htdemucs_ft":
-        # Ensemble: export sub-models one-by-one then merge
-        convert_ensemble(model_name, output_path)
-    else:
-        # Single model
-        model, segment_frames = load_single_model(model_name)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        raw_output_path = Path(tmpdir) / f"{model_name}.raw.onnx"
 
-        dummy_input = torch.randn(1, 2, segment_frames)
-        print(f"Dummy input shape: {dummy_input.shape}")
+        if model_name == "htdemucs_ft":
+            # Ensemble: export sub-models one-by-one then merge
+            convert_ensemble(model_name, raw_output_path)
+        else:
+            # Single model
+            model, segment_frames = load_single_model(model_name)
 
-        with torch.no_grad():
-            output = model(dummy_input)
-        print(f"PyTorch output shape: {output.shape}")
+            dummy_input = torch.randn(1, 2, segment_frames)
+            print(f"Dummy input shape: {dummy_input.shape}")
 
-        export_single_model(model, dummy_input, output_path)
+            with torch.no_grad():
+                output = model(dummy_input)
+            print(f"PyTorch output shape: {output.shape}")
 
-    # Verify
+            export_single_model(model, dummy_input, raw_output_path)
+
+        print("\nVerifying raw ONNX export...")
+        verify_onnx(raw_output_path)
+        optimize_onnx_with_ort(raw_output_path, output_path)
+        annotate_optimized_model(output_path)
+
+    # Verify final optimized artifact
     verify_onnx(output_path)
 
     # File size

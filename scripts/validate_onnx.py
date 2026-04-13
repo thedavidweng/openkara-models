@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import onnx
 import torch
 import onnxruntime as ort
 
@@ -21,6 +22,8 @@ SAMPLE_RATE = 44100
 MSE_THRESHOLD = 1e-4
 
 SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
+MODEL_CACHE_KEY_METADATA = "openkara.model_cache_key"
+MODEL_OPTIMIZED_BY_METADATA = "openkara.optimized_by"
 
 
 def load_pytorch_model(model_name):
@@ -98,6 +101,30 @@ def load_onnx_session(onnx_path):
     print(f"  Outputs: {[out.name for out in session.get_outputs()]}")
 
     return session
+
+
+def validate_model_metadata(onnx_path):
+    onnx_model = onnx.load(str(onnx_path))
+    metadata = {prop.key: prop.value for prop in onnx_model.metadata_props}
+
+    missing = [
+        key
+        for key in (MODEL_CACHE_KEY_METADATA, MODEL_OPTIMIZED_BY_METADATA)
+        if key not in metadata
+    ]
+    if missing:
+        print(f"  ERROR: missing metadata keys: {', '.join(missing)}")
+        return False
+
+    print("\n--- Validating optimized artifact metadata ---")
+    print(f"  {MODEL_CACHE_KEY_METADATA}: {metadata[MODEL_CACHE_KEY_METADATA]}")
+    print(f"  {MODEL_OPTIMIZED_BY_METADATA}: {metadata[MODEL_OPTIMIZED_BY_METADATA]}")
+
+    if metadata[MODEL_OPTIMIZED_BY_METADATA] != "onnxruntime":
+        print("  ERROR: optimized-by metadata must be 'onnxruntime'")
+        return False
+
+    return True
 
 
 def validate_single(pytorch_np, onnx_session, test_input_np, label):
@@ -227,6 +254,10 @@ def main():
         pytorch_np = pytorch_output.numpy()
 
     onnx_session = load_onnx_session(onnx_path)
+
+    if not validate_model_metadata(onnx_path):
+        print("\nVALIDATION FAILED: optimized artifact metadata missing or invalid")
+        sys.exit(1)
 
     # Validate structure
     if not validate_output_shape(onnx_session, segment_frames):
