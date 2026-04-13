@@ -75,7 +75,7 @@ pub const EMBEDDED_MODEL_FILENAME: &str = "htdemucs.onnx";
 
 ```rust
 pub const MODEL_DOWNLOAD_URL: &str =
-    "https://github.com/thedavidweng/openkara-models/releases/download/model-v1.0.0/htdemucs.onnx";
+    "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.0.0/htdemucs.onnx";
 pub const MODEL_SHA256: &str = "<sha256 from htdemucs.onnx.sha256>";
 ```
 
