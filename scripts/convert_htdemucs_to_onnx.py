@@ -483,6 +483,42 @@ def annotate_optimized_model(output_path):
     return cache_key
 
 
+def get_graph_stats(model_path):
+    """Return (file_size_bytes, node_count, op_counter) for an ONNX model."""
+    import onnx
+
+    size_bytes = model_path.stat().st_size
+    onnx_model = onnx.load(str(model_path))
+    node_count = len(onnx_model.graph.node)
+    op_counter = collections.Counter(n.op_type for n in onnx_model.graph.node)
+    return size_bytes, node_count, op_counter
+
+
+def print_raw_vs_optimized(raw_path, opt_path):
+    """Print a structured comparison of raw export vs ORT-optimized artifact."""
+    raw_size, raw_nodes, raw_ops = get_graph_stats(raw_path)
+    opt_size, opt_nodes, opt_ops = get_graph_stats(opt_path)
+
+    print("\n" + "=" * 60)
+    print("Raw vs Optimized Comparison")
+    print("=" * 60)
+    print(f"  {'':30s} {'Raw':>12s} {'Optimized':>12s} {'Delta':>12s}")
+    print(f"  {'-'*66}")
+    print(f"  {'File size (MB)':30s} {raw_size/1048576:>12.1f} {opt_size/1048576:>12.1f} {(opt_size-raw_size)/1048576:>+12.1f}")
+    print(f"  {'Node count':30s} {raw_nodes:>12d} {opt_nodes:>12d} {opt_nodes-raw_nodes:>+12d}")
+
+    all_ops = sorted(set(raw_ops) | set(opt_ops), key=lambda o: -(raw_ops.get(o, 0) + opt_ops.get(o, 0)))
+    print(f"\n  {'Operator':30s} {'Raw':>6s} {'Opt':>6s} {'Delta':>6s}")
+    print(f"  {'-'*48}")
+    for op in all_ops[:15]:
+        r = raw_ops.get(op, 0)
+        o = opt_ops.get(op, 0)
+        delta = o - r
+        marker = "" if delta == 0 else f"{delta:+d}"
+        print(f"  {op:30s} {r:>6d} {o:>6d} {marker:>6s}")
+    print()
+
+
 def optimize_onnx_with_ort(input_path, output_path):
     """Run ONNX Runtime offline graph optimization and emit the final model."""
     import onnxruntime as ort
@@ -556,6 +592,7 @@ def main():
         print("\nVerifying raw ONNX export...")
         verify_onnx(raw_output_path)
         optimize_onnx_with_ort(raw_output_path, output_path)
+        print_raw_vs_optimized(raw_output_path, output_path)
         annotate_optimized_model(output_path)
 
     # Verify final optimized artifact
