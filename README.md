@@ -4,6 +4,12 @@ Reproducible ONNX model conversion pipeline for [OpenKara](https://github.com/th
 
 Converts the pretrained [Demucs](https://github.com/adefossez/demucs) PyTorch models to ONNX format for cross-platform audio stem separation.
 
+## Compatibility (official ORT)
+
+Standard release ONNX files must load with **official, pre-built ONNX Runtime** on **Linux x64, Windows x64, macOS x64, and macOS arm64** using the **CPU** execution provider (CoreML on macOS is optional). They must **not** embed operator domains that only exist in custom ORT builds—especially **`com.microsoft.nchwc`** from layout optimization at `ORT_ENABLE_ALL`.
+
+Full policy, release gates, and a minimal Apple Silicon smoke-test snippet: **[docs/runtime-contract.md](docs/runtime-contract.md)**.
+
 ## Models
 
 ### htdemucs (default)
@@ -55,7 +61,7 @@ Output: `models/htdemucs.onnx` or `models/htdemucs_ft.onnx`
 The final release artifact is the ONNX Runtime optimized graph, not the raw PyTorch export. Each final model also carries:
 
 - `openkara.model_cache_key`: a deterministic cache-busting fingerprint for runtime compiled-model caches
-- `openkara.optimized_by=onnxruntime`: marks that the shipped artifact already passed through ORT offline graph optimization
+- `openkara.optimized_by=onnxruntime`: marks ORT offline optimization **under the [runtime contract](docs/runtime-contract.md)** (not “all optimizers including NCHWc layout rewrites”)
 
 GitHub Actions is only the orchestrator here. The actual graph optimization lives in `scripts/convert_htdemucs_to_onnx.py`, so CI and any local rerun use the exact same conversion pipeline instead of duplicating optimization logic in workflow YAML.
 
@@ -95,9 +101,11 @@ ONNX does not support complex-valued STFT/ISTFT operations used by Demucs. The c
 Each workflow:
 
 1. Converts the model to a raw ONNX export
-2. Rewrites the final artifact through ONNX Runtime offline optimization
-3. Validates ONNX output against PyTorch (MSE < 1e-4) and checks optimized-artifact metadata
+2. Rewrites the final artifact through ONNX Runtime offline optimization (`ORT_ENABLE_EXTENDED`; see [runtime contract](docs/runtime-contract.md))
+3. Validates ONNX output against PyTorch (MSE < 1e-4), checks optimized-artifact metadata, and asserts the graph contains no `com.microsoft.nchwc` nodes
 4. Publishes the optimized ONNX file + SHA-256 checksum as a GitHub Release
+
+Pull requests run a lightweight **runtime-contract** workflow (`scripts/onnx_runtime_contract.py --self-test`); full checks run on tagged release builds.
 
 A weekly check (every Monday) monitors PyPI for new Demucs versions and opens an issue labeled `upstream-update` when a new release is detected.
 

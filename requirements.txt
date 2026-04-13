@@ -2,5 +2,5 @@ torch>=2.0,<3.0
 torchaudio>=2.0,<3.0
 demucs>=4.0
 onnx>=1.14
-onnxruntime>=1.16
+onnxruntime>=1.23,<2
 numpy>=1.24

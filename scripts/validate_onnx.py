@@ -17,6 +17,11 @@ import torch
 import onnxruntime as ort
 
 ROOT_DIR = Path(__file__).parent.parent
+SCRIPTS_DIR = Path(__file__).parent
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from onnx_runtime_contract import assert_release_onnx_compatible_with_official_ort
+
 SAMPLE_RATE = 44100
 
 MSE_THRESHOLD = 1e-4
@@ -93,8 +98,15 @@ def load_onnx_session(onnx_path):
         sys.exit(1)
 
     sess_options = ort.SessionOptions()
-    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    session = ort.InferenceSession(str(onnx_path), sess_options)
+    # Match portable official ORT: avoid ORT_ENABLE_ALL layout rewrites at load time.
+    sess_options.graph_optimization_level = (
+        ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    )
+    session = ort.InferenceSession(
+        str(onnx_path),
+        sess_options,
+        providers=["CPUExecutionProvider"],
+    )
 
     print(f"ONNX model loaded: {onnx_path}")
     print(f"  Inputs:  {[inp.name for inp in session.get_inputs()]}")
@@ -227,6 +239,18 @@ def main():
     print("=" * 60)
     print(f"Demucs {model_name} ONNX Validation")
     print("=" * 60)
+
+    if not onnx_path.exists():
+        print(f"ERROR: ONNX model not found at {onnx_path}")
+        print("Run convert_htdemucs_to_onnx.py first.")
+        sys.exit(1)
+
+    try:
+        assert_release_onnx_compatible_with_official_ort(onnx_path)
+    except RuntimeError as e:
+        print(e)
+        sys.exit(1)
+    print("Runtime contract (operator domains): OK")
 
     # Fixed seed for reproducibility
     torch.manual_seed(42)
