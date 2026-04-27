@@ -40,6 +40,9 @@ jobs:
           if [ "$LATEST" != "$LAST_KNOWN" ]; then
             echo "New version detected: $LAST_KNOWN -> $LATEST"
 
+            # Ensure the label exists
+            gh label create "upstream-update" --description "Upstream dependency update" --color "0075ca" --force
+
             # Check if an open issue already exists
             EXISTING=$(gh issue list --label "upstream-update" --state open --json number --jq 'length')
             if [ "$EXISTING" -gt "0" ]; then
