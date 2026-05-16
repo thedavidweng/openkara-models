@@ -127,7 +127,7 @@ ONNX does not support complex-valued STFT/ISTFT operations used by Demucs. The c
 
 Each workflow:
 
-1. Converts the model to a raw ONNX export
+1. Exports the model to raw ONNX with the real-valued STFT/ISTFT rewrite
 2. Rewrites the final artifact through ONNX Runtime offline optimization (`ORT_ENABLE_EXTENDED`; see [runtime contract](docs/runtime-contract.md))
 3. Validates ONNX output against PyTorch (MSE < 1e-4), checks optimized-artifact metadata, and asserts the graph contains no `com.microsoft.nchwc` nodes
 4. Publishes the optimized ONNX file + SHA-256 checksum as a GitHub Release

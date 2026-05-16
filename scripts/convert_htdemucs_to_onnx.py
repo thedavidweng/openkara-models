@@ -3,12 +3,9 @@
 Convert pretrained Demucs htdemucs/htdemucs_ft model from PyTorch to ONNX format.
 
 The main challenge is that ONNX does not natively support complex-valued
-STFT/ISTFT operations, and newer PyTorch ONNX export paths choke on Demucs'
-data-dependent asserts. This script uses two strategies:
-
-1. Direct export with the legacy TorchScript-based ONNX exporter.
-2. Fallback: replace Demucs' complex spectrogram path with a fully
-   real-valued conv1d/conv_transpose1d implementation from onnx_stft.py.
+STFT/ISTFT operations used by Demucs. This script replaces Demucs' complex
+spectrogram path with a fully real-valued conv1d/conv_transpose1d
+implementation from onnx_stft.py before exporting.
 
 For htdemucs_ft (4-model ensemble), sub-models are exported one at a time
 to stay within CI runner memory limits, then merged into a single ONNX
@@ -32,7 +29,6 @@ import types
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 
 # Add scripts directory to path for local imports
 SCRIPTS_DIR = Path(__file__).parent
@@ -43,10 +39,6 @@ from onnx_runtime_contract import assert_release_onnx_compatible_with_official_o
 
 SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
 
-# htdemucs default STFT parameters
-N_FFT = 4096
-HOP_LENGTH = 1024
-SAMPLE_RATE = 44100
 MODEL_CACHE_KEY_METADATA = "openkara.model_cache_key"
 MODEL_OPTIMIZED_BY_METADATA = "openkara.optimized_by"
 
@@ -103,23 +95,6 @@ def load_sub_model(model_name, index):
 
     segment_frames = int(model.segment * model.samplerate)
     return model, segment_frames, n_models
-
-
-def try_direct_export(model, dummy_input, output_path):
-    """Attempt direct ONNX export using the legacy TorchScript exporter."""
-    print("Attempting direct ONNX export with legacy exporter (opset 17)...")
-
-    torch.onnx.export(
-        model,
-        (dummy_input,),
-        str(output_path),
-        input_names=["audio"],
-        output_names=["stems"],
-        opset_version=17,
-        do_constant_folding=True,
-        dynamo=False,
-    )
-    print("Direct export succeeded.")
 
 
 def bind_real_valued_export_patch(model):
@@ -188,9 +163,9 @@ def bind_real_valued_export_patch(model):
     return restore
 
 
-def try_patched_export(model, dummy_input, output_path):
-    """Export with a real-valued conv1d/conv_transpose1d STFT fallback."""
-    print("Attempting patched export with real-valued STFT/ISTFT...")
+def export_model_with_real_stft(model, dummy_input, output_path):
+    """Export with real-valued conv1d/conv_transpose1d STFT/ISTFT."""
+    print("Exporting ONNX with real-valued STFT/ISTFT...")
 
     restore = None
     try:
@@ -206,20 +181,10 @@ def try_patched_export(model, dummy_input, output_path):
             do_constant_folding=True,
             dynamo=False,
         )
-        print("Patched export succeeded.")
+        print("ONNX export succeeded.")
     finally:
         if restore is not None:
             restore()
-
-
-def export_single_model(model, dummy_input, output_path):
-    """Export a single HTDemucs model to ONNX, trying direct then patched."""
-    try:
-        try_direct_export(model, dummy_input, output_path)
-    except Exception as e:
-        print(f"Direct export failed: {e}")
-        print()
-        try_patched_export(model, dummy_input, output_path)
 
 
 def merge_ensemble_onnx(sub_model_paths, output_path, n_models):
@@ -258,19 +223,6 @@ def merge_ensemble_onnx(sub_model_paths, output_path, n_models):
 
     for i, m in enumerate(sub_models):
         prefix = f"sub{i}_"
-
-        # Build a rename map for this sub-model
-        # All internal names get prefixed, but the input name maps to shared input
-        internal_names = set()
-        for node in m.graph.node:
-            for name in list(node.input) + list(node.output):
-                internal_names.add(name)
-        for init in m.graph.initializer:
-            internal_names.add(init.name)
-        for inp in m.graph.input:
-            internal_names.add(inp.name)
-        for out in m.graph.output:
-            internal_names.add(out.name)
 
         input_name = m.graph.input[0].name
         output_name = m.graph.output[0].name
@@ -421,7 +373,7 @@ def convert_ensemble(model_name, output_path):
 
             # Export to temp file
             tmp_path = Path(tmpdir) / f"sub_{i}.onnx"
-            export_single_model(sub_model, dummy_input, tmp_path)
+            export_model_with_real_stft(sub_model, dummy_input, tmp_path)
 
             sub_model_paths.append(tmp_path)
 
@@ -562,7 +514,7 @@ def main():
                 output = model(dummy_input)
             print(f"PyTorch output shape: {output.shape}")
 
-            export_single_model(model, dummy_input, raw_output_path)
+            export_model_with_real_stft(model, dummy_input, raw_output_path)
 
         print("\nVerifying raw ONNX export...")
         verify_onnx(raw_output_path)
