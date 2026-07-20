@@ -62,28 +62,23 @@ def make_contract_compliant_session(onnx_path: Path, optimized_model_filepath=No
     the single source of truth for contract-compliant session creation — see
     docs/runtime-contract.md.
 
-    Log severity is set to ERROR (3, not the default WARNING=2) to suppress the
-    known device_discovery.cc GetPciBusId warning that ORT 1.24+ emits on
-    GitHub Linux runners (microsoft/onnxruntime#27268). That warning comes
-    from GPU device discovery for TRT-RTX EP, which is irrelevant here since
-    we only use CPUExecutionProvider. Real errors still surface at ERROR
-    level, so this does not hide any actionable problem.
-
-    Both the global default logger and the per-session log level are set to
-    ERROR. The global call is necessary because the PCI bus warning fires
-    during ORT's C++ device discovery, which runs before the session's own
-    log level takes effect.
+    Log severity is set to ERROR (3, not the default WARNING=2) to suppress
+    non-essential ORT warnings at the session level. This does NOT suppress
+    the known device_discovery.cc GetPciBusId warning that ORT 1.24+ emits on
+    GitHub Linux runners (microsoft/onnxruntime#27268), because that warning
+    comes from a statically-initialized logger in the pybind module that
+    hardcodes WARNING level and bypasses all Python API and env var control
+    (microsoft/onnxruntime#27092). That warning is harmless — it comes from
+    GPU device discovery for TRT-RTX EP, which is irrelevant since we only
+    use CPUExecutionProvider. The only way to silence it would be to redirect
+    fd 2 during `import onnxruntime`, but that hides ALL stderr output
+    including real errors, so we accept the warning.
 
     If optimized_model_filepath is set, ORT writes the optimized graph to that
     path before returning (used by the conversion pipeline to emit the final
     optimized ONNX artifact).
     """
     import onnxruntime as ort
-
-    # Set global logger to ERROR before any session creation. The PCI bus
-    # warning fires during C++ device discovery, which is controlled by the
-    # global logger, not the per-session log_severity_level.
-    ort.set_default_logger_severity(3)  # ORT LogLevel.ERROR
 
     so = ort.SessionOptions()
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED

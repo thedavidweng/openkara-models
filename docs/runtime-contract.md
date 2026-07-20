@@ -39,7 +39,7 @@ Allowed optimizations include:
 
 The conversion script uses **`ORT_ENABLE_EXTENDED`** for offline optimization so layout passes that emit `com.microsoft.nchwc` are not applied when writing the shipped ONNX.
 
-**Log severity:** contract-compliant sessions set `log_severity_level = 3` (ERROR) instead of the default 2 (WARNING). This suppresses the known `device_discovery.cc GetPciBusId` warning that ORT 1.24+ emits on GitHub Linux runners ([microsoft/onnxruntime#27268](https://github.com/microsoft/onnxruntime/issues/27268)) — that warning comes from GPU device discovery for TRT-RTX EP and is irrelevant when only `CPUExecutionProvider` is used. Real errors still surface at ERROR level.
+**Log severity:** contract-compliant sessions set `log_severity_level = 3` (ERROR) instead of the default 2 (WARNING) to suppress non-essential ORT warnings at the session level. This does NOT suppress the `device_discovery.cc GetPciBusId` warning that ORT 1.24+ emits on GitHub Linux runners ([microsoft/onnxruntime#27268](https://github.com/microsoft/onnxruntime/issues/27268)) — that warning comes from a statically-initialized logger in the pybind module that hardcodes WARNING and bypasses all Python API and env var control ([microsoft/onnxruntime#27092](https://github.com/microsoft/onnxruntime/issues/27092)). The warning is harmless (GPU device discovery for TRT-RTX EP, irrelevant with CPU EP). The only workaround (redirecting fd 2 during `import onnxruntime`) hides all stderr including real errors, so we accept the warning.
 
 ## Release gate (required before publishing)
 
