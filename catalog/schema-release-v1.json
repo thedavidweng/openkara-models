@@ -193,13 +193,14 @@
     "upstream_ref": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["project", "tag", "commit_sha", "source_lock", "build_revision", "build_flags"],
+      "required": ["project", "tag"],
       "properties": {
         "project": {"type": "string", "minLength": 1},
         "tag": {"type": "string", "minLength": 1},
         "commit_sha": {
           "type": "string",
-          "pattern": "^[0-9a-f]{40}$"
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Optional in v1: exact upstream commit. Issue #20 back-fills it for legacy releases and requires it for new releases."
         },
         "source_lock": {
           "type": "object",
@@ -208,7 +209,8 @@
           "properties": {
             "lock_file_url": {"$ref": "#/$defs/url"},
             "lock_file_sha256": {"$ref": "#/$defs/sha256"}
-          }
+          },
+          "description": "Optional in v1: issue #20 back-fills it for legacy releases and requires it for new releases."
         },
         "build_revision": {"type": "string", "minLength": 1},
         "build_flags": {

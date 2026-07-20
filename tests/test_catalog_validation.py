@@ -92,6 +92,15 @@ class SchemaStructureTests(unittest.TestCase):
                 art.pop("supply_chain", None)
         self.assertTrue(validate_document(doc).ok)
 
+    def test_minimal_upstream_passes(self):
+        """Legacy releases lack exact upstream commit/source locks; v1 requires
+        only project + tag. Issue #20 back-fills commit_sha + source_lock."""
+        doc = _valid_release()
+        up = doc["artifacts"]["models"][0]["upstream"]
+        for k in ("commit_sha", "source_lock", "build_revision", "build_flags"):
+            up.pop(k, None)
+        self.assertTrue(validate_document(doc).ok)
+
 
 class InvariantTests(unittest.TestCase):
     def test_missing_file_digest_detected(self):

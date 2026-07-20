@@ -154,6 +154,7 @@ releases and back-fills existing ones:
 | `model.required_operator_config` | #19 PR 2     | #19 PR 2                             |
 | `supply_chain` (release + per-artifact) | #18 PR 3 | #18 PR 3                             |
 | `gates` (quality/perf/compat reports) | #21     | #21 PR 4                             |
+| `upstream.commit_sha` + `upstream.source_lock` | #20 | #20                             |
 
 A release that omits a completion field is still a valid v1 manifest; a release
 that omits an identity/integrity field is rejected.
