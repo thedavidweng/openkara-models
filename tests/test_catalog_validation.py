@@ -74,6 +74,13 @@ class SchemaStructureTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(any("gates" in e for e in result.schema_errors))
 
+    def test_model_without_required_operator_config_passes(self):
+        """Pre-#19 model releases may omit required_operator_config; #19 PR 2
+        back-fills it and makes it required for new releases."""
+        doc = _valid_release()
+        doc["artifacts"]["models"][0]["model"].pop("required_operator_config")
+        self.assertTrue(validate_document(doc).ok)
+
 
 class InvariantTests(unittest.TestCase):
     def test_missing_file_digest_detected(self):

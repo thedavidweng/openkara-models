@@ -75,9 +75,11 @@ Declares `profile` (`balanced` / `quality` / `karaoke_2stem`), `target_triple`
 (`null` for portable), `arch`, `os`, and a `model` block with: `format`
 (`onnx` / `ort`), `opset`, `ir_version`, `tensor_interface` (`waveform` /
 `spectral-core`), input/output semantics, `precision`, `segment_frames`,
-`sample_rate`, `stem_profile`, `required_operator_config`, and an explicit
-`compatible_runtime_ids` list. The app resolves a runtime only through this
-list — never by parsing version strings.
+`sample_rate`, `stem_profile`, `required_operator_config` (optional in v1 —
+pre-#19 model releases may omit it; issue #19 PR 2 makes it required for new
+releases and back-fills existing ones), and an explicit `compatible_runtime_ids`
+list. The app resolves a runtime only through this list — never by parsing
+version strings.
 
 ### Runtime artifact
 

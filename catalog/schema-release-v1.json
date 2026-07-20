@@ -325,7 +325,6 @@
             "segment_frames",
             "sample_rate",
             "stem_profile",
-            "required_operator_config",
             "compatible_runtime_ids"
           ],
           "properties": {
@@ -358,7 +357,7 @@
                 "size": {"type": "integer", "minimum": 0},
                 "sha256": {"$ref": "#/$defs/sha256"}
               },
-              "description": "Operator set this model requires, generated from the graph (issue #19 PR 2)."
+              "description": "Operator set this model requires, generated from the graph (issue #19 PR 2). Optional in v1: pre-#19 model releases may omit it; #19 PR 2 makes it required for new releases and back-fills existing ones."
             },
             "compatible_runtime_ids": {
               "type": "array",
