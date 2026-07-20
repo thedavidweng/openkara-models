@@ -47,17 +47,24 @@ def export_model_with_real_stft(model, dummy_input, output_path):
     """Export with real-valued conv1d/conv_transpose1d STFT/ISTFT."""
     print("Exporting ONNX with real-valued STFT/ISTFT...")
 
-    with RealValuedSpectrogramPatch.from_model(model):
-        torch.onnx.export(
-            model,
-            (dummy_input,),
-            str(output_path),
-            input_names=["audio"],
-            output_names=["stems"],
-            opset_version=17,
-            do_constant_folding=True,
-            dynamo=False,
-        )
+    # Suppress TracerWarnings from Demucs' shape-based asserts and control
+    # flow. The model is traced with a fixed input shape [1, 2, segment_frames],
+    # so these Python-level shape checks are correctly constant-folded.
+    # Validation confirms numerical equivalence (MSE < 1e-4).
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
+        with RealValuedSpectrogramPatch.from_model(model):
+            torch.onnx.export(
+                model,
+                (dummy_input,),
+                str(output_path),
+                input_names=["audio"],
+                output_names=["stems"],
+                opset_version=17,
+                do_constant_folding=True,
+                dynamo=False,
+            )
     print("ONNX export succeeded.")
 
 
