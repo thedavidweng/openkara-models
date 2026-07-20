@@ -1,0 +1,4 @@
+# ORT build artifacts (issue #19)
+ort/source/
+ort/build/
+ort/packages/
