@@ -1,45 +1,41 @@
 {
-  "lock_version": "openkara.ort-source-lock/v1",
-  "upstream": {
-    "project": "onnxruntime",
-    "repo": "microsoft/onnxruntime",
-    "tag": "v1.27.1",
-    "commit_sha": "df2ba1cf8108aa63627cf4cdf8f807880b938616",
-    "release_url": "https://github.com/microsoft/onnxruntime/releases/tag/v1.27.1"
+  "c_api_level": {
+    "ort_api_version": 21,
+    "ort_api_version_note": "ORT C API version exported by the shared library. OpenKara's Rust `ort` crate must be compatible with this API level.",
+    "rust_ort_crate_version": ">=2.0,<3.0"
   },
+  "lock_version": "openkara.ort-source-lock/v1",
+  "note_on_submodules": "Submodule refs are pinned by ORT's CMake superbuild; the exact SHAs are determined at checkout time and recorded in the build manifest. The expected_ref values above are the branch/tag ORT pins to in its CMake configuration.",
   "submodules": {
-    "cmake/external/onnx": {
-      "repo": "onnx/onnx",
-      "expected_ref": "main"
-    },
     "cmake/external/abseil-cpp": {
-      "repo": "abseil/abseil-cpp",
-      "expected_ref": "lts_20240116"
+      "expected_ref": "lts_20240116",
+      "repo": "abseil/abseil-cpp"
     },
     "cmake/external/eigen": {
-      "repo": "google/eigen",
-      "expected_ref": "default"
+      "expected_ref": "default",
+      "repo": "google/eigen"
+    },
+    "cmake/external/onnx": {
+      "expected_ref": "main",
+      "repo": "onnx/onnx"
     },
     "cmake/external/protobuf": {
-      "repo": "protocolbuffers/protobuf",
-      "expected_ref": "main"
+      "expected_ref": "main",
+      "repo": "protocolbuffers/protobuf"
     },
     "cmake/external/re2": {
-      "repo": "google/re2",
-      "expected_ref": "main"
+      "expected_ref": "main",
+      "repo": "google/re2"
     },
     "cmake/external/xnnpack": {
-      "repo": "google/XNNPACK",
-      "expected_ref": "main"
+      "expected_ref": "main",
+      "repo": "google/XNNPACK"
     }
   },
-  "note_on_submodules": "Submodule refs are pinned by ORT's CMake superbuild; the exact SHAs are determined at checkout time and recorded in the build manifest. The expected_ref values above are the branch/tag ORT pins to in its CMake configuration.",
   "targets": {
     "aarch64-apple-darwin": {
-      "runner": "macos-14",
-      "runner_note": "Apple Silicon native runner. Uses macos-14 which is M1.",
-      "cmake_toolchain": "",
-      "deployment_target": "13.0",
+      "archive_format": "tar.gz",
+      "artifact_name": "libonnxruntime.dylib",
       "cmake_args": [
         "-DBUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
@@ -52,18 +48,50 @@
         "-Donnxruntime_USE_XNNPACK=OFF",
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0"
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
       ],
-      "execution_providers": ["cpu", "coreml"],
-      "artifact_name": "libonnxruntime.dylib",
-      "companion_libraries": ["libcoreml_ep.dylib"],
-      "archive_format": "tar.gz"
+      "cmake_toolchain": "",
+      "companion_libraries": [
+        "libcoreml_ep.dylib"
+      ],
+      "deployment_target": "13.0",
+      "execution_providers": [
+        "cpu",
+        "coreml"
+      ],
+      "runner": "macos-14",
+      "runner_note": "Apple Silicon native runner. Uses macos-14 which is M1."
+    },
+    "aarch64-unknown-linux-gnu": {
+      "archive_format": "tar.gz",
+      "artifact_name": "libonnxruntime.so",
+      "cmake_args": [
+        "-DBUILD_SHARED_LIB=ON",
+        "-DORT_ENABLE_TRAINING=OFF",
+        "-DORT_ENABLE_PYTHON=OFF",
+        "-Dbuild_ort_onnx_flaky_tests=OFF",
+        "-Dbuild_ort_perf_tests=OFF",
+        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
+        "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
+        "-Donnxruntime_USE_XNNPACK=ON",
+        "-Donnxruntime_USE_CPU=ON",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+      ],
+      "cmake_toolchain": "",
+      "companion_libraries": [],
+      "deployment_target": "",
+      "execution_providers": [
+        "cpu",
+        "xnnpack"
+      ],
+      "runner": "ubuntu-24.04-arm",
+      "runner_note": "Linux ARM64 native runner (GitHub-hosted ARM available since 2025)."
     },
     "x86_64-apple-darwin": {
-      "runner": "macos-15-intel",
-      "runner_note": "Intel macOS native runner. Hosted Intel runners have a retirement timeline; document a self-hosted replacement before that date.",
-      "cmake_toolchain": "",
-      "deployment_target": "13.0",
+      "archive_format": "tar.gz",
+      "artifact_name": "libonnxruntime.dylib",
       "cmake_args": [
         "-DBUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
@@ -76,62 +104,22 @@
         "-Donnxruntime_USE_CPU=ON",
         "-Donnxruntime_USE_COREML=OFF",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0"
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
       ],
-      "execution_providers": ["cpu", "xnnpack"],
-      "artifact_name": "libonnxruntime.dylib",
-      "companion_libraries": [],
-      "archive_format": "tar.gz"
-    },
-    "x86_64-unknown-linux-gnu": {
-      "runner": "ubuntu-latest",
-      "runner_note": "Linux x64 native runner.",
       "cmake_toolchain": "",
-      "deployment_target": "",
-      "cmake_args": [
-        "-DBUILD_SHARED_LIB=ON",
-        "-DORT_ENABLE_TRAINING=OFF",
-        "-DORT_ENABLE_PYTHON=OFF",
-        "-Dbuild_ort_onnx_flaky_tests=OFF",
-        "-Dbuild_ort_perf_tests=OFF",
-        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
-        "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
-        "-Donnxruntime_USE_XNNPACK=ON",
-        "-Donnxruntime_USE_CPU=ON",
-        "-DCMAKE_BUILD_TYPE=Release"
-      ],
-      "execution_providers": ["cpu", "xnnpack"],
-      "artifact_name": "libonnxruntime.so",
       "companion_libraries": [],
-      "archive_format": "tar.gz"
-    },
-    "aarch64-unknown-linux-gnu": {
-      "runner": "ubuntu-24.04-arm",
-      "runner_note": "Linux ARM64 native runner (GitHub-hosted ARM available since 2025).",
-      "cmake_toolchain": "",
-      "deployment_target": "",
-      "cmake_args": [
-        "-DBUILD_SHARED_LIB=ON",
-        "-DORT_ENABLE_TRAINING=OFF",
-        "-DORT_ENABLE_PYTHON=OFF",
-        "-Dbuild_ort_onnx_flaky_tests=OFF",
-        "-Dbuild_ort_perf_tests=OFF",
-        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
-        "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
-        "-Donnxruntime_USE_XNNPACK=ON",
-        "-Donnxruntime_USE_CPU=ON",
-        "-DCMAKE_BUILD_TYPE=Release"
+      "deployment_target": "13.0",
+      "execution_providers": [
+        "cpu",
+        "xnnpack"
       ],
-      "execution_providers": ["cpu", "xnnpack"],
-      "artifact_name": "libonnxruntime.so",
-      "companion_libraries": [],
-      "archive_format": "tar.gz"
+      "runner": "macos-15-intel",
+      "runner_note": "Intel macOS native runner. Hosted Intel runners have a retirement timeline; document a self-hosted replacement before that date."
     },
     "x86_64-pc-windows-msvc": {
-      "runner": "windows-latest",
-      "runner_note": "Windows x64 native runner with MSVC.",
-      "cmake_toolchain": "",
-      "deployment_target": "",
+      "archive_format": "zip",
+      "artifact_name": "onnxruntime.dll",
       "cmake_args": [
         "-DBUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
@@ -142,25 +130,61 @@
         "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
         "-Donnxruntime_USE_DML=ON",
         "-Donnxruntime_USE_CPU=ON",
-        "-DCMAKE_BUILD_TYPE=Release"
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
       ],
-      "execution_providers": ["cpu", "directml"],
-      "artifact_name": "onnxruntime.dll",
-      "companion_libraries": ["DirectML.dll"],
-      "archive_format": "zip"
+      "cmake_toolchain": "",
+      "companion_libraries": [
+        "DirectML.dll"
+      ],
+      "deployment_target": "",
+      "execution_providers": [
+        "cpu",
+        "directml"
+      ],
+      "runner": "windows-latest",
+      "runner_note": "Windows x64 native runner with MSVC."
+    },
+    "x86_64-unknown-linux-gnu": {
+      "archive_format": "tar.gz",
+      "artifact_name": "libonnxruntime.so",
+      "cmake_args": [
+        "-DBUILD_SHARED_LIB=ON",
+        "-DORT_ENABLE_TRAINING=OFF",
+        "-DORT_ENABLE_PYTHON=OFF",
+        "-Dbuild_ort_onnx_flaky_tests=OFF",
+        "-Dbuild_ort_perf_tests=OFF",
+        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
+        "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
+        "-Donnxruntime_USE_XNNPACK=ON",
+        "-Donnxruntime_USE_CPU=ON",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+      ],
+      "cmake_toolchain": "",
+      "companion_libraries": [],
+      "deployment_target": "",
+      "execution_providers": [
+        "cpu",
+        "xnnpack"
+      ],
+      "runner": "ubuntu-latest",
+      "runner_note": "Linux x64 native runner."
     }
   },
   "toolchain": {
     "cmake_minimum_version": "3.28",
-    "python_version": "3.11",
-    "xcode_version": "16.0",
-    "visual_studio_version": "2022",
     "gcc_version": "13",
-    "note": "Toolchain versions are enforced by the CI workflow. Local builds should match."
+    "note": "Toolchain versions are enforced by the CI workflow. Local builds should match.",
+    "python_version": "3.11",
+    "visual_studio_version": "2022",
+    "xcode_version": "16.0"
   },
-  "c_api_level": {
-    "ort_api_version": 21,
-    "ort_api_version_note": "ORT C API version exported by the shared library. OpenKara's Rust `ort` crate must be compatible with this API level.",
-    "rust_ort_crate_version": ">=2.0,<3.0"
+  "upstream": {
+    "commit_sha": "df2ba1cf8108aa63627cf4cdf8f807880b938616",
+    "project": "onnxruntime",
+    "release_url": "https://github.com/microsoft/onnxruntime/releases/tag/v1.27.1",
+    "repo": "microsoft/onnxruntime",
+    "tag": "v1.27.1"
   }
 }
