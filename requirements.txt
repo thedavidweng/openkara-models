@@ -1,5 +1,5 @@
 torch>=2.0,<3.0
-torchaudio>=2.0,<3.0
+torchaudio>=2.11.0,<3.0
 demucs>=4.1.0
 onnx>=1.14
 onnxruntime>=1.23,<2
