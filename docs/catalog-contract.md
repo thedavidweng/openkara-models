@@ -152,7 +152,7 @@ releases and back-fills existing ones:
 | Field                          | Owning issue | Becomes required for new releases in |
 | ------------------------------ | ------------ | ------------------------------------ |
 | `model.required_operator_config` | #19 PR 2     | #19 PR 2                             |
-| `supply_chain` (release + per-artifact) | #18 PR 3 | #18 PR 3                             |
+| `supply_chain` (release + per-artifact) | #18 PR 3 | #18 PR 3 (back-filled for 2026-07-20-001) |
 | `gates` (quality/perf/compat reports) | #21     | #21 PR 4                             |
 | `upstream.commit_sha` + `upstream.source_lock` | #20 | #20                             |
 
