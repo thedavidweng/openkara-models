@@ -69,16 +69,27 @@ class SchemaStructureTests(unittest.TestCase):
 
     def test_missing_required_field_rejected(self):
         doc = _valid_release()
-        del doc["gates"]
+        del doc["producer"]
         result = validate_document(doc)
         self.assertFalse(result.ok)
-        self.assertTrue(any("gates" in e for e in result.schema_errors))
+        self.assertTrue(any("producer" in e for e in result.schema_errors))
 
     def test_model_without_required_operator_config_passes(self):
         """Pre-#19 model releases may omit required_operator_config; #19 PR 2
         back-fills it and makes it required for new releases."""
         doc = _valid_release()
         doc["artifacts"]["models"][0]["model"].pop("required_operator_config")
+        self.assertTrue(validate_document(doc).ok)
+
+    def test_release_without_supply_chain_or_gates_passes(self):
+        """v1 requires identity + integrity only. supply_chain (#18 PR 3) and
+        gates (#21) are optional until their owning issues back-fill them."""
+        doc = _valid_release()
+        doc.pop("supply_chain")
+        doc.pop("gates")
+        for kind in ("models", "runtimes", "bundles"):
+            for art in doc["artifacts"][kind]:
+                art.pop("supply_chain", None)
         self.assertTrue(validate_document(doc).ok)
 
 

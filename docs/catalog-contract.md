@@ -139,3 +139,21 @@ the versioned schema. It must not grow new fields or become a second contract.
 6. A deprecated artifact's replacement must exist in the same release.
 7. Bundle target/provider must match its runtime.
 8. `latest.json` is a migration alias only and is deleted after migration.
+
+## Required vs. optional fields (v1 policy)
+
+v1 requires **identity + integrity** fields for every artifact: `artifact_id`,
+`kind`, `variant`, `filename`, `download_url`, `byte_size`, `archive_digest`,
+`extracted_file_digests`, `upstream`, and `deprecation`. **Completion fields**
+are optional in v1 because the legacy releases included during migration predate
+the issues that produce them; each owning issue makes its field required for new
+releases and back-fills existing ones:
+
+| Field                          | Owning issue | Becomes required for new releases in |
+| ------------------------------ | ------------ | ------------------------------------ |
+| `model.required_operator_config` | #19 PR 2     | #19 PR 2                             |
+| `supply_chain` (release + per-artifact) | #18 PR 3 | #18 PR 3                             |
+| `gates` (quality/perf/compat reports) | #21     | #21 PR 4                             |
+
+A release that omits a completion field is still a valid v1 manifest; a release
+that omits an identity/integrity field is rejected.

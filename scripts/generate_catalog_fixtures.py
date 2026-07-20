@@ -144,7 +144,7 @@ RELEASE_MUTATIONS: list[Mutation] = [
         "missing-required-field",
         "schema",
         [],
-        lambda d: d.pop("gates"),
+        lambda d: d.pop("producer"),
     ),
     (
         "unknown-schema-version",

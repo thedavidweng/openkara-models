@@ -12,9 +12,7 @@
     "created_at",
     "producer",
     "artifacts",
-    "compatibility",
-    "supply_chain",
-    "gates"
+    "compatibility"
   ],
   "properties": {
     "schema_version": {
@@ -98,7 +96,8 @@
         "license": {"$ref": "#/$defs/supply_chain_ref"},
         "notice": {"$ref": "#/$defs/supply_chain_ref"},
         "provenance": {"$ref": "#/$defs/supply_chain_ref"}
-      }
+      },
+      "description": "Optional in v1: issue #18 PR 3 makes it required for new releases and back-fills existing ones."
     },
     "gates": {
       "type": "object",
@@ -109,7 +108,7 @@
         "performance_report": {"$ref": "#/$defs/report_ref"},
         "compatibility_report": {"$ref": "#/$defs/report_ref"}
       },
-      "description": "References to the issue #21 reports that justify stable promotion of this release."
+      "description": "Optional in v1: issue #21 makes it required for new releases and back-fills existing ones."
     },
     "minimum_consumer_schema": {
       "type": "string",
@@ -247,7 +246,6 @@
         "archive_digest",
         "extracted_file_digests",
         "upstream",
-        "supply_chain",
         "deprecation"
       ],
       "properties": {
