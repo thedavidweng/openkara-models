@@ -2,8 +2,7 @@ name: Mirror to Codeberg
 
 on:
   push:
-    branches-ignore:
-      - "dependabot/**"
+    branches: ["main"]
     tags: ["**"]
   workflow_dispatch:
 
