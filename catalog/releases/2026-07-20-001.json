@@ -1,0 +1,105 @@
+{
+  "artifacts": {
+    "bundles": [],
+    "models": [
+      {
+        "arch": null,
+        "archive_digest": "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9",
+        "artifact_id": "htdemucs.balanced.fp32.onnx",
+        "byte_size": 354970480,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx",
+        "extracted_file_digests": {
+          "htdemucs.onnx": {
+            "sha256": "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9",
+            "size": 354970480
+          }
+        },
+        "filename": "htdemucs.onnx",
+        "kind": "model",
+        "model": {
+          "cache_key": "htdemucs-balanced-fp32-model-v2.1.0",
+          "compatible_runtime_ids": [],
+          "format": "onnx",
+          "input_semantics": "[1,2,343980] stereo audio at 44.1 kHz",
+          "ir_version": 9,
+          "opset": 17,
+          "output_semantics": "[1,4,2,343980] drums/bass/other/vocals",
+          "precision": "fp32",
+          "sample_rate": 44100,
+          "segment_frames": 343980,
+          "stem_profile": "four-stem",
+          "tensor_interface": "waveform"
+        },
+        "os": null,
+        "profile": "balanced",
+        "target_triple": null,
+        "upstream": {
+          "project": "openkara-models",
+          "tag": "model-v2.1.0"
+        },
+        "variant": "htdemucs"
+      },
+      {
+        "arch": null,
+        "archive_digest": "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b",
+        "artifact_id": "htdemucs_ft.quality.fp32.onnx",
+        "byte_size": 1421207127,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx",
+        "extracted_file_digests": {
+          "htdemucs_ft.onnx": {
+            "sha256": "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b",
+            "size": 1421207127
+          }
+        },
+        "filename": "htdemucs_ft.onnx",
+        "kind": "model",
+        "model": {
+          "cache_key": "htdemucs-ft-quality-fp32-model-ft-v2.1.0",
+          "compatible_runtime_ids": [],
+          "format": "onnx",
+          "input_semantics": "[1,2,343980] stereo audio at 44.1 kHz",
+          "ir_version": 9,
+          "opset": 17,
+          "output_semantics": "[1,4,2,343980] drums/bass/other/vocals",
+          "precision": "fp32",
+          "sample_rate": 44100,
+          "segment_frames": 343980,
+          "stem_profile": "four-stem",
+          "tensor_interface": "waveform"
+        },
+        "os": null,
+        "profile": "quality",
+        "target_triple": null,
+        "upstream": {
+          "project": "openkara-models",
+          "tag": "model-ft-v2.1.0"
+        },
+        "variant": "htdemucs_ft"
+      }
+    ],
+    "runtimes": []
+  },
+  "compatibility": [],
+  "created_at": "2026-07-20T00:00:00Z",
+  "generation": 1,
+  "minimum_consumer_schema": "openkara.catalog/release-v1",
+  "notes": "Migration catalog: includes the htdemucs and htdemucs_ft model releases already consumed by OpenKara PR #165, using the authoritative v2.1.0 release-asset digests. No runtimes, bundles, compatibility edges, supply-chain records, or gate reports yet; #19/#21/#22 PR 3 add them and back-fill.",
+  "producer": {
+    "commit_sha": "df9d79174badec3efc01d6e79e9368460621db56",
+    "repo": "thedavidweng/openkara-models",
+    "run_id": "legacy",
+    "workflow": "legacy-model-release"
+  },
+  "release_id": "2026-07-20-001",
+  "schema_version": "openkara.catalog/release-v1"
+}

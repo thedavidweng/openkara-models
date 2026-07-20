@@ -1,0 +1,14 @@
+{
+  "htdemucs": {
+    "sha256": "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9",
+    "size": 354970480,
+    "tag": "model-v2.1.0",
+    "url": "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx"
+  },
+  "htdemucs_ft": {
+    "sha256": "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b",
+    "size": 1421207127,
+    "tag": "model-ft-v2.1.0",
+    "url": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx"
+  }
+}
