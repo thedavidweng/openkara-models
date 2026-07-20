@@ -37,7 +37,7 @@
       "archive_format": "tar.gz",
       "artifact_name": "libonnxruntime.dylib",
       "cmake_args": [
-        "-DBUILD_SHARED_LIB=ON",
+        "-Donnxruntime_BUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
         "-DORT_ENABLE_PYTHON=OFF",
         "-Dbuild_ort_onnx_flaky_tests=OFF",
@@ -49,7 +49,8 @@
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [
@@ -67,7 +68,7 @@
       "archive_format": "tar.gz",
       "artifact_name": "libonnxruntime.so",
       "cmake_args": [
-        "-DBUILD_SHARED_LIB=ON",
+        "-Donnxruntime_BUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
         "-DORT_ENABLE_PYTHON=OFF",
         "-Dbuild_ort_onnx_flaky_tests=OFF",
@@ -77,7 +78,8 @@
         "-Donnxruntime_USE_XNNPACK=ON",
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
@@ -93,7 +95,7 @@
       "archive_format": "tar.gz",
       "artifact_name": "libonnxruntime.dylib",
       "cmake_args": [
-        "-DBUILD_SHARED_LIB=ON",
+        "-Donnxruntime_BUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
         "-DORT_ENABLE_PYTHON=OFF",
         "-Dbuild_ort_onnx_flaky_tests=OFF",
@@ -105,7 +107,8 @@
         "-Donnxruntime_USE_COREML=OFF",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
@@ -121,7 +124,7 @@
       "archive_format": "zip",
       "artifact_name": "onnxruntime.dll",
       "cmake_args": [
-        "-DBUILD_SHARED_LIB=ON",
+        "-Donnxruntime_BUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
         "-DORT_ENABLE_PYTHON=OFF",
         "-Dbuild_ort_onnx_flaky_tests=OFF",
@@ -131,7 +134,8 @@
         "-Donnxruntime_USE_DML=ON",
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [
@@ -149,7 +153,7 @@
       "archive_format": "tar.gz",
       "artifact_name": "libonnxruntime.so",
       "cmake_args": [
-        "-DBUILD_SHARED_LIB=ON",
+        "-Donnxruntime_BUILD_SHARED_LIB=ON",
         "-DORT_ENABLE_TRAINING=OFF",
         "-DORT_ENABLE_PYTHON=OFF",
         "-Dbuild_ort_onnx_flaky_tests=OFF",
@@ -159,7 +163,8 @@
         "-Donnxruntime_USE_XNNPACK=ON",
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],

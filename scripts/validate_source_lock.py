@@ -80,8 +80,8 @@ def validate_lock(lock: dict[str, Any]) -> list[str]:
 
         # Check cmake_args has BUILD_SHARED_LIB=ON.
         cmake_args = target_config.get("cmake_args", [])
-        if "-DBUILD_SHARED_LIB=ON" not in cmake_args:
-            errors.append(f"{target_name}: cmake_args must include -DBUILD_SHARED_LIB=ON")
+        if "-Donnxruntime_BUILD_SHARED_LIB=ON" not in cmake_args:
+            errors.append(f"{target_name}: cmake_args must include -Donnxruntime_BUILD_SHARED_LIB=ON")
 
         # Check execution_providers includes cpu.
         eps = target_config.get("execution_providers", [])

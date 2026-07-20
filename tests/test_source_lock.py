@@ -65,7 +65,7 @@ class TargetConfigTests(unittest.TestCase):
     def test_each_target_has_shared_lib_enabled(self):
         lock = _load_lock()
         for target, config in lock["targets"].items():
-            self.assertIn("-DBUILD_SHARED_LIB=ON", config["cmake_args"],
+            self.assertIn("-Donnxruntime_BUILD_SHARED_LIB=ON", config["cmake_args"],
                           f"{target} must build shared lib")
 
     def test_each_target_has_cpu_provider(self):
