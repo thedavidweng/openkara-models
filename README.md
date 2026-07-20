@@ -77,8 +77,8 @@ from the release assets (`htdemucs.onnx.sha256`, `htdemucs_ft.onnx.sha256`).
 
 | Variant      | Release tag        | Asset file        |
 | ------------ | ------------------ | ----------------- |
-| `htdemucs`   | `model-v2.0.1`     | `htdemucs.onnx`   |
-| `htdemucs_ft`| `model-ft-v2.0.1`  | `htdemucs_ft.onnx`|
+| `htdemucs`   | `model-v2.1.0`     | `htdemucs.onnx`   |
+| `htdemucs_ft`| `model-ft-v2.1.0`  | `htdemucs_ft.onnx`|
 
 **`src-tauri/src/separator/model.rs`** — embedded filename (unchanged unless you rename assets):
 
@@ -92,13 +92,13 @@ release you ship; `MODEL_DOWNLOAD_URL` / `MODEL_SHA256` are aliases of `HTDEMUCS
 ```rust
 pub const HTDEMUCS: ModelDescriptor = ModelDescriptor {
     filename: "htdemucs.onnx",
-    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.0.1/htdemucs.onnx",
+    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx",
     sha256: "8fa3dab679c59aeb049dd229f57a212c9339b3fc17ebf50541daad9e799364a1",
 };
 
 pub const HTDEMUCS_FT: ModelDescriptor = ModelDescriptor {
     filename: "htdemucs_ft.onnx",
-    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.0.1/htdemucs_ft.onnx",
+    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx",
     sha256: "0f2efbd7044182c10a6e8169b670392a3a91f904635e29329d6a3667375f5c94",
 };
 ```
