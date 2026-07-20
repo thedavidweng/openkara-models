@@ -115,8 +115,40 @@ OpenKara PR #165 currently fetches an ad hoc `latest.json` of the form:
 ```
 
 Issue #18 PR 2 generates this file from the stable pointer as a **migration
-alias only**. It is deleted in issue #18 PR 4 once OpenKara #167 switches to
-the versioned schema. It must not grow new fields or become a second contract.
+alias only**. It is deleted once OpenKara #167 switches to the versioned
+schema. It must not grow new fields or become a second contract.
+
+**Deletion procedure (blocked on OpenKara #167):**
+1. OpenKara #167 merges — the app fetches `catalog/channels/stable.json` and
+   `catalog/releases/<release-id>.json` instead of `latest.json`.
+2. Remove `latest.json` from the repo root.
+3. Remove `_build_latest_adapter` and the `--latest-json-path` option from
+   `scripts/generate_catalog_release.py`.
+4. Remove the `latest.json` freshness guard from
+   `.github/workflows/catalog-validate.yml`.
+5. Remove the stale README pin table and Rust constant block (already
+   deprecated in PR 2's README note).
+
+Until OpenKara #167 merges, `latest.json` remains generated from the stable
+pointer and verified by CI on every PR.
+
+## Atomic publication
+
+`scripts/publish_catalog_release.py --release <release-id> [--execute]`
+publishes a catalog release as an immutable GitHub release:
+
+1. **Dry-run (default):** verifies the manifest validates, supply-chain records
+   match local files, model asset URLs resolve to existing GitHub releases, and
+   generation is monotonic. Exits 0 if ready to publish.
+2. **Execute (`--execute`):** creates a draft GitHub release tagged
+   `infra-<release-id>`, uploads the manifest + supply-chain files, verifies
+   every asset, publishes (undrafts) the release. On any failure, deletes the
+   release and does not move the stable pointer.
+
+The stable pointer (`catalog/channels/stable.json`) is committed to the repo
+by `generate_catalog_release.py` and points at the intended immutable manifest
+URL. The publication script makes that URL resolve by creating the release
+with the manifest as an asset.
 
 ## Cross-repository pairing
 
