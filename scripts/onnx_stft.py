@@ -10,6 +10,7 @@ All operations are real-valued and use standard ONNX-exportable ops.
 """
 
 import math
+import types
 
 import torch
 import torch.nn as nn
@@ -24,13 +25,12 @@ def _build_dft_filters(n_fft: int):
         sin_filters: (n_fft//2+1, 1, n_fft) - imaginary part
     """
     n_freqs = n_fft // 2 + 1
-    # DFT frequencies
-    k = torch.arange(n_freqs, dtype=torch.float32).unsqueeze(1)  # (n_freqs, 1)
-    n = torch.arange(n_fft, dtype=torch.float32).unsqueeze(0)  # (1, n_fft)
-    angles = 2.0 * math.pi * k * n / n_fft  # (n_freqs, n_fft)
+    k = torch.arange(n_freqs, dtype=torch.float32).unsqueeze(1)
+    n = torch.arange(n_fft, dtype=torch.float32).unsqueeze(0)
+    angles = 2.0 * math.pi * k * n / n_fft
 
-    cos_filters = torch.cos(angles).unsqueeze(1)  # (n_freqs, 1, n_fft)
-    sin_filters = -torch.sin(angles).unsqueeze(1)  # (n_freqs, 1, n_fft)
+    cos_filters = torch.cos(angles).unsqueeze(1)
+    sin_filters = -torch.sin(angles).unsqueeze(1)
     return cos_filters, sin_filters
 
 
@@ -42,22 +42,18 @@ def _build_idft_filters(n_fft: int):
         sin_filters: (1, n_fft//2+1, n_fft) - imaginary part
     """
     n_freqs = n_fft // 2 + 1
-    k = torch.arange(n_freqs, dtype=torch.float32).unsqueeze(1)  # (n_freqs, 1)
-    n = torch.arange(n_fft, dtype=torch.float32).unsqueeze(0)  # (1, n_fft)
-    angles = 2.0 * math.pi * k * n / n_fft  # (n_freqs, n_fft)
+    k = torch.arange(n_freqs, dtype=torch.float32).unsqueeze(1)
+    n = torch.arange(n_fft, dtype=torch.float32).unsqueeze(0)
+    angles = 2.0 * math.pi * k * n / n_fft
 
-    # For inverse DFT, the first and last frequency bins contribute once,
-    # others contribute twice (conjugate symmetry)
-    cos_filters = torch.cos(angles)  # (n_freqs, n_fft)
-    sin_filters = torch.sin(angles)  # (n_freqs, n_fft)
+    cos_filters = torch.cos(angles)
+    sin_filters = torch.sin(angles)
 
-    # Scale: DC and Nyquist bins contribute once, others contribute twice
     scale = torch.ones(n_freqs, 1)
     scale[1:-1] = 2.0
     cos_filters = cos_filters * scale
     sin_filters = sin_filters * scale
 
-    # Reshape for conv_transpose1d: (1, n_freqs, n_fft)
     cos_filters = cos_filters.unsqueeze(0)
     sin_filters = sin_filters.unsqueeze(0)
     return cos_filters, sin_filters
@@ -79,12 +75,9 @@ class OnnxSTFT(nn.Module):
         window = torch.hann_window(n_fft, dtype=torch.float32)
         cos_filters, sin_filters = _build_dft_filters(n_fft)
 
-        # Apply window to filters
-        # cos_filters: (n_freqs, 1, n_fft), window: (n_fft,)
         cos_filters = cos_filters * window.unsqueeze(0).unsqueeze(0)
         sin_filters = sin_filters * window.unsqueeze(0).unsqueeze(0)
 
-        # Normalization factor (matches torch.stft normalized=True)
         norm = 1.0 / math.sqrt(n_fft)
         cos_filters = cos_filters * norm
         sin_filters = sin_filters * norm
@@ -96,37 +89,25 @@ class OnnxSTFT(nn.Module):
         """Compute STFT of input signal.
 
         Args:
-            x: (batch, channels, frames) or (batch * channels, frames)
+            x: (batch, channels, frames)
 
         Returns:
             Complex spectrogram as (batch, channels, freq_bins, time_steps, 2)
             where last dim is [real, imag].
         """
-        shape = x.shape
-        if x.dim() == 3:
-            batch, channels, frames = shape
-            x = x.reshape(batch * channels, frames)
-        else:
-            batch = shape[0]
-            channels = 1
-            frames = shape[-1]
+        batch, channels, frames = x.shape
+        x = x.reshape(batch * channels, frames)
 
-        # Center padding (reflect)
         pad_amount = self.n_fft // 2
         x = F.pad(x, (pad_amount, pad_amount), mode="reflect")
 
-        # Add channel dim for conv1d: (batch*ch, 1, padded_frames)
         x = x.unsqueeze(1)
 
-        # Compute real and imaginary parts via conv1d
         real = F.conv1d(x, self.cos_filters, stride=self.hop_length)
         imag = F.conv1d(x, self.sin_filters, stride=self.hop_length)
 
-        # Stack as last dimension: (..., 2)
-        # real/imag shape: (batch*ch, n_freqs, time_steps)
         spec = torch.stack([real, imag], dim=-1)
 
-        # Reshape back
         n_freqs = spec.shape[1]
         time_steps = spec.shape[2]
         spec = spec.reshape(batch, channels, n_freqs, time_steps, 2)
@@ -149,54 +130,42 @@ class OnnxISTFT(nn.Module):
         window = torch.hann_window(n_fft, dtype=torch.float32)
         cos_filters, sin_filters = _build_idft_filters(n_fft)
 
-        # Normalization (matches torch.istft normalized=True)
         norm = 1.0 / math.sqrt(n_fft)
         cos_filters = cos_filters * norm
         sin_filters = sin_filters * norm
 
-        # Apply window to inverse filters
-        # filters: (1, n_freqs, n_fft), window: (n_fft,)
         cos_filters = cos_filters * window.unsqueeze(0).unsqueeze(0)
         sin_filters = sin_filters * window.unsqueeze(0).unsqueeze(0)
 
         self.register_buffer("cos_filters", cos_filters)
         self.register_buffer("sin_filters", sin_filters)
 
-        # Overlap-add normalization depends only on the window, not on the
-        # Fourier basis. Using the squared synthesis filters here introduces a
-        # scale error in the reconstructed waveform.
         self.register_buffer("window_sq_kernel", (window * window).view(1, 1, n_fft))
 
-    def forward(self, spec: torch.Tensor, length: int = 0) -> torch.Tensor:
+    def forward(self, spec: torch.Tensor, length: int) -> torch.Tensor:
         """Compute ISTFT to reconstruct time-domain signal.
 
         Args:
             spec: (batch, channels, freq_bins, time_steps, 2) where last dim is [real, imag]
-            length: desired output length (0 = auto)
+            length: desired output length
 
         Returns:
             Reconstructed signal: (batch, channels, frames)
         """
         batch, channels, n_freqs, time_steps, _ = spec.shape
 
-        real = spec[..., 0]  # (batch, ch, freq, time)
+        real = spec[..., 0]
         imag = spec[..., 1]
 
-        # Reshape for conv_transpose1d
         real = real.reshape(batch * channels, n_freqs, time_steps)
         imag = imag.reshape(batch * channels, n_freqs, time_steps)
 
-        # Transpose for conv_transpose1d: (batch*ch, n_freqs, time_steps)
-        # cos/sin_filters: (1, n_freqs, n_fft) -> need (n_freqs, 1, n_fft) for conv_transpose1d
-        cos_f = self.cos_filters.squeeze(0).unsqueeze(1)  # (n_freqs, 1, n_fft)
-        sin_f = self.sin_filters.squeeze(0).unsqueeze(1)  # (n_freqs, 1, n_fft)
+        cos_f = self.cos_filters.squeeze(0).unsqueeze(1)
+        sin_f = self.sin_filters.squeeze(0).unsqueeze(1)
 
-        # ISTFT: sum of real*cos - imag*sin across frequency bins
-        # Using conv_transpose1d for overlap-add
         signal = F.conv_transpose1d(real, cos_f, stride=self.hop_length)
         signal = signal - F.conv_transpose1d(imag, sin_f, stride=self.hop_length)
 
-        # Compute the standard overlap-add normalization envelope.
         ones = torch.ones(batch * channels, 1, time_steps, device=spec.device, dtype=spec.dtype)
         window_envelope = F.conv_transpose1d(
             ones,
@@ -204,22 +173,122 @@ class OnnxISTFT(nn.Module):
             stride=self.hop_length,
         )
 
-        # Avoid division by zero
         window_envelope = torch.clamp(window_envelope, min=1e-8)
         signal = signal / window_envelope
 
-        # Remove center padding
         pad_amount = self.n_fft // 2
         signal = signal[:, :, pad_amount:]
+        signal = signal[:, :, :length]
 
-        if length > 0:
-            signal = signal[:, :, :length]
-
-        # Sum across the single output channel from conv_transpose1d
-        # signal shape: (batch*ch, 1, frames)
         signal = signal.squeeze(1)
 
-        # Reshape back
         signal = signal.reshape(batch, channels, -1)
 
         return signal
+
+
+class RealValuedSpectrogramPatch:
+    """Replace an HTDemucs model's complex spectrogram path with real-valued ops.
+
+    HTDemucs uses complex STFT/ISTFT via torch.stft/torch.istft, which ONNX
+    cannot export. This patch swaps the four spectrogram methods (_spec,
+    _ispec, _magnitude, _mask) with real-valued conv1d/conv_transpose1d
+    implementations built from OnnxSTFT/OnnxISTFT.
+
+    Use as a context manager, or call apply()/restore() explicitly:
+
+        with RealValuedSpectrogramPatch.from_model(model):
+            torch.onnx.export(model, ...)
+
+    The model must have cac=True, nfft, hop_length, segment, and samplerate
+    attributes (the HTDemucs interface).
+    """
+
+    def __init__(self, model, stft_module, istft_module):
+        self.model = model
+        self.stft_module = stft_module
+        self.istft_module = istft_module
+        self._originals = {}
+        self._applied = False
+
+    @classmethod
+    def from_model(cls, model):
+        if not model.cac:
+            raise RuntimeError(
+                "RealValuedSpectrogramPatch expects an HTDemucs model with cac=True"
+            )
+        stft = OnnxSTFT(n_fft=model.nfft, hop_length=model.hop_length)
+        istft = OnnxISTFT(n_fft=model.nfft, hop_length=model.hop_length)
+        return cls(model, stft, istft)
+
+    def apply(self):
+        if self._applied:
+            return
+        from demucs.hdemucs import pad1d
+
+        stft_module = self.stft_module
+        istft_module = self.istft_module
+
+        self._originals = {
+            "_spec": self.model._spec,
+            "_ispec": self.model._ispec,
+            "_magnitude": self.model._magnitude,
+            "_mask": self.model._mask,
+        }
+
+        def exportable_spec(self, x):
+            hl = self.hop_length
+            nfft = self.nfft
+            assert hl == nfft // 4
+            le = int(math.ceil(x.shape[-1] / hl))
+            pad = hl // 2 * 3
+            x = pad1d(x, (pad, pad + le * hl - x.shape[-1]), mode="reflect")
+            z = stft_module(x)[:, :, :-1, :, :]
+            assert z.shape[-2] == le + 4, (z.shape, x.shape, le)
+            z = z[:, :, :, 2: 2 + le, :]
+            return z.permute(0, 1, 4, 2, 3).contiguous()
+
+        def exportable_ispec(self, z, length=None, scale=0):
+            assert scale == 0, "Scaled ISTFT export is not implemented"
+            hl = self.hop_length
+            z = F.pad(z, (0, 0, 0, 1))
+            z = F.pad(z, (2, 2))
+            pad = hl // 2 * 3
+            le = hl * int(math.ceil(length / hl)) + 2 * pad
+
+            batch, sources, channels, _, freqs, frames = z.shape
+            z = z.permute(0, 1, 2, 4, 5, 3).contiguous()
+            z = z.view(batch * sources, channels, freqs, frames, 2)
+            x = istft_module(z, length=le)
+            x = x.view(batch, sources, channels, le)
+            return x[..., pad: pad + length]
+
+        def exportable_magnitude(self, z):
+            batch, channels, _, freqs, frames = z.shape
+            return z.reshape(batch, channels * 2, freqs, frames)
+
+        def exportable_mask(self, z, m):
+            batch, sources, _, freqs, frames = m.shape
+            return m.view(batch, sources, -1, 2, freqs, frames).contiguous()
+
+        self.model._spec = types.MethodType(exportable_spec, self.model)
+        self.model._ispec = types.MethodType(exportable_ispec, self.model)
+        self.model._magnitude = types.MethodType(exportable_magnitude, self.model)
+        self.model._mask = types.MethodType(exportable_mask, self.model)
+        self._applied = True
+
+    def restore(self):
+        if not self._applied:
+            return
+        for name, method in self._originals.items():
+            setattr(self.model, name, method)
+        self._originals = {}
+        self._applied = False
+
+    def __enter__(self):
+        self.apply()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.restore()
+        return False

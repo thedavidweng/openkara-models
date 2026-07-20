@@ -2,8 +2,14 @@ name: Convert and Release
 
 on:
   push:
-    tags: ["model-v*"]
+    tags: ["model-v*", "model-ft-v*"]
   workflow_dispatch:
+    inputs:
+      model:
+        description: "Model to convert"
+        type: choice
+        options: [htdemucs, htdemucs_ft]
+        default: htdemucs
 
 permissions:
   contents: write
@@ -11,14 +17,24 @@ permissions:
 jobs:
   convert:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Determine model from tag or input
+        id: model
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "model=${{ github.event.inputs.model }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF#refs/tags/}" == model-ft-* ]]; then
+            echo "model=htdemucs_ft" >> "$GITHUB_OUTPUT"
+          else
+            echo "model=htdemucs" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -27,46 +43,46 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Convert model to ONNX
-        run: python scripts/convert_htdemucs_to_onnx.py
+        run: python scripts/convert_htdemucs_to_onnx.py --model ${{ steps.model.outputs.model }}
 
       - name: Validate ONNX model
-        run: python scripts/validate_onnx.py
+        run: python scripts/validate_onnx.py --model ${{ steps.model.outputs.model }}
 
       - name: Runtime contract (protobuf + ORT CPU session)
-        run: python scripts/onnx_runtime_contract.py --model models/htdemucs.onnx --ort-session
+        run: python scripts/onnx_runtime_contract.py --model models/${{ steps.model.outputs.model }}.onnx --ort-session
 
       - name: Generate checksum
         run: |
           cd models
-          sha256sum htdemucs.onnx > htdemucs.onnx.sha256
+          sha256sum ${{ steps.model.outputs.model }}.onnx > ${{ steps.model.outputs.model }}.onnx.sha256
           echo "Checksum:"
-          cat htdemucs.onnx.sha256
+          cat ${{ steps.model.outputs.model }}.onnx.sha256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: htdemucs-onnx
+          name: ${{ steps.model.outputs.model }}-onnx
           path: |
-            models/htdemucs.onnx
-            models/htdemucs.onnx.sha256
+            models/${{ steps.model.outputs.model }}.onnx
+            models/${{ steps.model.outputs.model }}.onnx.sha256
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            models/htdemucs.onnx
-            models/htdemucs.onnx.sha256
+            models/${{ steps.model.outputs.model }}.onnx
+            models/${{ steps.model.outputs.model }}.onnx.sha256
           body: |
-            ## HTDemucs ONNX Model
+            ## ${{ steps.model.outputs.model }} ONNX Model
 
-            Converted from the pretrained [Demucs htdemucs](https://github.com/facebookresearch/demucs) PyTorch model.
+            Converted from the pretrained [Demucs ${{ steps.model.outputs.model }}](https://github.com/adefossez/demucs) PyTorch model.
 
             **Model spec:**
             - Input: `[1, 2, frame_count]` (stereo audio at 44.1 kHz)
             - Output: `[1, 4, 2, frame_count]` (drums, bass, other, vocals)
             - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
 
-            **Verification:** SHA-256 checksum included in `htdemucs.onnx.sha256`.
+            **Verification:** SHA-256 checksum included in `${{ steps.model.outputs.model }}.onnx.sha256`.
             Validated against PyTorch reference output (MSE < 1e-4) and checked for OpenKara runtime metadata.
           generate_release_notes: true

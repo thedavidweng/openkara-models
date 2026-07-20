@@ -11,27 +11,19 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Iterable
 
 import onnx
-from onnx import NodeProto
 
-# Domains that must not appear in default OpenKara standard models. Extend carefully.
 FORBIDDEN_OP_DOMAINS = frozenset({"com.microsoft.nchwc"})
 
-
-def iter_graph_nodes(model: onnx.ModelProto) -> Iterable[NodeProto]:
-    for node in model.graph.node:
-        yield node
-    for fn in getattr(model, "functions", ()):
-        for node in fn.node:
-            yield node
+MODEL_CACHE_KEY_METADATA = "openkara.model_cache_key"
+MODEL_OPTIMIZED_BY_METADATA = "openkara.optimized_by"
 
 
 def collect_op_domains(model: onnx.ModelProto) -> dict[str, set[str]]:
     """Map domain -> set of op_type seen in that domain."""
     domains: dict[str, set[str]] = {}
-    for node in iter_graph_nodes(model):
+    for node in model.graph.node:
         domain = node.domain or ""
         domains.setdefault(domain, set()).add(node.op_type)
     return domains
@@ -46,18 +38,12 @@ def forbidden_domain_violations(model: onnx.ModelProto) -> list[tuple[str, set[s
     return out
 
 
-def load_onnx_for_contract(path: Path) -> onnx.ModelProto:
-    """Load ONNX; resolve external data if present."""
-    model = onnx.load(str(path), load_external_data=True)
-    return model
-
-
 def assert_release_onnx_compatible_with_official_ort(onnx_path: Path) -> None:
     """
     Fail fast if the graph uses operator domains not supported by official ORT
     on all OpenKara target platforms (see docs/runtime-contract.md).
     """
-    model = load_onnx_for_contract(onnx_path)
+    model = onnx.load(str(onnx_path), load_external_data=True)
     violations = forbidden_domain_violations(model)
     if violations:
         lines = [f"  domain={dom!r} ops={sorted(ops)}" for dom, ops in violations]
@@ -68,17 +54,34 @@ def assert_release_onnx_compatible_with_official_ort(onnx_path: Path) -> None:
         )
 
 
-def verify_ort_cpu_session(onnx_path: Path) -> None:
-    """Create a CPU EP InferenceSession (matches portable official ORT usage)."""
+def make_contract_compliant_session(onnx_path: Path, optimized_model_filepath=None):
+    """Create an ORT InferenceSession that satisfies the runtime contract.
+
+    Uses ORT_ENABLE_EXTENDED (not ORT_ENABLE_ALL) and CPUExecutionProvider so
+    layout passes that emit com.microsoft.nchwc ops are not applied. This is
+    the single source of truth for contract-compliant session creation — see
+    docs/runtime-contract.md.
+
+    If optimized_model_filepath is set, ORT writes the optimized graph to that
+    path before returning (used by the conversion pipeline to emit the final
+    optimized ONNX artifact).
+    """
     import onnxruntime as ort
 
     so = ort.SessionOptions()
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-    ort.InferenceSession(
+    if optimized_model_filepath is not None:
+        so.optimized_model_filepath = str(optimized_model_filepath)
+    return ort.InferenceSession(
         str(onnx_path),
         sess_options=so,
         providers=["CPUExecutionProvider"],
     )
+
+
+def verify_ort_cpu_session(onnx_path: Path) -> None:
+    """Create and discard a CPU EP InferenceSession (matches portable official ORT usage)."""
+    make_contract_compliant_session(onnx_path)
 
 
 def run_self_test() -> None:

@@ -24,5 +24,8 @@ jobs:
       - name: Domain gate self-test
         run: python scripts/onnx_runtime_contract.py --self-test
 
+      - name: Behavior tests (contract + ensemble graph)
+        run: python tests/test_conversion_pipeline.py
+
       - name: Syntax check scripts
         run: python -m compileall -q scripts

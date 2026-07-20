@@ -136,8 +136,6 @@ Pull requests run a lightweight **runtime-contract** workflow (`scripts/onnx_run
 
 A weekly check (every Monday) monitors PyPI for new Demucs versions and opens an issue labeled `upstream-update` when a new release is detected.
 
-For Linux-based continuation work on conversion, optimization, and packaging validation, see `docs/plans/2026-04-12-linux-agent-handoff.md`.
-
 ## License
 
 MIT
