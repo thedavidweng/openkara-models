@@ -70,7 +70,7 @@ def _gh(args: list[str], *, check: bool = True, capture: bool = True) -> subproc
     )
 
 
-def _verify_manifest(manifest: dict[str, Any]) -> list[str]:
+def _verify_manifest(manifest: dict[str, Any], *, skip_asset_check: bool = False) -> list[str]:
     """Validate manifest + verify supply-chain records + check asset URLs."""
     errors: list[str] = []
 
@@ -102,23 +102,22 @@ def _verify_manifest(manifest: dict[str, Any]) -> list[str]:
             errors.append(f"supply_chain.{key}: size mismatch")
 
     # Check that model asset URLs point to existing GitHub releases.
-    for kind in ("models", "runtimes", "bundles"):
-        for art in manifest.get("artifacts", {}).get(kind, []):
-            url = art.get("download_url", "")
-            if not url.startswith("https://github.com/"):
-                errors.append(f"{art['artifact_id']}: non-GitHub URL {url}")
-                continue
-            # Extract release tag from URL.
-            # .../releases/download/<tag>/<filename>
-            parts = url.split("/releases/download/")
-            if len(parts) != 2:
-                errors.append(f"{art['artifact_id']}: unparseable release URL {url}")
-                continue
-            tag = parts[1].split("/")[0]
-            # Check release exists.
-            r = _gh(["release", "view", tag, "--json", "assets"], check=False)
-            if r.returncode != 0:
-                errors.append(f"{art['artifact_id']}: release tag {tag} not found")
+    # Skipped in CI (--skip-asset-check) where gh may lack cross-repo auth.
+    if not skip_asset_check:
+        for kind in ("models", "runtimes", "bundles"):
+            for art in manifest.get("artifacts", {}).get(kind, []):
+                url = art.get("download_url", "")
+                if not url.startswith("https://github.com/"):
+                    errors.append(f"{art['artifact_id']}: non-GitHub URL {url}")
+                    continue
+                parts = url.split("/releases/download/")
+                if len(parts) != 2:
+                    errors.append(f"{art['artifact_id']}: unparseable release URL {url}")
+                    continue
+                tag = parts[1].split("/")[0]
+                r = _gh(["release", "view", tag, "--json", "assets"], check=False)
+                if r.returncode != 0:
+                    errors.append(f"{art['artifact_id']}: release tag {tag} not found")
 
     return errors
 
@@ -143,6 +142,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Publish a catalog release atomically.")
     parser.add_argument("--release", required=True, help="release_id to publish.")
     parser.add_argument("--execute", action="store_true", help="Actually create the GitHub release (default: dry-run).")
+    parser.add_argument("--skip-asset-check", action="store_true", help="Skip GitHub release existence check (for CI where gh lacks cross-repo auth).")
     args = parser.parse_args()
 
     manifest_path = RELEASES_DIR / f"{args.release}.json"
@@ -153,7 +153,7 @@ def main() -> int:
     manifest = _load(manifest_path)
 
     # Step 1: verify manifest, supply-chain, and asset URLs.
-    errors = _verify_manifest(manifest)
+    errors = _verify_manifest(manifest, skip_asset_check=args.skip_asset_check)
     if errors:
         print("ERROR: pre-publication verification failed:", file=sys.stderr)
         for e in errors:

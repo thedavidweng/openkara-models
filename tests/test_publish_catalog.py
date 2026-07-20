@@ -27,13 +27,13 @@ def _run_publish(args: list[str]) -> subprocess.CompletedProcess:
 
 class DryRunTests(unittest.TestCase):
     def test_dry_run_passes_for_committed_release(self):
-        r = _run_publish(["--release", RELEASE_ID])
+        r = _run_publish(["--release", RELEASE_ID, "--skip-asset-check"])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("DRY-RUN", r.stdout)
         self.assertIn("ready to publish", r.stdout)
 
     def test_dry_run_fails_for_nonexistent_release(self):
-        r = _run_publish(["--release", "9999-99-99-999"])
+        r = _run_publish(["--release", "9999-99-99-999", "--skip-asset-check"])
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("manifest not found", r.stderr)
 
@@ -43,7 +43,7 @@ class DryRunTests(unittest.TestCase):
         original = sc_file.read_bytes()
         try:
             sc_file.write_bytes(b"TAMPERED")
-            r = _run_publish(["--release", RELEASE_ID])
+            r = _run_publish(["--release", RELEASE_ID, "--skip-asset-check"])
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("supply_chain.notice", r.stderr)
         finally:
@@ -53,7 +53,7 @@ class DryRunTests(unittest.TestCase):
 class MonotonicityGuardTests(unittest.TestCase):
     def test_dry_run_checks_monotonicity(self):
         """The dry-run must pass monotonicity checks against existing releases."""
-        r = _run_publish(["--release", RELEASE_ID])
+        r = _run_publish(["--release", RELEASE_ID, "--skip-asset-check"])
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
