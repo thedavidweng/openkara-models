@@ -62,6 +62,13 @@ def make_contract_compliant_session(onnx_path: Path, optimized_model_filepath=No
     the single source of truth for contract-compliant session creation — see
     docs/runtime-contract.md.
 
+    Log severity is set to ERROR (3, not the default WARNING=2) to suppress the
+    known device_discovery.cc GetPciBusId warning that ORT 1.24+ emits on
+    GitHub Linux runners (microsoft/onnxruntime#27268). That warning comes
+    from GPU device discovery for TRT-RTX EP, which is irrelevant here since
+    we only use CPUExecutionProvider. Real errors still surface at ERROR
+    level, so this does not hide any actionable problem.
+
     If optimized_model_filepath is set, ORT writes the optimized graph to that
     path before returning (used by the conversion pipeline to emit the final
     optimized ONNX artifact).
@@ -70,6 +77,7 @@ def make_contract_compliant_session(onnx_path: Path, optimized_model_filepath=No
 
     so = ort.SessionOptions()
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    so.log_severity_level = 3  # ORT LogLevel.ERROR: 0=Verbose 1=Info 2=Warning 3=Error 4=Fatal
     if optimized_model_filepath is not None:
         so.optimized_model_filepath = str(optimized_model_filepath)
     return ort.InferenceSession(

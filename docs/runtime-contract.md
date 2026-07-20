@@ -39,6 +39,8 @@ Allowed optimizations include:
 
 The conversion script uses **`ORT_ENABLE_EXTENDED`** for offline optimization so layout passes that emit `com.microsoft.nchwc` are not applied when writing the shipped ONNX.
 
+**Log severity:** contract-compliant sessions set `log_severity_level = 3` (ERROR) instead of the default 2 (WARNING). This suppresses the known `device_discovery.cc GetPciBusId` warning that ORT 1.24+ emits on GitHub Linux runners ([microsoft/onnxruntime#27268](https://github.com/microsoft/onnxruntime/issues/27268)) — that warning comes from GPU device discovery for TRT-RTX EP and is irrelevant when only `CPUExecutionProvider` is used. Real errors still surface at ERROR level.
+
 ## Release gate (required before publishing)
 
 Before tagging a **standard** model release, maintainers MUST:
