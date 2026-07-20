@@ -4,11 +4,60 @@ build_ensemble_graph takes in-memory onnx.ModelProto sub-models and returns
 an in-memory ensemble onnx.ModelProto. This module is separated from
 convert_htdemucs_to_onnx.py so it can be unit-tested with only the onnx
 package, without torch or demucs.
+
+Two optimizations beyond naive concatenation:
+
+1. **Initializer deduplication** — sub-models share identical STFT/ISTFT
+   filter banks (same n_fft/hop_length). After prefixing, these become
+   distinct initializers with identical content. We hash tensor content
+   and collapse duplicates to a single shared initializer, reducing model
+   size and improving runtime cache locality.
+
+2. **Sum + Mul averaging** — instead of Unsqueeze→Concat→ReduceMean (which
+   materializes a stacked [N, ...] intermediate tensor), we use a single
+   Sum node followed by Mul by 1/N. Fewer nodes, no intermediate tensor,
+   identical numerical result.
 """
+
+import hashlib
 
 import numpy as np
 import onnx
 from onnx import helper, TensorProto, numpy_helper, shape_inference
+
+
+def _tensor_content_hash(init: TensorProto) -> str:
+    """Stable hash of tensor data + shape + dtype, excluding the name field."""
+    arr = numpy_helper.to_array(init)
+    h = hashlib.sha256()
+    h.update(str(arr.dtype).encode())
+    h.update(np.array(arr.shape, dtype=np.int64).tobytes())
+    h.update(np.ascontiguousarray(arr).tobytes())
+    return h.hexdigest()
+
+
+def _deduplicate_initializers(nodes, initializers):
+    """Collapse identical initializers to a single shared copy.
+
+    Returns (nodes_with_renamed_inputs, deduped_initializers).
+    """
+    canonical: dict[str, str] = {}   # content_hash -> canonical name
+    rename: dict[str, str] = {}      # old name -> canonical name
+
+    for init in initializers:
+        ch = _tensor_content_hash(init)
+        if ch in canonical:
+            rename[init.name] = canonical[ch]
+        else:
+            canonical[ch] = init.name
+
+    for node in nodes:
+        for i, inp in enumerate(node.input):
+            if inp in rename:
+                node.input[i] = rename[inp]
+
+    deduped = [init for init in initializers if init.name not in rename]
+    return nodes, deduped
 
 
 def build_ensemble_graph(sub_models, n_models):
@@ -16,8 +65,9 @@ def build_ensemble_graph(sub_models, n_models):
 
     Pure function: takes in-memory onnx.ModelProto list, returns an in-memory
     ensemble onnx.ModelProto. Feeds the same input to all sub-models, averages
-    their outputs, and namespaces each sub-model's nodes/initializers with a
-    prefix to avoid collisions. Runs shape inference before returning.
+    their outputs via Sum+Mul, namespaces each sub-model's nodes/initializers
+    with a prefix to avoid collisions, deduplicates identical initializers
+    (shared STFT/ISTFT filter banks), and runs shape inference before returning.
     """
     ref = sub_models[0]
     ref_input = ref.graph.input[0]
@@ -60,36 +110,25 @@ def build_ensemble_graph(sub_models, n_models):
                 new_node.attribute.append(attr)
             all_nodes.append(new_node)
 
-    concat_output = "ensemble_concat"
+    # Average via Sum + Mul — no intermediate stacked tensor.
     all_nodes.append(helper.make_node(
-        "Unsqueeze",
-        inputs=[sub_output_names[0], "unsqueeze_axes"],
-        outputs=["unsqueeze_0"],
+        "Sum",
+        inputs=sub_output_names,
+        outputs=["ensemble_sum"],
     ))
-    for i in range(1, n_models):
-        all_nodes.append(helper.make_node(
-            "Unsqueeze",
-            inputs=[sub_output_names[i], "unsqueeze_axes"],
-            outputs=[f"unsqueeze_{i}"],
-        ))
-
     all_nodes.append(helper.make_node(
-        "Concat",
-        inputs=[f"unsqueeze_{i}" for i in range(n_models)],
-        outputs=[concat_output],
-        axis=0,
-    ))
-
-    all_nodes.append(helper.make_node(
-        "ReduceMean",
-        inputs=[concat_output],
+        "Mul",
+        inputs=["ensemble_sum", "ensemble_scale"],
         outputs=["stems"],
-        axes=[0],
-        keepdims=0,
     ))
 
-    axes_0 = numpy_helper.from_array(np.array([0], dtype=np.int64), name="unsqueeze_axes")
-    all_initializers.append(axes_0)
+    scale = numpy_helper.from_array(
+        np.array([1.0 / n_models], dtype=np.float32), name="ensemble_scale"
+    )
+    all_initializers.append(scale)
+
+    # Deduplicate identical initializers (shared STFT/ISTFT filter banks).
+    all_nodes, all_initializers = _deduplicate_initializers(all_nodes, all_initializers)
 
     ensemble_input = helper.make_tensor_value_info(
         "audio",

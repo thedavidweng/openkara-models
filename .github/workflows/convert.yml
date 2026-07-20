@@ -14,27 +14,55 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: convert-${{ github.ref }}-${{ github.event.inputs.model || 'auto' }}
+  cancel-in-progress: true
+
 jobs:
-  convert:
+  detect-model:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 2
+    outputs:
+      model: ${{ steps.model.outputs.model }}
+      is_ensemble: ${{ steps.model.outputs.is_ensemble }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Determine model from tag or input
         id: model
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "model=${{ github.event.inputs.model }}" >> "$GITHUB_OUTPUT"
+            MODEL="${{ github.event.inputs.model }}"
           elif [[ "${GITHUB_REF#refs/tags/}" == model-ft-* ]]; then
-            echo "model=htdemucs_ft" >> "$GITHUB_OUTPUT"
+            MODEL="htdemucs_ft"
           else
-            echo "model=htdemucs" >> "$GITHUB_OUTPUT"
+            MODEL="htdemucs"
           fi
+          echo "model=$MODEL" >> "$GITHUB_OUTPUT"
+          if [ "$MODEL" = "htdemucs_ft" ]; then
+            echo "is_ensemble=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_ensemble=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Parallel sub-model export for htdemucs_ft (4 jobs, ~6min wall time
+  # instead of ~20min serial).
+  export-sub-models:
+    needs: detect-model
+    if: needs.detect-model.outputs.is_ensemble == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        index: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -42,47 +70,203 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Cache Demucs pretrained weights
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/torch/hub/checkpoints
+          key: demucs-weights-htdemucs_ft-${{ hashFiles('requirements.txt') }}
+
+      - name: Export sub-model ${{ matrix.index }}
+        run: |
+          python scripts/convert_htdemucs_to_onnx.py \
+            --model htdemucs_ft \
+            --sub-model-index ${{ matrix.index }} \
+            --output sub_${{ matrix.index }}.onnx
+
+      - name: Upload sub-model artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: sub-model-${{ matrix.index }}
+          path: sub_${{ matrix.index }}.onnx
+          retention-days: 7
+
+  # Single-model path for htdemucs: export + optimize + validate + release
+  # in one job (already fast, ~5min).
+  convert-single:
+    needs: detect-model
+    if: needs.detect-model.outputs.is_ensemble == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install CPU-only PyTorch
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Cache Demucs pretrained weights
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/torch/hub/checkpoints
+          key: demucs-weights-htdemucs-${{ hashFiles('requirements.txt') }}
+
       - name: Convert model to ONNX
-        run: python scripts/convert_htdemucs_to_onnx.py --model ${{ steps.model.outputs.model }}
+        id: convert
+        run: |
+          python scripts/convert_htdemucs_to_onnx.py --model ${{ needs.detect-model.outputs.model }}
+          SIZE_MB=$(stat -c%s models/${{ needs.detect-model.outputs.model }}.onnx | awk '{printf "%.1f", $1/1048576}')
+          echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
 
       - name: Validate ONNX model
-        run: python scripts/validate_onnx.py --model ${{ steps.model.outputs.model }}
+        id: validate
+        run: |
+          python scripts/validate_onnx.py --model ${{ needs.detect-model.outputs.model }} 2>&1 | tee validate.log
+          MSE=$(grep 'MSE:' validate.log | head -1 | awk '{print $2}')
+          echo "mse=$MSE" >> "$GITHUB_OUTPUT"
 
       - name: Runtime contract (protobuf + ORT CPU session)
-        run: python scripts/onnx_runtime_contract.py --model models/${{ steps.model.outputs.model }}.onnx --ort-session
+        run: python scripts/onnx_runtime_contract.py --model models/${{ needs.detect-model.outputs.model }}.onnx --ort-session
 
       - name: Generate checksum
         run: |
           cd models
-          sha256sum ${{ steps.model.outputs.model }}.onnx > ${{ steps.model.outputs.model }}.onnx.sha256
+          sha256sum ${{ needs.detect-model.outputs.model }}.onnx > ${{ needs.detect-model.outputs.model }}.onnx.sha256
           echo "Checksum:"
-          cat ${{ steps.model.outputs.model }}.onnx.sha256
+          cat ${{ needs.detect-model.outputs.model }}.onnx.sha256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ steps.model.outputs.model }}-onnx
+          name: ${{ needs.detect-model.outputs.model }}-onnx
           path: |
-            models/${{ steps.model.outputs.model }}.onnx
-            models/${{ steps.model.outputs.model }}.onnx.sha256
+            models/${{ needs.detect-model.outputs.model }}.onnx
+            models/${{ needs.detect-model.outputs.model }}.onnx.sha256
+          retention-days: 7
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: |
-            models/${{ steps.model.outputs.model }}.onnx
-            models/${{ steps.model.outputs.model }}.onnx.sha256
+            models/${{ needs.detect-model.outputs.model }}.onnx
+            models/${{ needs.detect-model.outputs.model }}.onnx.sha256
           body: |
-            ## ${{ steps.model.outputs.model }} ONNX Model
+            ## ${{ needs.detect-model.outputs.model }} ONNX Model
 
-            Converted from the pretrained [Demucs ${{ steps.model.outputs.model }}](https://github.com/adefossez/demucs) PyTorch model.
+            Converted from the pretrained [Demucs ${{ needs.detect-model.outputs.model }}](https://github.com/adefossez/demucs) PyTorch model.
 
             **Model spec:**
             - Input: `[1, 2, frame_count]` (stereo audio at 44.1 kHz)
             - Output: `[1, 4, 2, frame_count]` (drums, bass, other, vocals)
             - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
 
-            **Verification:** SHA-256 checksum included in `${{ steps.model.outputs.model }}.onnx.sha256`.
+            **Build metrics:**
+            - Model size: ${{ steps.convert.outputs.size_mb }} MB
+            - Validation MSE: ${{ steps.validate.outputs.mse }}
+
+            **Verification:** SHA-256 checksum included in `${{ needs.detect-model.outputs.model }}.onnx.sha256`.
+            Validated against PyTorch reference output (MSE < 1e-4) and checked for OpenKara runtime metadata.
+          generate_release_notes: true
+
+  # Ensemble merge + finalize path for htdemucs_ft: merges 4 sub-model
+  # artifacts, optimizes, validates, and releases.
+  finalize-ensemble:
+    needs: [detect-model, export-sub-models]
+    if: needs.detect-model.outputs.is_ensemble == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install CPU-only PyTorch
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Cache Demucs pretrained weights
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/torch/hub/checkpoints
+          key: demucs-weights-htdemucs_ft-${{ hashFiles('requirements.txt') }}
+
+      - name: Download all sub-model artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: sub-model-*
+          path: sub-models
+          merge-multiple: true
+
+      - name: Merge + optimize + annotate
+        id: convert
+        run: |
+          python scripts/convert_htdemucs_to_onnx.py \
+            --model htdemucs_ft \
+            --merge-from sub-models
+          SIZE_MB=$(stat -c%s models/htdemucs_ft.onnx | awk '{printf "%.1f", $1/1048576}')
+          echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
+
+      - name: Validate ONNX model
+        id: validate
+        run: |
+          python scripts/validate_onnx.py --model htdemucs_ft 2>&1 | tee validate.log
+          MSE=$(grep 'MSE:' validate.log | head -1 | awk '{print $2}')
+          echo "mse=$MSE" >> "$GITHUB_OUTPUT"
+
+      - name: Runtime contract (protobuf + ORT CPU session)
+        run: python scripts/onnx_runtime_contract.py --model models/htdemucs_ft.onnx --ort-session
+
+      - name: Generate checksum
+        run: |
+          cd models
+          sha256sum htdemucs_ft.onnx > htdemucs_ft.onnx.sha256
+          echo "Checksum:"
+          cat htdemucs_ft.onnx.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: htdemucs_ft-onnx
+          path: |
+            models/htdemucs_ft.onnx
+            models/htdemucs_ft.onnx.sha256
+          retention-days: 7
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          files: |
+            models/htdemucs_ft.onnx
+            models/htdemucs_ft.onnx.sha256
+          body: |
+            ## htdemucs_ft ONNX Model
+
+            Converted from the pretrained [Demucs htdemucs_ft](https://github.com/adefossez/demucs) PyTorch model (4-model ensemble, averaged into a single ONNX graph with deduplicated STFT/ISTFT filter banks).
+
+            **Model spec:**
+            - Input: `[1, 2, frame_count]` (stereo audio at 44.1 kHz)
+            - Output: `[1, 4, 2, frame_count]` (drums, bass, other, vocals)
+            - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
+
+            **Build metrics:**
+            - Model size: ${{ steps.convert.outputs.size_mb }} MB
+            - Validation MSE: ${{ steps.validate.outputs.mse }}
+
+            **Verification:** SHA-256 checksum included in `htdemucs_ft.onnx.sha256`.
             Validated against PyTorch reference output (MSE < 1e-4) and checked for OpenKara runtime metadata.
           generate_release_notes: true

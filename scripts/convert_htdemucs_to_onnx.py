@@ -212,14 +212,112 @@ def parse_args():
         default="htdemucs",
         help="Model to convert (default: htdemucs)",
     )
+    parser.add_argument(
+        "--sub-model-index",
+        type=int,
+        default=None,
+        help="Export only this sub-model from a htdemucs_ft ensemble. "
+        "Outputs a raw ONNX file (no ORT optimization). "
+        "Used by CI parallel ensemble export.",
+    )
+    parser.add_argument(
+        "--merge-from",
+        type=Path,
+        default=None,
+        help="Merge sub-model ONNX files from this directory, then run ORT "
+        "optimization and annotation. Expects sub_0.onnx, sub_1.onnx, ... "
+        "Used by CI parallel ensemble export.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output path. Defaults to models/<model>.onnx, or sub_<i>.onnx "
+        "when --sub-model-index is set.",
+    )
     return parser.parse_args()
+
+
+def export_single_sub_model(model_name, index, output_path):
+    """Export one sub-model to a raw ONNX file (for parallel CI)."""
+    sub_model, segment_frames, n_models = load_sub_model(model_name, index)
+    print(f"\nSub-model {index}/{n_models - 1}, segment_frames={segment_frames}")
+
+    dummy_input = torch.randn(1, 2, segment_frames)
+    with torch.no_grad():
+        out = sub_model(dummy_input)
+    print(f"  PyTorch output shape: {out.shape}")
+    del out
+
+    os.makedirs(output_path.parent, exist_ok=True)
+    export_model_with_real_stft(sub_model, dummy_input, output_path)
+    verify_onnx(output_path)
+    print(f"\nSub-model {index} export complete: {output_path}")
+
+
+def merge_and_finalize(model_name, sub_model_dir, output_path):
+    """Merge sub-model ONNX files from a directory, optimize, and annotate."""
+    import onnx
+
+    # Discover sub-model files.
+    sub_paths = sorted(
+        sub_model_dir.glob("sub_*.onnx"),
+        key=lambda p: int(p.stem.split("_")[1]),
+    )
+    if not sub_paths:
+        raise RuntimeError(f"No sub_*.onnx files found in {sub_model_dir}")
+
+    n_models = len(sub_paths)
+    print(f"Found {n_models} sub-model files in {sub_model_dir}")
+
+    sub_models = []
+    for p in sub_paths:
+        m = onnx.load(str(p))
+        onnx.checker.check_model(m)
+        sub_models.append(m)
+        print(f"  Loaded: {p}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        raw_output_path = Path(tmpdir) / f"{model_name}.raw.onnx"
+        merge_ensemble_onnx(sub_paths, raw_output_path, n_models)
+
+        print("\nVerifying raw merged ONNX...")
+        verify_onnx(raw_output_path)
+        optimize_onnx_with_ort(raw_output_path, output_path)
+        annotate_optimized_model(output_path)
+
+    verify_onnx(output_path)
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    print(f"Model size: {size_mb:.1f} MB")
+    compute_sha256(output_path)
+    print(f"\nMerge + finalize complete: {output_path}")
 
 
 def main():
     args = parse_args()
     model_name = args.model
-    output_path = ROOT_DIR / "models" / f"{model_name}.onnx"
 
+    # CI parallel mode: export a single sub-model.
+    if args.sub_model_index is not None:
+        if model_name != "htdemucs_ft":
+            print("--sub-model-index requires --model htdemucs_ft", file=sys.stderr)
+            sys.exit(1)
+        output = args.output or Path(f"sub_{args.sub_model_index}.onnx")
+        export_single_sub_model(model_name, args.sub_model_index, output)
+        return
+
+    # CI parallel mode: merge pre-exported sub-models.
+    if args.merge_from is not None:
+        if model_name != "htdemucs_ft":
+            print("--merge-from requires --model htdemucs_ft", file=sys.stderr)
+            sys.exit(1)
+        output = args.output or (ROOT_DIR / "models" / f"{model_name}.onnx")
+        os.makedirs(output.parent, exist_ok=True)
+        merge_and_finalize(model_name, args.merge_from, output)
+        return
+
+    # Normal mode: single-job export + optimize + annotate.
+    output_path = args.output or (ROOT_DIR / "models" / f"{model_name}.onnx")
     os.makedirs(output_path.parent, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmpdir:

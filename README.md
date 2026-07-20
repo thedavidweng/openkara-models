@@ -120,21 +120,36 @@ newer tag whose CI passed the [runtime contract](docs/runtime-contract.md) gates
 
 ONNX does not support complex-valued STFT/ISTFT operations used by Demucs. The conversion pipeline rewrites these as real-valued conv1d operations (DFT filter matrices), following the approach from [sevagh/demucs.onnx](https://github.com/sevagh/demucs.onnx) and the [Mixxx GSOC 2025 project](https://mixxx.org/news/2025-10-27-gsoc2025-demucs-to-onnx-dhunstack/).
 
+For `htdemucs_ft` (4-model ensemble), the pipeline exports each sub-model to a separate ONNX graph, then merges them into a single graph that averages all four outputs. The merge step also **deduplicates identical initializers** — the STFT/ISTFT filter banks are shared across all sub-models, so only one copy is kept, reducing model size and improving runtime cache locality. Averaging uses `Sum + Mul(1/N)` instead of materializing a stacked intermediate tensor.
+
 ## CI/CD
 
 - Pushing a tag matching `model-v*` triggers conversion and release of **htdemucs**.
 - Pushing a tag matching `model-ft-v*` triggers conversion and release of **htdemucs_ft**.
+
+**htdemucs** runs in a single job: export → optimize → validate → release (~5 min).
+
+**htdemucs_ft** runs in parallel: 4 sub-model export jobs (matrix) → 1 merge + finalize job (~6 min wall time instead of ~20 min serial).
 
 Each workflow:
 
 1. Exports the model to raw ONNX with the real-valued STFT/ISTFT rewrite
 2. Rewrites the final artifact through ONNX Runtime offline optimization (`ORT_ENABLE_EXTENDED`; see [runtime contract](docs/runtime-contract.md))
 3. Validates ONNX output against PyTorch (MSE < 1e-4), checks optimized-artifact metadata, and asserts the graph contains no `com.microsoft.nchwc` nodes
-4. Publishes the optimized ONNX file + SHA-256 checksum as a GitHub Release
+4. Publishes the optimized ONNX file + SHA-256 checksum as a GitHub Release (release body includes model size and validation MSE)
+
+CI optimizations: pip wheel cache, Demucs pretrained-weights cache, concurrency cancellation for duplicate runs, pinned action SHAs, 7-day artifact retention.
 
 Pull requests run a lightweight **runtime-contract** workflow (`scripts/onnx_runtime_contract.py --self-test`); full checks run on tagged release builds.
 
-A weekly check (every Monday) monitors PyPI for new Demucs versions and opens an issue labeled `upstream-update` when a new release is detected.
+A weekly check (every Monday) monitors both **PyPI** (for Demucs package updates) and **HuggingFace** (for model weight updates at `adefossez/HTDemucs` and `adefossez/HTDemucs-ft`) for upstream changes. When a change is detected, the workflow:
+
+1. Updates `.upstream-state.json` and commits it to the repo (persistent state across runs)
+2. Creates a tracking issue labeled `upstream-update` with a diff table
+3. **Automatically triggers a draft conversion** via `workflow_dispatch` for the affected model(s) — this produces artifacts for review but does **not** auto-release (releases only happen on tag push)
+4. A maintainer reviews the draft artifacts (MSE < 1e-4), updates `requirements.txt` if needed, and tags a release manually
+
+See `.github/workflows/check-upstream.yml` for the full implementation.
 
 ## License
 

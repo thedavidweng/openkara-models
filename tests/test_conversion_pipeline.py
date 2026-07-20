@@ -76,25 +76,76 @@ class BuildEnsembleGraphTests(unittest.TestCase):
         self.assertEqual(ensemble.graph.output[0].name, "stems")
 
         op_types = {n.op_type for n in ensemble.graph.node}
-        self.assertIn("Unsqueeze", op_types)
-        self.assertIn("Concat", op_types)
-        self.assertIn("ReduceMean", op_types)
+        self.assertIn("Sum", op_types)
+        self.assertIn("Mul", op_types)
+        # Old Unsqueeze/Concat/ReduceMean approach should be gone.
+        self.assertNotIn("ReduceMean", op_types)
+        self.assertNotIn("Concat", op_types)
 
     def test_ensemble_graph_namespaces_sub_model_nodes(self):
         from ensemble_merge import build_ensemble_graph
+        import numpy as np
+        from onnx import numpy_helper
 
-        sub_models = [self._make_tiny_model("a"), self._make_tiny_model("b")]
+        # Use different weight content so dedup keeps both initializers.
+        m0 = self._make_tiny_model("a")
+        m1 = self._make_tiny_model("b")
+        for init in m1.graph.initializer:
+            if init.name == "b_w":
+                init.CopyFrom(
+                    numpy_helper.from_array(
+                        np.full((4, 2, 1), 2.0, dtype=np.float32), name="b_w"
+                    )
+                )
+        sub_models = [m0, m1]
         ensemble = build_ensemble_graph(sub_models, 2)
 
         init_names = {i.name for i in ensemble.graph.initializer}
         self.assertIn("sub0_a_w", init_names)
         self.assertIn("sub1_b_w", init_names)
-        self.assertIn("unsqueeze_axes", init_names)
+        self.assertIn("ensemble_scale", init_names)
 
         sub0_inputs = {n for node in ensemble.graph.node for n in node.input}
         self.assertIn("sub0_a_w", sub0_inputs)
         self.assertIn("sub1_b_w", sub0_inputs)
         self.assertIn("audio", sub0_inputs)
+
+    def test_ensemble_graph_deduplicates_identical_initializers(self):
+        """Sub-models with identical weight content should share one initializer."""
+        from ensemble_merge import build_ensemble_graph
+
+        # Two sub-models with identical weights (same name "shared_w").
+        sub_models = [self._make_tiny_model("shared"), self._make_tiny_model("shared")]
+        ensemble = build_ensemble_graph(sub_models, 2)
+
+        init_names = [i.name for i in ensemble.graph.initializer]
+        # Both sub-models have identical weight content, so only one
+        # canonical copy should remain (plus ensemble_scale).
+        weight_inits = [n for n in init_names if "shared_w" in n]
+        self.assertEqual(
+            len(weight_inits), 1,
+            f"Expected 1 shared weight initializer, got {weight_inits}",
+        )
+
+    def test_ensemble_graph_preserves_distinct_initializers(self):
+        """Sub-models with different weights should keep both initializers."""
+        from ensemble_merge import build_ensemble_graph
+        import numpy as np
+        from onnx import numpy_helper
+
+        m0 = self._make_tiny_model("a")
+        m1 = self._make_tiny_model("b")
+        # Overwrite m1's weight with different content.
+        for init in m1.graph.initializer:
+            if init.name == "b_w":
+                arr = np.zeros((4, 2, 1), dtype=np.float32)
+                init.CopyFrom(numpy_helper.from_array(arr, name="b_w"))
+        sub_models = [m0, m1]
+        ensemble = build_ensemble_graph(sub_models, 2)
+
+        init_names = {i.name for i in ensemble.graph.initializer}
+        self.assertIn("sub0_a_w", init_names)
+        self.assertIn("sub1_b_w", init_names)
 
 
 @unittest.skipUnless(_HAS_TORCH, "torch not installed")
