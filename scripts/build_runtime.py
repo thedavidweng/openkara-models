@@ -129,9 +129,17 @@ def _get_submodule_state(source_dir: Path) -> dict[str, str]:
 
 
 def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
-                  build_dir: Path) -> dict[str, Any]:
+                  build_dir: Path, *, reduced: bool = False) -> dict[str, Any]:
     target_config = lock["targets"][target]
-    cmake_args = target_config["cmake_args"]
+    cmake_args = list(target_config["cmake_args"])
+    reduced_cfg = None
+    if reduced:
+        reduced_cfg = lock.get("reduced_build")
+        if not reduced_cfg:
+            raise RuntimeError(
+                "source lock has no reduced_build section; cannot build reduced runtime"
+            )
+        cmake_args.extend(reduced_cfg.get("extra_cmake_args", []))
 
     # Set SOURCE_DATE_EPOCH for reproducible builds. This environment
     # variable is respected by many build tools (cmake, gcc, clang, etc.)
@@ -145,6 +153,27 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
                      *cmake_args]
     _run(configure_cmd, env=env)
 
+    # Reduced-operator build: run ORT's reduce_op_kernels.py after configure
+    # to prune unused operator kernels from the generated source. This keeps
+    # ONNX-format model support, runtime optimization, and EP partitioning;
+    # it only removes kernels for operators not in the required-operators config.
+    if reduced:
+        config_path = ROOT / reduced_cfg["config_path"]
+        if not config_path.is_file():
+            raise FileNotFoundError(
+                f"required-operators config not found: {config_path}. "
+                "Run scripts/generate_required_operators.py first."
+            )
+        script = source_dir / reduced_cfg["reduce_op_kernels_script"]
+        if not script.is_file():
+            raise FileNotFoundError(
+                f"reduce_op_kernels.py not found at {script}; "
+                "source checkout may be incomplete"
+            )
+        _run([sys.executable, str(script),
+              "--cmake_build_dir", str(build_dir),
+              "--config", str(config_path)], env=env)
+
     # Build.
     nproc = os.cpu_count() or 4
     build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release",
@@ -156,7 +185,7 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
     # reproducibility. The OS and arch are kept because they are determined
     # by the target triple and runner, not the specific machine.
     submodules = _get_submodule_state(source_dir)
-    return {
+    meta: dict[str, Any] = {
         "target": target,
         "commit_sha": lock["upstream"]["commit_sha"],
         "tag": lock["upstream"]["tag"],
@@ -165,6 +194,10 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
         "build_os": f"{platform.system()} {platform.release()}",
         "build_arch": platform.machine(),
     }
+    if reduced:
+        meta["reduced_build"] = True
+        meta["ops_config_sha256"] = _sha256_file(ROOT / reduced_cfg["config_path"])[1]
+    return meta
 
 
 def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
@@ -237,6 +270,8 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
     version = lock["upstream"]["tag"].lstrip("v")
     archive_base = f"onnxruntime-{version}-openkara-{target}"
+    if build_meta.get("reduced_build"):
+        archive_base += "-reduced"
     fixed_timestamp = _ort_commit_timestamp(lock)
 
     if archive_format == "tar.gz":
@@ -339,11 +374,20 @@ def main() -> int:
                              "submodules exactly match the source lock before "
                              "building. Required by the verification commands "
                              "(verify_runtime_package.py, CI).")
+    parser.add_argument("--reduced", action="store_true",
+                        help="Build a reduced-operator runtime. Requires "
+                             "ort/required-operators.config (generate with "
+                             "scripts/generate_required_operators.py). Prunes "
+                             "unused operator kernels via reduce_op_kernels.py "
+                             "while retaining ONNX-format, runtime optimization, "
+                             "and EP partitioning support.")
     args = parser.parse_args()
 
     lock = _load_lock()
     source_dir = args.source_dir
     build_dir = args.build_dir or (BUILD_DIR / args.target)
+    if args.reduced:
+        build_dir = build_dir.parent / f"{args.target}-reduced" if build_dir.name == args.target else build_dir
 
     if not args.skip_clone:
         print(f"Cloning ORT {lock['upstream']['tag']} ({lock['upstream']['commit_sha'][:12]})...")
@@ -362,8 +406,8 @@ def main() -> int:
         _verify_submodules(lock, source_dir)
         print("  source lock verified.")
 
-    print(f"Building for {args.target}...")
-    build_meta = _build_target(lock, args.target, source_dir, build_dir)
+    print(f"Building for {args.target}{' (reduced)' if args.reduced else ''}...")
+    build_meta = _build_target(lock, args.target, source_dir, build_dir, reduced=args.reduced)
 
     print(f"Packaging {args.target}...")
     archive_path = _package_target(lock, args.target, source_dir, build_dir, build_meta)

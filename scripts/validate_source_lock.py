@@ -124,6 +124,15 @@ def validate_lock(lock: dict[str, Any]) -> list[str]:
         if "url" not in info:
             errors.append(f"deps.entries.{name}: url missing")
 
+    # Check reduced_build section (optional but if present must be well-formed).
+    reduced = lock.get("reduced_build")
+    if reduced is not None:
+        for field in ("config_path", "config_sidecar_path", "reduce_op_kernels_script"):
+            if field not in reduced:
+                errors.append(f"reduced_build.{field} missing")
+        if "extra_cmake_args" in reduced and not isinstance(reduced["extra_cmake_args"], list):
+            errors.append("reduced_build.extra_cmake_args must be a list")
+
     return errors
 
 

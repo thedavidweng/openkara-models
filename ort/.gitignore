@@ -2,3 +2,8 @@
 ort/source/
 ort/build/
 ort/packages/
+# Generated required-operator config (issue #19 PR 2). Regenerated from the
+# stable catalog models by scripts/generate_required_operators.py; not a pin.
+ort/required-operators.config
+ort/required-operators.json
+ort/model-cache/
