@@ -48,7 +48,11 @@ def _extract_archive(archive: Path) -> dict[str, bytes]:
                 if member.isfile():
                     f = tar.extractfile(member)
                     if f:
-                        files[member.name] = f.read()
+                        # Strip leading ./ from tar member names
+                        name = member.name
+                        if name.startswith("./"):
+                            name = name[2:]
+                        files[name] = f.read()
     elif archive.suffix == ".zip":
         with zipfile.ZipFile(archive, "r") as zf:
             for info in zf.infolist():
