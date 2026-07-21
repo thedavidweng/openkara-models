@@ -126,8 +126,12 @@ schema. It must not grow new fields or become a second contract.
    `scripts/generate_catalog_release.py`.
 4. Remove the `latest.json` freshness guard from
    `.github/workflows/catalog-validate.yml`.
-5. Remove the stale README pin table and Rust constant block (already
-   deprecated in PR 2's README note).
+
+Step 5 of the original procedure (remove the stale README pin table and Rust
+`ModelDescriptor` constant block) is **already complete** — it was done in
+PR 4 commit `42fe5a3` ahead of the OpenKara #167 switch, since the catalog is
+the single authority and the duplicated constants were incorrect (the HTDEMUCS
+pin carried the v2.0.1 digest while claiming v2.1.0).
 
 Until OpenKara #167 merges, `latest.json` remains generated from the stable
 pointer and verified by CI on every PR.
