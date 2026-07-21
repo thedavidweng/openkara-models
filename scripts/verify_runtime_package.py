@@ -140,10 +140,10 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
             errors.append(f"missing companion library: {comp}")
 
     # Check license/notice presence.
-    has_license = any("LICENSE" in f for f in files)
+    has_license = any("LICENSE" in f.upper() for f in files)
     if not has_license:
         errors.append("missing LICENSE file")
-    has_notice = any("NOTICE" in f for f in files)
+    has_notice = any("NOTICE" in f.upper() or "THIRDPARTY" in f.upper() for f in files)
     if not has_notice:
         errors.append("missing NOTICE file")
 

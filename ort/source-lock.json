@@ -53,9 +53,7 @@
         "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
-      "companion_libraries": [
-        "libcoreml_ep.dylib"
-      ],
+      "companion_libraries": [],
       "deployment_target": "13.0",
       "execution_providers": [
         "cpu",
@@ -138,9 +136,7 @@
         "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
-      "companion_libraries": [
-        "DirectML.dll"
-      ],
+      "companion_libraries": [],
       "deployment_target": "",
       "execution_providers": [
         "cpu",

@@ -159,10 +159,13 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
             shutil.copy2(comp_path, staging / comp_path.name)
 
     # Copy licenses and notices from source.
-    license_dir = source_dir / "LICENSE"
-    if license_dir.is_file():
-        shutil.copy2(license_dir, staging / "LICENSE.onnxruntime")
+    license_file = source_dir / "LICENSE"
+    if license_file.is_file():
+        shutil.copy2(license_file, staging / "LICENSE.onnxruntime")
+    # ORT uses ThirdPartyNotices.txt, not NOTICE
     notice_file = source_dir / "NOTICE"
+    if not notice_file.is_file():
+        notice_file = source_dir / "ThirdPartyNotices.txt"
     if notice_file.is_file():
         shutil.copy2(notice_file, staging / "NOTICE.onnxruntime")
     # Third-party licenses
