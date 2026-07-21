@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/ort/schema-benchmark-report-v1.json",
+  "title": "OpenKara ORT runtime benchmark report (v1)",
+  "description": "Schema for the native runtime compatibility + performance benchmark report produced by scripts/run_runtime_benchmarks.py. One report per target per runtime archive.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "runtime_archive", "target", "frames", "results"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "openkara.runtime-benchmark/v1"
+    },
+    "runtime_archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size"],
+      "properties": {
+        "name": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "target": {"type": "string"},
+    "frames": {"type": "integer", "minimum": 1},
+    "warmup": {"type": "integer", "minimum": 0},
+    "iters": {"type": "integer", "minimum": 1},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "cold_load_s", "first_window_s", "warm_median_s", "warm_p95_s", "peak_rss_kb", "providers", "output_shape", "shape_errors", "frames"],
+        "properties": {
+          "model": {"type": "string"},
+          "model_artifact_id": {"type": ["string", "null"]},
+          "cold_load_s": {"type": "number", "minimum": 0},
+          "first_window_s": {"type": "number", "minimum": 0},
+          "warm_median_s": {"type": "number", "minimum": 0},
+          "warm_p95_s": {"type": "number", "minimum": 0},
+          "warm_iters": {"type": "integer", "minimum": 0},
+          "peak_rss_kb": {"type": "integer", "minimum": 0},
+          "rss_delta_kb": {"type": "integer"},
+          "providers": {"type": "array", "items": {"type": "string"}},
+          "fallback_node_count": {"type": ["integer", "null"], "minimum": 0},
+          "fallback_node_count_mismatch": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["baseline", "actual"],
+            "properties": {
+              "baseline": {"type": "integer", "minimum": 0},
+              "actual": {"type": "integer", "minimum": 0}
+            }
+          },
+          "output_shape": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+          "shape_errors": {"type": "array", "items": {"type": "string"}},
+          "frames": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "archive": {"type": "string"}
+      }
+    }
+  }
+}
