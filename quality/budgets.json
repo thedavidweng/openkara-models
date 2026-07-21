@@ -1,0 +1,96 @@
+{
+  "schema_version": "openkara.quality-budgets/v1",
+  "note": "Non-regression budgets for stable catalog artifacts. A candidate artifact must not regress any metric beyond its budget relative to the baseline. Budgets are relative (factor or absolute delta). PR 4 of #21 defines initial budgets; they may be tightened but not loosened without an issue.",
+  "budgets": [
+    {
+      "metric": "mse",
+      "category": "correctness",
+      "direction": "lower-is-better",
+      "pr_max_absolute": 1e-4,
+      "release_max_absolute": 1e-5,
+      "note": "ONNX vs PyTorch reference. Must not exceed threshold."
+    },
+    {
+      "metric": "mae",
+      "category": "correctness",
+      "direction": "lower-is-better",
+      "pr_max_absolute": 1e-3,
+      "release_max_absolute": 1e-4
+    },
+    {
+      "metric": "max_abs_error",
+      "category": "correctness",
+      "direction": "lower-is-better",
+      "pr_max_absolute": 1e-2,
+      "release_max_absolute": 1e-3
+    },
+    {
+      "metric": "rtf_warm",
+      "category": "runtime",
+      "direction": "lower-is-better",
+      "pr_max_factor": 10.0,
+      "release_max_factor": 5.0,
+      "note": "Real-time factor. Must not exceed baseline * factor."
+    },
+    {
+      "metric": "cold_load_s",
+      "category": "runtime",
+      "direction": "lower-is-better",
+      "pr_max_factor": 3.0,
+      "release_max_factor": 1.5
+    },
+    {
+      "metric": "warm_median_s",
+      "category": "runtime",
+      "direction": "lower-is-better",
+      "pr_max_factor": 3.0,
+      "release_max_factor": 1.5
+    },
+    {
+      "metric": "peak_rss_kb",
+      "category": "runtime",
+      "direction": "lower-is-better",
+      "pr_max_factor": 2.0,
+      "release_max_factor": 1.3
+    },
+    {
+      "metric": "installed_size",
+      "category": "size",
+      "direction": "lower-is-better",
+      "pr_max_factor": 2.0,
+      "release_max_factor": 1.2
+    },
+    {
+      "metric": "shape_match",
+      "category": "correctness",
+      "direction": "equality",
+      "required_value": true,
+      "note": "Output shape must match expected. No budget — must always be true."
+    },
+    {
+      "metric": "onnx_has_nan",
+      "category": "correctness",
+      "direction": "equality",
+      "required_value": false,
+      "note": "No NaN allowed. No budget — must always be false."
+    },
+    {
+      "metric": "onnx_has_inf",
+      "category": "correctness",
+      "direction": "equality",
+      "required_value": false,
+      "note": "No Inf allowed. No budget — must always be false."
+    }
+  ],
+  "promotion_policy": {
+    "note": "From issue #21: until empirical baselines are frozen, the initial promotion policy applies. After freezing, a candidate must not regress any metric beyond its budget.",
+    "initial_policy": [
+      "Structural graph rewrites must remain within the existing numerical tolerance and show no quality regression.",
+      "A new default model must be non-inferior to the current default on leakage and aggregate SI-SDR.",
+      "A target-specific artifact must improve at least one of installed size, cold load, warm latency, peak memory, or quality without regressing another metric outside its budget.",
+      "A precision/quantization variant that is slower or fails quality limits is not published, and its shipping code is deleted."
+    ],
+    "pareto_requirement": "Every new format, precision, provider, or student model must include a Pareto comparison against the current default. A candidate that is dominated by the default on all measured metrics is not published.",
+    "no_bypass": "Maintainers cannot bypass a failed gate by editing release notes. The gate is enforced by the catalog publish workflow."
+  }
+}

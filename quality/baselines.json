@@ -1,0 +1,40 @@
+{
+  "schema_version": "openkara.quality-baselines/v1",
+  "note": "Baseline report IDs and metric values for current stable artifacts. These are the reference points for non-regression budgets. PR 4 of #21 freezes these; subsequent PRs must not regress beyond the budgets defined in budgets.json. When a new stable artifact is promoted, its baseline report ID is added here.",
+  "stable_baselines": [
+    {
+      "artifact_id": "htdemucs.balanced.fp32.onnx",
+      "model": "htdemucs",
+      "baseline_quality_report_id": "pending-pr4-freeze",
+      "baseline_runtime_report_id": "pending-pr4-freeze",
+      "baseline_metrics": {
+        "mse": 0.0,
+        "mae": 0.0,
+        "max_abs_error": 0.0,
+        "rtf_warm": 0.14,
+        "cold_load_s": 1.5,
+        "warm_median_s": 1.1,
+        "peak_rss_kb": 500000
+      },
+      "frozen_at": "pending",
+      "note": "Initial placeholder. The actual baseline is frozen when the first complete quality + runtime report is produced on the stable artifact. Until then, the initial promotion policy from issue #21 applies."
+    },
+    {
+      "artifact_id": "htdemucs_ft.balanced.fp32.onnx",
+      "model": "htdemucs_ft",
+      "baseline_quality_report_id": "pending-pr4-freeze",
+      "baseline_runtime_report_id": "pending-pr4-freeze",
+      "baseline_metrics": {
+        "mse": 0.0,
+        "mae": 0.0,
+        "max_abs_error": 0.0,
+        "rtf_warm": 0.14,
+        "cold_load_s": 1.5,
+        "warm_median_s": 1.1,
+        "peak_rss_kb": 500000
+      },
+      "frozen_at": "pending",
+      "note": "Initial placeholder. The actual baseline is frozen when the first complete quality + runtime report is produced on the stable artifact."
+    }
+  ]
+}
