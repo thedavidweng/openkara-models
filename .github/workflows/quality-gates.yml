@@ -1,0 +1,34 @@
+name: Quality gates (corpus + metrics)
+
+on:
+  pull_request:
+    paths:
+      - "quality/**"
+      - "scripts/synthetic_fixtures.py"
+      - "scripts/validate_corpus_manifest.py"
+      - "tests/test_corpus_manifest.py"
+      - ".github/workflows/quality-gates.yml"
+  push:
+    branches: [main]
+    paths:
+      - "quality/**"
+      - "scripts/synthetic_fixtures.py"
+      - "scripts/validate_corpus_manifest.py"
+
+jobs:
+  validate-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
+      - name: Validate corpus manifest
+        run: python scripts/validate_corpus_manifest.py
+      - name: Corpus + fixture tests
+        run: python -m pytest tests/test_corpus_manifest.py -q
+      - name: Syntax check
+        run: python -m compileall -q scripts/synthetic_fixtures.py scripts/validate_corpus_manifest.py

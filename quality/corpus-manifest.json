@@ -1,0 +1,185 @@
+{
+  "schema_version": "openkara.corpus-manifest/v1",
+  "fixtures": [
+    {
+      "fixture_id": "synth-silence-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "silence",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "silence",
+        "params": {}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Zero-input baseline. Verifies load, shape, finiteness, and latency."
+    },
+    {
+      "fixture_id": "synth-noise-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "noise",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "white_noise",
+        "params": {"seed": 42}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Deterministic white noise. Exercises all frequency bands."
+    },
+    {
+      "fixture_id": "synth-sine-sweep-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "sine-sweep",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "sine_sweep",
+        "params": {"f0": 20, "f1": 20000, "seed": 42}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Logarithmic sine sweep 20Hz-20kHz. Exercises frequency response."
+    },
+    {
+      "fixture_id": "synth-multitone-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "multitone",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "multitone",
+        "params": {"freqs": [100, 440, 1000, 4000, 12000], "seed": 42}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Five-tone mixture. Exercises harmonic separation."
+    },
+    {
+      "fixture_id": "synth-impulse-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "impulse",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "impulse",
+        "params": {"position": 44100}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Single impulse at 1s. Exercises transient response."
+    },
+    {
+      "fixture_id": "synth-chunk-boundary-687960",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "chunk-boundary",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 687960,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "chunk_boundary",
+        "params": {"chunk_frames": 343980, "seed": 42}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 687960],
+      "notes": "Two consecutive chunks with a discontinuity at the boundary. Tests overlap-add reconstruction."
+    },
+    {
+      "fixture_id": "synth-clipping-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "clipping",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "clipped",
+        "params": {"seed": 42, "clip_threshold": 0.8}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Clipped signal. Tests robustness to non-linear input."
+    },
+    {
+      "fixture_id": "synth-low-level-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "low-level",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "low_level",
+        "params": {"seed": 42, "amplitude": 0.01}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Low-amplitude signal (-40dB). Tests noise floor behavior."
+    },
+    {
+      "fixture_id": "synth-channel-imbalance-343980",
+      "kind": "synthetic",
+      "tier": "pr",
+      "category": "channel-imbalance",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 343980,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "channel_imbalance",
+        "params": {"seed": 42, "left_gain": 1.0, "right_gain": 0.3}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 343980],
+      "notes": "Left channel 10dB louder than right. Tests stereo separation."
+    },
+    {
+      "fixture_id": "synth-full-song-3439800",
+      "kind": "synthetic",
+      "tier": "release",
+      "category": "full-song",
+      "channels": 2,
+      "sample_rate": 44100,
+      "frames": 3439800,
+      "generator": {
+        "type": "deterministic",
+        "module": "synthetic_fixtures",
+        "function": "full_song",
+        "params": {"seed": 42}
+      },
+      "license": "generated",
+      "expected_output_shape": [1, 4, 2, 3439800],
+      "notes": "10-chunk synthetic full song. Release tier only — tests end-to-end real-time factor."
+    }
+  ]
+}
