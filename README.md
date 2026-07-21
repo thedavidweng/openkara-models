@@ -25,13 +25,11 @@ See **[docs/catalog-contract.md](docs/catalog-contract.md)** for the contract
 and `scripts/validate_catalog.py` / `scripts/generate_catalog_release.py` for
 validation and generation.
 
-> **Stale-pin notice (to be reconciled by OpenKara #167):** the hardcoded
-> `HTDEMUCS` SHA-256 pin documented below (`8fa3dab6…`) is the digest of
-> `model-v2.0.1`, not `model-v2.1.0` as the pin table claims. The catalog and
-> `latest.json` carry the correct `model-v2.1.0` digest (`3d85dad9…`, from the
-> release sha256 sidecar). The OpenKara-side `ModelDescriptor` constants must be
-> updated to consume the catalog in OpenKara #167. The README pin table and
-> Rust constant block below are deprecated and will be removed in issue #18 PR 4.
+OpenKara must resolve model and runtime artifacts from the catalog, not from
+hardcoded constants. The old README pin table and Rust `ModelDescriptor`
+constant block have been removed to avoid duplicate release metadata. OpenKara
+issue #167 switches the app to consuming `catalog/channels/stable.json` and
+`catalog/releases/<release-id>.json`.
 
 ## Models
 
@@ -92,52 +90,11 @@ The first shipping optimization pass is intentionally structural and determinist
 
 ## Integrate with OpenKara
 
-After a release is published, update the pinned **download URL**, **SHA-256**, and (when needed)
-**GitHub release tag** in [OpenKara](https://github.com/thedavidweng/OpenKara). Copy exact values
-from the release assets (`htdemucs.onnx.sha256`, `htdemucs_ft.onnx.sha256`).
-
-**Current default standard pin (contract-compliant, Apple Silicon–safe):**
-
-| Variant      | Release tag        | Asset file        |
-| ------------ | ------------------ | ----------------- |
-| `htdemucs`   | `model-v2.1.0`     | `htdemucs.onnx`   |
-| `htdemucs_ft`| `model-ft-v2.1.0`  | `htdemucs_ft.onnx`|
-
-**`src-tauri/src/separator/model.rs`** — embedded filename (unchanged unless you rename assets):
-
-```rust
-pub const EMBEDDED_MODEL_FILENAME: &str = "htdemucs.onnx";
-```
-
-**`src-tauri/src/separator/bootstrap.rs`** — `ModelDescriptor` entries (URL + SHA must match the
-release you ship; `MODEL_DOWNLOAD_URL` / `MODEL_SHA256` are aliases of `HTDEMUCS`):
-
-```rust
-pub const HTDEMUCS: ModelDescriptor = ModelDescriptor {
-    filename: "htdemucs.onnx",
-    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx",
-    sha256: "8fa3dab679c59aeb049dd229f57a212c9339b3fc17ebf50541daad9e799364a1",
-};
-
-pub const HTDEMUCS_FT: ModelDescriptor = ModelDescriptor {
-    filename: "htdemucs_ft.onnx",
-    download_url: "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx",
-    sha256: "0f2efbd7044182c10a6e8169b670392a3a91f904635e29329d6a3667375f5c94",
-};
-```
-
-**`scripts/setup.sh`** — `MODEL_URL` / `MODEL_SHA256` for the standard `htdemucs.onnx` dev cache
-(same URL and SHA as `HTDEMUCS` above).
-
-**`.github/workflows/ci.yml`** — `MODEL_URL` / `MODEL_SHA256` env vars for the Verify job model
-cache (same as `HTDEMUCS`).
-
-**`docs/references/contracts/phase-6-model-bootstrap-contract.md`** — pinned release paths in the
-bootstrap contract section.
-
-Do **not** point default onboarding at **`model-v2.0.0`**: those artifacts could embed
-`com.microsoft.nchwc` and fail on official macOS arm64 ONNX Runtime. Prefer **`v2.0.1`** or any
-newer tag whose CI passed the [runtime contract](docs/runtime-contract.md) gates.
+OpenKara resolves model and runtime artifacts from the [artifact catalog](#artifact-catalog-authoritative).
+The catalog is the single source of truth for download URLs, SHA-256 digests,
+sizes, and compatibility edges. Do not duplicate release metadata in OpenKara
+constants — consume `catalog/channels/stable.json` and
+`catalog/releases/<release-id>.json` directly (OpenKara issue #167).
 
 ## How it works
 
