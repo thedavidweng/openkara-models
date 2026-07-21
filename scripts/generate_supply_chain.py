@@ -239,7 +239,7 @@ def main() -> int:
             f"{base}/NOTICE", len(notice_bytes), _sha256_bytes(notice_bytes), "notice-file"
         ),
         "provenance": _ref(
-            f"{base}/provenance.json", len(prov_bytes), _sha256_bytes(prov_bytes), "github-attestation"
+            f"{base}/provenance.json", len(prov_bytes), _sha256_bytes(prov_bytes), "commit-provenance"
         ),
     }
 

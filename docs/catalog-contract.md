@@ -135,20 +135,30 @@ pointer and verified by CI on every PR.
 ## Atomic publication
 
 `scripts/publish_catalog_release.py --release <release-id> [--execute]`
-publishes a catalog release as an immutable GitHub release:
+publishes a catalog release as an immutable GitHub release and advances the
+stable pointer atomically:
 
 1. **Dry-run (default):** verifies the manifest validates, supply-chain records
-   match local files, model asset URLs resolve to existing GitHub releases, and
-   generation is monotonic. Exits 0 if ready to publish.
-2. **Execute (`--execute`):** creates a draft GitHub release tagged
-   `infra-<release-id>`, uploads the manifest + supply-chain files, verifies
-   every asset, publishes (undrafts) the release. On any failure, deletes the
-   release and does not move the stable pointer.
+   match local files, every referenced artifact asset URL resolves to an
+   existing GitHub release asset whose SHA-256 matches the manifest, and
+   generation is monotonic. Exits 0 if ready to publish. No `--skip-asset-check`
+   escape hatch exists — every asset must be reachable and verifiable.
+2. **Execute (`--execute`):**
+   1. Creates a draft GitHub release tagged `infra-<release-id>`.
+   2. Uploads the manifest + supply-chain files as release assets.
+   3. Downloads every uploaded asset and verifies its SHA-256 and size match
+      the manifest.
+   4. Advances `catalog/channels/stable.json` to point at the new release
+      (only after every asset is verified).
+   5. Publishes (undrafts) the release.
+   On any failure before step 4, the release is deleted and the stable pointer
+   is not moved.
 
-The stable pointer (`catalog/channels/stable.json`) is committed to the repo
-by `generate_catalog_release.py` and points at the intended immutable manifest
-URL. The publication script makes that URL resolve by creating the release
-with the manifest as an asset.
+`generate_catalog_release.py` writes the immutable manifest and `latest.json`
+adapter only. It does **not** advance the stable pointer — that is the sole
+responsibility of `publish_catalog_release.py` after asset verification. This
+enforces the issue #18 PR 4 atomicity contract: the stable pointer never
+references a release whose assets have not been uploaded and verified.
 
 ## Cross-repository pairing
 

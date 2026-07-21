@@ -167,7 +167,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["spdx-json", "spdx-tag", "cyclonedx-json", "license-file", "notice-file", "sigstore-attestation", "github-attestation"]
+          "enum": ["spdx-json", "spdx-tag", "cyclonedx-json", "license-file", "notice-file", "sigstore-attestation", "github-attestation", "commit-provenance"]
         },
         "url": {"$ref": "#/$defs/url"},
         "size": {"type": "integer", "minimum": 0},

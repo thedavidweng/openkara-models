@@ -57,7 +57,7 @@
           },
           "provenance": {
             "digest_algorithm": "sha256",
-            "kind": "github-attestation",
+            "kind": "commit-provenance",
             "sha256": "f23c656c8d9025543ff44b401540c89b56dd6cdcac1f7269b8c8caa7fe6ae615",
             "size": 1176,
             "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-07-20-001/provenance.json"
@@ -132,7 +132,7 @@
           },
           "provenance": {
             "digest_algorithm": "sha256",
-            "kind": "github-attestation",
+            "kind": "commit-provenance",
             "sha256": "f23c656c8d9025543ff44b401540c89b56dd6cdcac1f7269b8c8caa7fe6ae615",
             "size": 1176,
             "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-07-20-001/provenance.json"
@@ -185,7 +185,7 @@
     },
     "provenance": {
       "digest_algorithm": "sha256",
-      "kind": "github-attestation",
+      "kind": "commit-provenance",
       "sha256": "f23c656c8d9025543ff44b401540c89b56dd6cdcac1f7269b8c8caa7fe6ae615",
       "size": 1176,
       "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-07-20-001/provenance.json"

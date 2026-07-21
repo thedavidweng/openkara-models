@@ -3,8 +3,8 @@
   "generation": 1,
   "previous_release_id": null,
   "release_id": "2026-07-20-001",
-  "release_manifest_sha256": "bf9cf9533dd08282a7aed512d661d2717927a5375bab8389cadb7a09b33ce9a0",
-  "release_manifest_size": 7961,
+  "release_manifest_sha256": "b738dd8bdc826a2c2d16d30199584fbc7241bc92a4d9deec7a3b5712ae83bc85",
+  "release_manifest_size": 7958,
   "release_manifest_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-07-20-001/release-manifest.json",
   "schema_version": "openkara.catalog/channel-v1",
   "updated_at": "2026-07-20T00:00:00Z"
