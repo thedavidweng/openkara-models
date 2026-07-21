@@ -205,11 +205,20 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
         _run(["tar", "czf", str(archive_path), "-C", str(staging), "."])
     elif archive_format == "zip":
         archive_path = PACKAGES_DIR / f"{archive_base}.zip"
-        _run(["zip", "-r", str(archive_path), "."], cwd=staging)
+        _make_zip(archive_path, staging)
     else:
         raise ValueError(f"unknown archive format: {archive_format}")
 
     return archive_path
+
+
+def _make_zip(archive_path: Path, staging: Path) -> None:
+    """Create a zip archive using Python's zipfile (no external zip binary)."""
+    import zipfile
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(staging.rglob("*")):
+            if f.is_file():
+                zf.write(f, f.relative_to(staging).as_posix())
 
 
 def _find_library(build_dir: Path, name: str) -> Path | None:
