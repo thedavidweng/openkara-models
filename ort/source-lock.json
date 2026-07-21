@@ -133,7 +133,10 @@
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON",
-        "-Donnxruntime_USE_DML=OFF"
+        "-Donnxruntime_USE_DML=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+        "-Dprotobuf_MSVC_STATIC_RUNTIME=ON",
+        "-Dabsl_MSVC_STATIC_RUNTIME=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
