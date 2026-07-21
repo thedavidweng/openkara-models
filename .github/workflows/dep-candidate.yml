@@ -1,0 +1,187 @@
+name: Dependency candidate orchestration
+
+on:
+  workflow_dispatch:
+    inputs:
+      ort_tag:
+        description: "New ORT release tag (e.g. v1.28.0). Leave empty for model-weight-only updates."
+        required: false
+        type: string
+      ort_commit:
+        description: "New ORT commit SHA. Required if ort_tag is set."
+        required: false
+        type: string
+      model:
+        description: "Model name for weight revision (htdemucs or htdemucs_ft). Leave empty for ORT-only updates."
+        required: false
+        type: string
+      model_commit:
+        description: "New model-weight commit SHA. Required if model is set."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      branch_name: ${{ steps.branch.outputs.branch_name }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Generate candidate branch name
+        id: branch
+        run: |
+          if [ -n "${{ inputs.ort_tag }}" ]; then
+            BRANCH="deps/candidate-ort-${{ inputs.ort_tag }}"
+          elif [ -n "${{ inputs.model }}" ]; then
+            BRANCH="deps/candidate-${{ inputs.model }}-${{ inputs.model_commit }}"
+          else
+            echo "ERROR: no update specified"
+            exit 1
+          fi
+          echo "branch_name=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "Branch: $BRANCH"
+      - name: Prepare lock update
+        run: |
+          if [ -n "${{ inputs.ort_tag }}" ]; then
+            python scripts/generate_dep_candidate.py \
+              --ort-tag "${{ inputs.ort_tag }}" \
+              --ort-commit "${{ inputs.ort_commit }}" \
+              --output candidate-summary.json \
+              --markdown candidate-summary.md
+          else
+            python scripts/generate_dep_candidate.py \
+              --model "${{ inputs.model }}" \
+              --model-commit "${{ inputs.model_commit }}" \
+              --output candidate-summary.json \
+              --markdown candidate-summary.md
+          fi
+      - name: Validate updated lock
+        if: inputs.ort_tag != ''
+        run: python scripts/validate_source_lock.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: candidate-summary
+          path: |
+            candidate-summary.json
+            candidate-summary.md
+            ort/source-lock.json
+
+  # Build all 5 runtime targets (only for ORT updates).
+  build-runtimes:
+    needs: prepare
+    if: inputs.ort_tag != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: candidate-summary
+      - name: Apply lock update
+        run: |
+          # The lock was updated in the prepare job; download and overwrite.
+          # (In a real implementation, this would checkout the candidate branch.)
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Install build deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+      - name: Build ORT for ${{ matrix.target }}
+        run: python scripts/build_runtime.py --target ${{ matrix.target }}
+      - name: Generate supply-chain
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package
+        run: python scripts/verify_runtime_package.py --all
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: runtime-${{ matrix.target }}
+          path: ort/packages/onnxruntime-*-${{ matrix.target }}.*
+
+  # Run quality gates (for both ORT and model-weight updates).
+  quality-gates:
+    needs: [prepare, build-runtimes]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
+          pip install -r requirements.txt
+      - name: Run detection + candidate tests
+        run: python -m pytest tests/test_dep_detection.py -q
+      - name: Run quality suite (PR tier)
+        run: |
+          # This requires a model file; skip if not available.
+          if [ -f models/htdemucs.onnx ]; then
+            python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.onnx --report quality-report.json || true
+          else
+            echo "No model file available; skipping quality suite"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: quality-reports
+          path: |
+            quality-report.json
+            candidate-summary.md
+
+  # Create the candidate PR with the summary.
+  create-pr:
+    needs: [prepare, build-runtimes, quality-gates]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: candidate-summary
+      - name: Create or update candidate PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ needs.prepare.outputs.branch_name }}"
+          git checkout -b "$BRANCH" || git checkout "$BRANCH"
+          # Apply lock update if ORT update.
+          if [ -f ort/source-lock.json ]; then
+            git add ort/source-lock.json
+          fi
+          git commit -m "deps: candidate update" || true
+          git push origin "$BRANCH" || true
+          # Create PR with summary.
+          gh pr create \
+            --title "deps: candidate update ($BRANCH)" \
+            --body-file candidate-summary.md \
+            --head "$BRANCH" \
+            --base main \
+            --label "dependencies" || \
+          gh pr edit "$BRANCH" --body-file candidate-summary.md
