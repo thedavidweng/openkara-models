@@ -1,0 +1,103 @@
+name: ORT runtime publish (5 targets + catalog entries)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: "Catalog release ID to publish runtimes into (e.g. 2026-07-20-001)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "ort-v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # Build all 5 targets in parallel, generate supply-chain, verify, upload.
+  # Each job produces a runtime archive artifact consumed by the publish job.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Install build deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+      - name: Build ORT for ${{ matrix.target }}
+        run: python scripts/build_runtime.py --target ${{ matrix.target }}
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ort-${{ matrix.target }}
+          path: ort/packages/onnxruntime-*-${{ matrix.target }}.*
+          retention-days: 14
+
+  # Publish: download all 5 archives, generate catalog entries, create a
+  # GitHub release with the archives as assets, and emit the catalog spec
+  # fragment for merge into the release spec.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Download all runtime artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: ort-*
+          path: ort/packages
+          merge-multiple: true
+
+      - name: Verify all packages
+        run: python scripts/verify_runtime_package.py --all
+
+      - name: Generate runtime catalog entries
+        run: |
+          python scripts/generate_runtime_catalog_entries.py \
+            --release "${{ inputs.release_id || github.ref_name }}" \
+            --output catalog/specs/runtime-entries.json
+
+      - name: Create GitHub release + upload archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_id && format('infra-{0}', inputs.release_id) || github.ref_name }}"
+          gh release create "$TAG" \
+            --title "ORT runtime ${{ github.ref_name || inputs.release_id }}" \
+            --notes "Source-built ONNX Runtime archives for 5 targets. See catalog/specs/runtime-entries.json for the catalog spec fragment." \
+            ort/packages/onnxruntime-*.tar.gz ort/packages/onnxruntime-*.zip
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: runtime-catalog-entries
+          path: catalog/specs/runtime-entries.json
+          retention-days: 30
