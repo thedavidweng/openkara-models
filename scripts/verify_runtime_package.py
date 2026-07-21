@@ -65,8 +65,13 @@ def _extract_archive(archive: Path) -> dict[str, bytes]:
 
 def _target_from_archive_name(name: str) -> str:
     """Extract target triple from archive name like onnxruntime-1.27.1-openkara-aarch64-apple-darwin.tar.gz"""
-    parts = name.rsplit(".", 2)[0]  # strip .tar.gz or .zip
-    segments = parts.split("-openkara-")
+    # Strip .tar.gz (two extensions) or .zip (one extension)
+    base = name
+    if base.endswith(".tar.gz"):
+        base = base[:-7]
+    elif base.endswith(".zip"):
+        base = base[:-4]
+    segments = base.split("-openkara-")
     if len(segments) != 2:
         raise ValueError(f"cannot parse target from archive name: {name}")
     return segments[1]
