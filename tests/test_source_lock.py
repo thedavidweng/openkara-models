@@ -93,7 +93,9 @@ class TargetConfigTests(unittest.TestCase):
     def test_windows_has_directml(self):
         lock = _load_lock()
         eps = lock["targets"]["x86_64-pc-windows-msvc"]["execution_providers"]
-        self.assertIn("directml", eps)
+        # DirectML disabled in PR 1 due to CRT mismatch; PR 2 re-enables with
+        # correct CRT settings. For now, Windows uses CPU-only.
+        self.assertIn("cpu", eps)
 
     def test_linux_targets_have_xnnpack(self):
         lock = _load_lock()

@@ -129,19 +129,17 @@
         "-Dbuild_ort_perf_tests=OFF",
         "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
         "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
-        "-Donnxruntime_USE_DML=ON",
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON",
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL"
+        "-Donnxruntime_USE_DML=OFF"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
       "deployment_target": "",
       "execution_providers": [
-        "cpu",
-        "directml"
+        "cpu"
       ],
       "runner": "windows-latest",
       "runner_note": "Windows x64 native runner with MSVC."
