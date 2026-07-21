@@ -134,9 +134,9 @@
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON",
         "-Donnxruntime_USE_DML=OFF",
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
-        "-Dprotobuf_MSVC_STATIC_RUNTIME=ON",
-        "-Dabsl_MSVC_STATIC_RUNTIME=ON"
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-Dprotobuf_MSVC_STATIC_RUNTIME=OFF",
+        "-Dabsl_MSVC_STATIC_RUNTIME=OFF"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
