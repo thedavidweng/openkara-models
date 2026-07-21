@@ -212,6 +212,48 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
                         f"config={expected_ops_sha})"
                     )
 
+    # Supply-chain verification: the archive must contain sbom.spdx.json and
+    # provenance.json, and the build manifest must reference them with matching
+    # size + SHA-256. The SBOM must be valid SPDX-2.3; the provenance must
+    # reference the source lock's upstream commit.
+    sc = manifest.get("supply_chain", {})
+    for key in ("sbom", "provenance"):
+        ref = sc.get(key)
+        if not ref:
+            errors.append(f"build manifest missing supply_chain.{key} ref")
+            continue
+        fname = ref.get("path", key.replace("sbom", "sbom.spdx.json").replace("provenance", "provenance.json"))
+        if fname not in files:
+            errors.append(f"archive missing supply-chain file: {fname}")
+            continue
+        actual_sha = _sha256_bytes(files[fname])
+        if actual_sha != ref["sha256"]:
+            errors.append(f"{fname}: sha256 mismatch (manifest={ref['sha256'][:12]}... actual={actual_sha[:12]}...)")
+        if len(files[fname]) != ref["size"]:
+            errors.append(f"{fname}: size mismatch (manifest={ref['size']} actual={len(files[fname])})")
+
+    if "sbom.spdx.json" in files:
+        try:
+            sbom = json.loads(files["sbom.spdx.json"])
+            if sbom.get("spdxVersion") != "SPDX-2.3":
+                errors.append("sbom.spdx.json: not SPDX-2.3")
+            if not sbom.get("packages"):
+                errors.append("sbom.spdx.json: no packages")
+        except json.JSONDecodeError as e:
+            errors.append(f"sbom.spdx.json: invalid JSON: {e}")
+
+    if "provenance.json" in files:
+        try:
+            prov = json.loads(files["provenance.json"])
+            if prov.get("schema_version") != "openkara.runtime-provenance/v1":
+                errors.append("provenance.json: unexpected schema_version")
+            if prov.get("upstream", {}).get("commit_sha") != lock["upstream"]["commit_sha"]:
+                errors.append("provenance.json: upstream commit_sha does not match source lock")
+            if prov.get("upstream", {}).get("tag") != lock["upstream"]["tag"]:
+                errors.append("provenance.json: upstream tag does not match source lock")
+        except json.JSONDecodeError as e:
+            errors.append(f"provenance.json: invalid JSON: {e}")
+
     return errors
 
 

@@ -9,9 +9,11 @@ on:
       - "scripts/validate_source_lock.py"
       - "scripts/generate_required_operators.py"
       - "scripts/compare_runtime_builds.py"
+      - "scripts/generate_runtime_supply_chain.py"
       - "tests/test_source_lock.py"
       - "tests/test_required_operators.py"
       - "tests/test_compare_runtime_builds.py"
+      - "tests/test_runtime_supply_chain.py"
       - ".github/workflows/ort-build.yml"
   push:
     branches: [main]
@@ -22,6 +24,7 @@ on:
       - "scripts/validate_source_lock.py"
       - "scripts/generate_required_operators.py"
       - "scripts/compare_runtime_builds.py"
+      - "scripts/generate_runtime_supply_chain.py"
 
 jobs:
   validate-source-lock:
@@ -36,11 +39,11 @@ jobs:
         run: pip install "pytest>=8.0" "onnx>=1.22.0"
       - name: Validate source lock
         run: python scripts/validate_source_lock.py
-      - name: Source lock + required-operator + comparison tests
+      - name: Source lock + required-operator + comparison + supply-chain tests
         run: |
-          python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py -q
+          python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py tests/test_runtime_supply_chain.py -q
       - name: Syntax check build scripts
-        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py
+        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py
 
   build-aarch64-apple-darwin:
     needs: validate-source-lock
@@ -53,7 +56,9 @@ jobs:
           python-version: "3.11"
       - name: Build ORT for aarch64-apple-darwin
         run: python scripts/build_runtime.py --target aarch64-apple-darwin
-      - name: Verify package
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -72,7 +77,9 @@ jobs:
           python-version: "3.11"
       - name: Build ORT for x86_64-apple-darwin
         run: python scripts/build_runtime.py --target x86_64-apple-darwin
-      - name: Verify package
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -95,7 +102,9 @@ jobs:
           sudo apt-get install -y cmake build-essential
       - name: Build ORT for x86_64-unknown-linux-gnu
         run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu
-      - name: Verify package
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -118,7 +127,9 @@ jobs:
           sudo apt-get install -y cmake build-essential
       - name: Build ORT for aarch64-unknown-linux-gnu
         run: python scripts/build_runtime.py --target aarch64-unknown-linux-gnu
-      - name: Verify package
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -137,7 +148,9 @@ jobs:
           python-version: "3.11"
       - name: Build ORT for x86_64-pc-windows-msvc
         run: python scripts/build_runtime.py --target x86_64-pc-windows-msvc
-      - name: Verify package
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -197,6 +210,9 @@ jobs:
 
       - name: Build reduced runtime
         run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu --reduced
+
+      - name: Generate supply-chain records (SBOM + provenance, full + reduced)
+        run: python scripts/generate_runtime_supply_chain.py --all
 
       - name: Verify reduced package
         run: python scripts/verify_runtime_package.py --all
