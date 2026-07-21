@@ -99,6 +99,31 @@ def validate_lock(lock: dict[str, Any]) -> list[str]:
         if field not in toolchain:
             errors.append(f"toolchain.{field} missing")
 
+    # Check submodules: every submodule must have expected_sha (40 hex chars).
+    submodules = lock.get("submodules", {})
+    for path, info in submodules.items():
+        if "expected_sha" not in info:
+            errors.append(f"submodules.{path}: expected_sha missing")
+            continue
+        sha = info["expected_sha"]
+        if len(sha) != 40:
+            errors.append(f"submodules.{path}: expected_sha must be 40 hex chars, got {len(sha)}")
+            continue
+        try:
+            int(sha, 16)
+        except ValueError:
+            errors.append(f"submodules.{path}: expected_sha must be valid hex")
+        if "repo" not in info:
+            errors.append(f"submodules.{path}: repo missing")
+
+    # Check deps entries: every entry must have sha1 and url.
+    deps = lock.get("deps", {}).get("entries", {})
+    for name, info in deps.items():
+        if "sha1" not in info:
+            errors.append(f"deps.entries.{name}: sha1 missing")
+        if "url" not in info:
+            errors.append(f"deps.entries.{name}: url missing")
+
     return errors
 
 

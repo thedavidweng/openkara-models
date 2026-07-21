@@ -152,6 +152,30 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
     if not has_notice:
         errors.append("missing NOTICE file")
 
+    # Reproducibility: build manifest must not contain build_host (hostname
+    # varies per build host and breaks reproducibility).
+    build_meta = manifest.get("build", {})
+    if "build_host" in build_meta:
+        errors.append(
+            "build-manifest.json contains build_host field; remove it for "
+            "reproducibility (hostname varies per build host)"
+        )
+
+    # Submodule verification: every submodule in the lock must be present in
+    # the build manifest with the expected SHA.
+    expected_submodules = lock.get("submodules", {})
+    actual_submodules = build_meta.get("submodule_state", {})
+    for path, info in expected_submodules.items():
+        expected_sha = info["expected_sha"]
+        actual_sha = actual_submodules.get(path)
+        if actual_sha is None:
+            errors.append(f"submodule {path} missing from build manifest")
+        elif actual_sha != expected_sha:
+            errors.append(
+                f"submodule {path} SHA mismatch (manifest={actual_sha} "
+                f"lock={expected_sha})"
+            )
+
     return errors
 
 

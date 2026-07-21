@@ -79,6 +79,34 @@ def _clone_source(lock: dict[str, Any], target_dir: Path) -> None:
     _run(["git", "submodule", "update", "--init", "--recursive", "--depth", "1"],
          cwd=target_dir)
 
+    # Verify submodule SHAs against the source lock.
+    _verify_submodules(lock, target_dir)
+
+
+def _verify_submodules(lock: dict[str, Any], source_dir: Path) -> None:
+    """Verify that every submodule SHA in the lock matches the checkout."""
+    expected = lock.get("submodules", {})
+    if not expected:
+        return
+    actual = _get_submodule_state(source_dir)
+    mismatches: list[str] = []
+    for path, info in expected.items():
+        expected_sha = info["expected_sha"]
+        actual_sha = actual.get(path)
+        if actual_sha is None:
+            mismatches.append(f"{path}: submodule not found in checkout")
+        elif actual_sha != expected_sha:
+            mismatches.append(
+                f"{path}: SHA mismatch (expected {expected_sha}, got {actual_sha})"
+            )
+    if mismatches:
+        for m in mismatches:
+            print(f"  SUBMODULE MISMATCH: {m}", file=sys.stderr)
+        raise RuntimeError(
+            f"submodule verification failed ({len(mismatches)} mismatch(es)); "
+            "the source lock does not match the ORT checkout"
+        )
+
 
 def _get_submodule_state(source_dir: Path) -> dict[str, str]:
     """Record the exact SHA of each submodule."""
@@ -105,19 +133,28 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
     target_config = lock["targets"][target]
     cmake_args = target_config["cmake_args"]
 
+    # Set SOURCE_DATE_EPOCH for reproducible builds. This environment
+    # variable is respected by many build tools (cmake, gcc, clang, etc.)
+    # to normalize embedded timestamps.
+    env = os.environ.copy()
+    env["SOURCE_DATE_EPOCH"] = str(_ort_commit_timestamp(lock))
+
     # Configure.
     build_dir.mkdir(parents=True, exist_ok=True)
     configure_cmd = ["cmake", "-S", str(source_dir / "cmake"), "-B", str(build_dir),
                      *cmake_args]
-    _run(configure_cmd)
+    _run(configure_cmd, env=env)
 
     # Build.
     nproc = os.cpu_count() or 4
     build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release",
                  "--parallel", str(nproc)]
-    _run(build_cmd)
+    _run(build_cmd, env=env)
 
-    # Collect build metadata.
+    # Collect build metadata. NOTE: build_host (hostname) is intentionally
+    # omitted from the manifest — it varies per build host and breaks
+    # reproducibility. The OS and arch are kept because they are determined
+    # by the target triple and runner, not the specific machine.
     submodules = _get_submodule_state(source_dir)
     return {
         "target": target,
@@ -125,7 +162,6 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
         "tag": lock["upstream"]["tag"],
         "submodule_state": submodules,
         "cmake_args": cmake_args,
-        "build_host": platform.node(),
         "build_os": f"{platform.system()} {platform.release()}",
         "build_arch": platform.machine(),
     }
@@ -195,30 +231,84 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
         json.dump(manifest, fh, indent=2, sort_keys=True, ensure_ascii=False)
         fh.write("\n")
 
-    # Create archive.
+    # Create archive with deterministic timestamps. All entries use the ORT
+    # commit date as their mtime so the same source lock + toolchain produces
+    # byte-identical archives across different build hosts and times.
     PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
     version = lock["upstream"]["tag"].lstrip("v")
     archive_base = f"onnxruntime-{version}-openkara-{target}"
+    fixed_timestamp = _ort_commit_timestamp(lock)
 
     if archive_format == "tar.gz":
         archive_path = PACKAGES_DIR / f"{archive_base}.tar.gz"
-        _run(["tar", "czf", str(archive_path), "-C", str(staging), "."])
+        _make_tar(archive_path, staging, fixed_timestamp)
     elif archive_format == "zip":
         archive_path = PACKAGES_DIR / f"{archive_base}.zip"
-        _make_zip(archive_path, staging)
+        _make_zip(archive_path, staging, fixed_timestamp)
     else:
         raise ValueError(f"unknown archive format: {archive_format}")
 
     return archive_path
 
 
-def _make_zip(archive_path: Path, staging: Path) -> None:
-    """Create a zip archive using Python's zipfile (no external zip binary)."""
+def _ort_commit_timestamp(lock: dict[str, Any]) -> int:
+    """Return a deterministic Unix timestamp for archive entry mtimes.
+
+    We use 315532800 (1980-01-01 00:00:00 UTC), the earliest timestamp
+    supported by both the zip and tar formats. Using a fixed timestamp
+    ensures the same source lock + toolchain produces byte-identical
+    archives across different build hosts and times.
+    """
+    return 315532800  # 1980-01-01 00:00:00 UTC (zip epoch)
+
+
+def _make_tar(archive_path: Path, staging: Path, fixed_timestamp: int) -> None:
+    """Create a tar.gz archive with deterministic entry timestamps and
+    ordering using Python's tarfile (no external tar binary).
+
+    The gzip wrapper uses mtime=fixed_timestamp and an empty filename in
+    its header so the archive is byte-identical across runs regardless of
+    the output file path.
+    """
+    import gzip
+    import io
+    import tarfile
+    # Use BytesIO as the gzip target so no filename is embedded in the
+    # gzip header. This ensures byte-identical output regardless of the
+    # output file path.
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", mtime=fixed_timestamp, filename="") as gz:
+        with tarfile.open(fileobj=gz, mode="w") as tar:
+            for f in sorted(staging.rglob("*")):
+                if f.is_file():
+                    rel = f.relative_to(staging).as_posix()
+                    info = tarfile.TarInfo(name=rel)
+                    info.size = f.stat().st_size
+                    info.mtime = fixed_timestamp
+                    info.mode = 0o644
+                    info.uid = 0
+                    info.gid = 0
+                    info.uname = ""
+                    info.gname = ""
+                    with f.open("rb") as fh:
+                        tar.addfile(info, fh)
+    archive_path.write_bytes(buf.getvalue())
+
+
+def _make_zip(archive_path: Path, staging: Path, fixed_timestamp: int) -> None:
+    """Create a zip archive with deterministic entry timestamps and ordering."""
     import zipfile
+    from datetime import datetime, timezone
+    fixed_dt = datetime.fromtimestamp(fixed_timestamp, tz=timezone.utc)
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in sorted(staging.rglob("*")):
             if f.is_file():
-                zf.write(f, f.relative_to(staging).as_posix())
+                rel = f.relative_to(staging).as_posix()
+                info = zipfile.ZipInfo(filename=rel, date_time=fixed_dt.timetuple()[:6])
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = 0o644 << 16
+                with f.open("rb") as fh:
+                    zf.writestr(info, fh.read())
 
 
 def _find_library(build_dir: Path, name: str) -> Path | None:
@@ -244,6 +334,11 @@ def main() -> int:
                         help="Source directory (default: ort/source/).")
     parser.add_argument("--build-dir", type=Path, default=None,
                         help="Build directory (default: ort/build/<target>/).")
+    parser.add_argument("--locked", action="store_true",
+                        help="Verify that the checked-out source tree and "
+                             "submodules exactly match the source lock before "
+                             "building. Required by the verification commands "
+                             "(verify_runtime_package.py, CI).")
     args = parser.parse_args()
 
     lock = _load_lock()
@@ -257,6 +352,16 @@ def main() -> int:
         print(f"ERROR: source dir not found: {source_dir}", file=sys.stderr)
         return 1
 
+    # --locked: verify the upstream commit and all submodules match the lock
+    # exactly. This catches drift when --skip-clone is used with a stale or
+    # manually-modified checkout.
+    if args.locked:
+        print("Verifying source lock...")
+        if not _verify_upstream_commit(lock, source_dir):
+            return 1
+        _verify_submodules(lock, source_dir)
+        print("  source lock verified.")
+
     print(f"Building for {args.target}...")
     build_meta = _build_target(lock, args.target, source_dir, build_dir)
 
@@ -269,6 +374,26 @@ def main() -> int:
     print(f"  size:    {archive_size} bytes")
     print(f"  sha256:  {archive_sha}")
     return 0
+
+
+def _verify_upstream_commit(lock: dict[str, Any], source_dir: Path) -> bool:
+    """Verify the checked-out HEAD matches the source lock's commit_sha."""
+    expected = lock["upstream"]["commit_sha"]
+    r = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(source_dir),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    actual = r.stdout.strip()
+    if actual != expected:
+        print(
+            f"ERROR: upstream commit mismatch (expected {expected}, got {actual})",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 if __name__ == "__main__":

@@ -93,9 +93,22 @@ class TargetConfigTests(unittest.TestCase):
     def test_windows_has_directml(self):
         lock = _load_lock()
         eps = lock["targets"]["x86_64-pc-windows-msvc"]["execution_providers"]
-        # DirectML disabled in PR 1 due to CRT mismatch; PR 2 re-enables with
-        # correct CRT settings. For now, Windows uses CPU-only.
         self.assertIn("cpu", eps)
+        self.assertIn("directml", eps)
+
+    def test_windows_uses_dynamic_crt(self):
+        """DirectML's NuGet package is built with MultiThreadedDLL; the ORT
+        build must use the same CRT to link correctly."""
+        lock = _load_lock()
+        cmake_args = lock["targets"]["x86_64-pc-windows-msvc"]["cmake_args"]
+        self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL", cmake_args)
+        self.assertIn("-Donnxruntime_USE_DML=ON", cmake_args)
+
+    def test_windows_companion_libraries_include_directml(self):
+        """DirectML.dll must be shipped as a companion library."""
+        lock = _load_lock()
+        companions = lock["targets"]["x86_64-pc-windows-msvc"]["companion_libraries"]
+        self.assertIn("DirectML.dll", companions)
 
     def test_linux_targets_have_xnnpack(self):
         lock = _load_lock()
@@ -125,6 +138,35 @@ class TargetConfigTests(unittest.TestCase):
         for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
             dt = lock["targets"][target]["deployment_target"]
             self.assertTrue(dt, f"{target} must set deployment_target")
+
+
+class SubmodulePinningTests(unittest.TestCase):
+    def test_submodules_have_expected_sha(self):
+        """Every submodule must have an expected_sha (40-char hex), not a
+        mutable ref like 'main'."""
+        lock = _load_lock()
+        for path, info in lock.get("submodules", {}).items():
+            self.assertIn("expected_sha", info, f"{path} must have expected_sha")
+            sha = info["expected_sha"]
+            self.assertEqual(len(sha), 40, f"{path}: expected_sha must be 40 chars")
+            int(sha, 16)  # must be valid hex
+
+    def test_no_submodule_uses_expected_ref(self):
+        """Submodules must not use mutable expected_ref fields."""
+        lock = _load_lock()
+        for path, info in lock.get("submodules", {}).items():
+            self.assertNotIn("expected_ref", info,
+                             f"{path}: use expected_sha (pinned commit), not "
+                             f"expected_ref (mutable branch/tag)")
+
+    def test_deps_entries_have_sha1(self):
+        """Every deps entry must have a sha1 hash for archive verification."""
+        lock = _load_lock()
+        deps = lock.get("deps", {}).get("entries", {})
+        self.assertTrue(deps, "deps.entries must not be empty")
+        for name, info in deps.items():
+            self.assertIn("sha1", info, f"deps.{name} must have sha1")
+            self.assertIn("url", info, f"deps.{name} must have url")
 
 
 class ValidateSourceLockTests(unittest.TestCase):
