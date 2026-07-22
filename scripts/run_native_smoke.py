@@ -116,11 +116,15 @@ def run_smoke(
     # The harness prints JSON to stdout. Parse it.
     out = r.stdout.strip()
     if not out:
+        stderr = r.stderr.strip()
         return {
             "target": target,
             "requested_provider": provider,
             "session_creation": "failed",
-            "session_creation_error": r.stderr.strip() or "no stdout from harness",
+            "session_creation_error": (
+                f"no stdout from harness (exit={r.returncode})"
+                + (f"; stderr: {stderr[:500]}" if stderr else "")
+            ),
             "inference": "not_attempted",
             "available_providers": "",
             "output_shape": "",

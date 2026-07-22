@@ -174,6 +174,24 @@ bool all_finite(const float* data, size_t count) {
     return true;
 }
 
+// Custom ORT logger that writes to stderr (NOT stdout).
+// The harness prints its JSON report to stdout; if ORT's default logger
+// also writes to stdout, log lines pollute the JSON and break parsing.
+// Routing logs to stderr keeps stdout clean for the JSON output.
+void stderr_logger(void* /*param*/, OrtLoggingLevel severity,
+                   const char* category, const char* logid,
+                   const char* /*code_location*/, const char* message) {
+    const char* sev = "?";
+    switch (severity) {
+        case ORT_LOGGING_LEVEL_VERBOSE: sev = "V"; break;
+        case ORT_LOGGING_LEVEL_INFO:    sev = "I"; break;
+        case ORT_LOGGING_LEVEL_WARNING: sev = "W"; break;
+        case ORT_LOGGING_LEVEL_ERROR:   sev = "E"; break;
+        case ORT_LOGGING_LEVEL_FATAL:   sev = "F"; break;
+    }
+    fprintf(stderr, "[ort][%s][%s][%s] %s\n", sev, category, logid, message);
+}
+
 void print_json_field(const char* key, const std::string& value, bool last) {
     printf("  \"%s\": \"%s\"%s\n", key, json_escape(value).c_str(), last ? "" : ",");
 }
@@ -288,10 +306,13 @@ int main(int argc, char** argv) {
     }
     print_json_field("available_providers", available, false);
 
-    // Create environment.
+    // Create environment with a custom logger that writes to stderr,
+    // keeping stdout clean for the JSON report.
     OrtEnv* env = nullptr;
     {
-        OrtStatus* st = api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "ort_smoke", &env);
+        OrtStatus* st = api->CreateEnvWithCustomLogger(
+            stderr_logger, nullptr, ORT_LOGGING_LEVEL_WARNING,
+            "ort_smoke", &env);
         if (st) {
             print_json_field("session_creation", "failed", false);
             print_json_field("session_creation_error", api->GetErrorMessage(st), false);
