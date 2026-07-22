@@ -1,0 +1,11 @@
+{
+  "channel": "stable",
+  "generation": 1,
+  "previous_release_id": null,
+  "release_id": "2026-07-20-001",
+  "release_manifest_sha256": "0397eec74564afc8df756fdb07f59da077113fcf4a57a6127021cfec06794bcf",
+  "release_manifest_size": 3839,
+  "release_manifest_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-07-20-001/release-manifest.json",
+  "schema_version": "openkara.catalog/channel-v1",
+  "updated_at": "2026-07-20T00:00:00Z"
+}

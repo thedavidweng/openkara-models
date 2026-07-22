@@ -10,6 +10,29 @@ Standard release ONNX files must load with **official, pre-built ONNX Runtime** 
 
 Full policy, release gates, and a minimal Apple Silicon smoke-test snippet: **[docs/runtime-contract.md](docs/runtime-contract.md)**.
 
+## Artifact catalog (authoritative)
+
+Model and ONNX Runtime release metadata now live in the versioned artifact
+catalog, not in hardcoded constants:
+
+- `catalog/releases/<release-id>.json` — immutable release manifest.
+- `catalog/channels/stable.json` — stable-channel pointer.
+- `latest.json` — temporary migration adapter for OpenKara PR #165, generated
+  from the stable pointer. Deleted in issue #18 PR 4 after OpenKara #167
+  switches to the versioned schema.
+
+See **[docs/catalog-contract.md](docs/catalog-contract.md)** for the contract
+and `scripts/validate_catalog.py` / `scripts/generate_catalog_release.py` for
+validation and generation.
+
+> **Stale-pin notice (to be reconciled by OpenKara #167):** the hardcoded
+> `HTDEMUCS` SHA-256 pin documented below (`8fa3dab6…`) is the digest of
+> `model-v2.0.1`, not `model-v2.1.0` as the pin table claims. The catalog and
+> `latest.json` carry the correct `model-v2.1.0` digest (`3d85dad9…`, from the
+> release sha256 sidecar). The OpenKara-side `ModelDescriptor` constants must be
+> updated to consume the catalog in OpenKara #167. The README pin table and
+> Rust constant block below are deprecated and will be removed in issue #18 PR 4.
+
 ## Models
 
 ### htdemucs (default)
