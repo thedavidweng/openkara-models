@@ -207,14 +207,34 @@ def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
             errors.append("gcc: not found on PATH")
     elif "windows" in target:
         required_vs = tc.get("visual_studio_version", "2022")
-        # MSVC version is checked via cl.exe; we only assert it is present.
-        # The exact VS version is enforced by the runner image selection.
-        try:
-            r = subprocess.run(["cl", "/?"], capture_output=True, text=True)
-            if r.returncode != 0:
-                errors.append("cl.exe: MSVC compiler not found on PATH")
-        except FileNotFoundError:
-            errors.append("cl.exe: MSVC compiler not found on PATH")
+        # On Windows the MSVC compiler (cl.exe) is not on PATH in a plain
+        # shell — it is only available after sourcing vcvarsall.bat. CMake's
+        # Visual Studio generator finds MSVC via the registry/vswhere without
+        # vcvars, so the build itself works, but a direct cl.exe probe fails.
+        # Use vswhere (always present on GitHub Windows runners and any VS
+        # install) to detect Visual Studio 2022 (version 17.x) instead.
+        vswhere = Path(r"C:\Program Files (x86)\Microsoft Visual Studio"
+                       r"\Installer\vswhere.exe")
+        vs_year = {"2022": "[17.0,18.0)", "2019": "[16.0,17.0)"}
+        version_range = vs_year.get(str(required_vs))
+        if version_range is None:
+            errors.append(
+                f"visual_studio_version: unknown required {required_vs}"
+            )
+        elif not vswhere.is_file():
+            errors.append("vswhere.exe: not found (Visual Studio Installer "
+                          "absent)")
+        else:
+            r = subprocess.run(
+                [str(vswhere), "-latest", "-version", version_range,
+                 "-property", "displayName"],
+                capture_output=True, text=True,
+            )
+            if r.returncode != 0 or not r.stdout.strip():
+                errors.append(
+                    f"visual studio: expected {required_vs} "
+                    f"(version range {version_range}) not found by vswhere"
+                )
 
     if errors:
         for e in errors:

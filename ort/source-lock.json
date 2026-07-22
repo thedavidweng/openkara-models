@@ -74,8 +74,8 @@
         "cpu",
         "coreml"
       ],
-      "runner": "macos-14",
-      "runner_note": "Apple Silicon native runner. Uses macos-14 which is M1."
+      "runner": "macos-15",
+      "runner_note": "Apple Silicon native runner. Uses macos-15 (M1) which ships Xcode 16.0+ to satisfy the toolchain xcode_version requirement."
     },
     "aarch64-unknown-linux-gnu": {
       "archive_format": "tar.gz",

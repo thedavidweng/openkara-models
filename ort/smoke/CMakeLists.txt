@@ -28,7 +28,13 @@ endif()
 get_filename_component(ORT_SOURCE_DIR_ABS "${ORT_SOURCE_DIR}" ABSOLUTE)
 
 add_executable(ort_smoke ort_smoke.cpp)
-target_include_directories(ort_smoke PRIVATE "${ORT_SOURCE_DIR_ABS}")
+# The ORT C API header is at <source>/include/onnxruntime/core/session/
+# onnxruntime_c_api.h and is included as <onnxruntime/core/session/...>, so the
+# include directory must be <source>/include. The source root is also added so
+# any ancillary headers referenced relative to it resolve correctly.
+target_include_directories(ort_smoke PRIVATE
+    "${ORT_SOURCE_DIR_ABS}/include"
+    "${ORT_SOURCE_DIR_ABS}")
 
 if(WIN32)
     # LoadLibrary is in kernel32, always linked.
