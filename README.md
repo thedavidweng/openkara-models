@@ -122,14 +122,14 @@ CI optimizations: pip wheel cache, Demucs pretrained-weights cache, concurrency 
 
 Pull requests run a lightweight **runtime-contract** workflow (`scripts/onnx_runtime_contract.py --self-test`); full checks run on tagged release builds.
 
-A weekly check (every Monday) monitors both **PyPI** (for Demucs package updates) and **HuggingFace** (for model weight updates at `adefossez/HTDemucs` and `adefossez/HTDemucs-ft`) for upstream changes. When a change is detected, the workflow:
+A weekly check (every Monday) monitors **ONNX Runtime releases** (via `scripts/detect_ort_release.py`, filtering prereleases) and **HuggingFace model-weight revisions** (via `scripts/detect_model_weight_revision.py`, using immutable commit SHAs at `adefossez/HTDemucs` and `adefossez/HTDemucs-ft`). When a change is detected, the workflow:
 
-1. Updates `.upstream-state.json` and commits it to the repo (persistent state across runs)
-2. Creates a tracking issue labeled `upstream-update` with a diff table
-3. **Automatically triggers a draft conversion** via `workflow_dispatch` for the affected model(s) — this produces artifacts for review but does **not** auto-release (releases only happen on tag push)
-4. A maintainer reviews the draft artifacts (MSE < 1e-4), updates `requirements.txt` if needed, and tags a release manually
+1. Compares the latest stable upstream tag + commit SHA against `ort/source-lock.json`
+2. Opens a tracking issue for review
+3. A maintainer triggers the candidate orchestration workflow (`dep-candidate.yml`) to build all runtime targets, run quality gates, and open a reviewable candidate PR with artifacts
+4. A candidate PR never changes the stable pointer — stable publication remains a separate reviewed action (tag push only)
 
-See `.github/workflows/check-upstream.yml` for the full implementation.
+See `.github/workflows/dep-detection.yml` for detection, `.github/workflows/dep-candidate.yml` for candidate orchestration, and `.github/workflows/dep-health-monitor.yml` for automation health monitoring. Dependency update ownership is documented in `docs/dependency-update-authorities.md`.
 
 ## License
 

@@ -13,7 +13,8 @@ Checks:
   3. No duplicate candidate branches exist for the same upstream version.
 
 Exits 0 if healthy, 1 if stale (candidate needed), 2 if automation
-failure detected, 3 on API error.
+failure detected (duplicate candidates or detection workflow never run),
+3 on API error.
 
 Usage::
 
@@ -163,6 +164,15 @@ def main() -> int:
         if not args.json:
             print("STALE: dep-detection workflow has not run recently", file=sys.stderr)
         return 1
+    if workflow_check["status"] == "no_runs":
+        # The detection workflow has never run. This is NOT healthy — the
+        # automation is not functioning. Treat as automation failure (exit 2)
+        # so the health check cannot silently report "healthy" when no
+        # detection has ever happened.
+        if not args.json:
+            print("NO_RUNS: dep-detection workflow has never run — automation not functioning",
+                  file=sys.stderr)
+        return 2
     if duplicate_check["status"] == "duplicates":
         if not args.json:
             print("DUPLICATES: duplicate candidate branches detected", file=sys.stderr)
