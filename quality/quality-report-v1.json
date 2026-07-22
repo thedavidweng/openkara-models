@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/quality/schema-quality-report-v1.json",
+  "title": "OpenKara quality report (v1)",
+  "description": "Schema for the model correctness + quality report produced by scripts/run_quality_suite.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "model", "onnx_path", "tier", "mse_threshold", "results"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "openkara.quality-report/v1"},
+    "model": {"type": "string"},
+    "onnx_path": {"type": "string"},
+    "tier": {"type": "string", "enum": ["pr", "release"]},
+    "mse_threshold": {"type": "number", "minimum": 0},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fixture_id", "category", "tier", "onnx_shape", "pytorch_shape",
+                      "shape_match", "onnx_has_nan", "onnx_has_inf",
+                      "pytorch_has_nan", "pytorch_has_inf",
+                      "onnx_output_digest", "pytorch_output_digest"],
+        "properties": {
+          "fixture_id": {"type": "string"},
+          "category": {"type": "string"},
+          "tier": {"type": "string"},
+          "onnx_shape": {"type": "array", "items": {"type": "integer"}},
+          "pytorch_shape": {"type": "array", "items": {"type": "integer"}},
+          "shape_match": {"type": "boolean"},
+          "expected_shape": {"type": "array", "items": {"type": "integer"}},
+          "expected_shape_match": {"type": "boolean"},
+          "onnx_has_nan": {"type": "boolean"},
+          "onnx_has_inf": {"type": "boolean"},
+          "pytorch_has_nan": {"type": "boolean"},
+          "pytorch_has_inf": {"type": "boolean"},
+          "mse": {"type": ["number", "null"], "minimum": 0},
+          "mae": {"type": ["number", "null"], "minimum": 0},
+          "max_abs_error": {"type": ["number", "null"], "minimum": 0},
+          "onnx_output_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "pytorch_output_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}
