@@ -1,6 +1,7 @@
 version: 2
 updates:
-  # Python dependencies
+  # Python dependencies — owned by Dependabot.
+  # Renovate and repository-owned scripts do NOT touch requirements.txt.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
@@ -11,8 +12,14 @@ updates:
       - "python"
     commit-message:
       prefix: "deps"
+    groups:
+      torch:
+        patterns: ["torch", "torchaudio"]
+      onnx:
+        patterns: ["onnx", "onnxruntime"]
 
-  # GitHub Actions (SHA-pinned actions get SHA bumps)
+  # GitHub Actions — owned by Dependabot.
+  # Renovate and repository-owned scripts do NOT touch workflow files.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

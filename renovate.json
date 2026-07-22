@@ -1,0 +1,50 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": "Renovate config for openkara-models. Handles container/toolchain image fields in ort/source-lock.json via custom regex managers. Does NOT touch Python packages (owned by Dependabot) or ORT source tags/commits (owned by scripts/detect_ort_release.py).",
+  "packageRules": [
+    {
+      "description": "Group all source-lock toolchain updates into one PR.",
+      "matchFileNames": ["ort/source-lock.json"],
+      "groupName": "toolchain images"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update runner image fields in ort/source-lock.json.",
+      "fileMatch": ["^ort/source-lock\\.json$"],
+      "matchStrings": [
+        "\"runner\"\\s*:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "github-actions-runner",
+      "datasourceTemplate": "github-runners"
+    },
+    {
+      "customType": "regex",
+      "description": "Update Xcode version in ort/source-lock.json toolchain.",
+      "fileMatch": ["^ort/source-lock\\.json$"],
+      "matchStrings": [
+        "\"xcode_version\"\\s*:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "xcode",
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "apple/swift"
+    },
+    {
+      "customType": "regex",
+      "description": "Update gcc version in ort/source-lock.json toolchain.",
+      "fileMatch": ["^ort/source-lock\\.json$"],
+      "matchStrings": [
+        "\"gcc_version\"\\s*:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "gcc",
+      "datasourceTemplate": "github-tags",
+      "packageNameTemplate": "gcc-mirror/gcc"
+    }
+  ],
+  "ignorePaths": [
+    "requirements.txt",
+    ".github/workflows/**"
+  ]
+}
