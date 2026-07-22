@@ -390,6 +390,7 @@ jobs:
           python scripts/run_runtime_benchmarks.py \
             --runtime "$RUNTIME" \
             --model models/htdemucs.onnx \
+            --expected-output-shape "1,4,2,343980" \
             --target x86_64-unknown-linux-gnu \
             --frames 343980 --warmup 1 --iters 3 \
             --report benchmark-x86_64-unknown-linux-gnu.json
