@@ -1,0 +1,67 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT-20260720001",
+  "creationInfo": {
+    "created": "2026-07-20T00:00:00Z",
+    "creators": [
+      "Organization: OpenKara"
+    ],
+    "licenseListVersion": "3.21"
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://openkara.org/spdx/2026-07-20-001",
+  "name": "openkara-models-2026-07-20-001",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-Repo",
+      "copyrightText": "Copyright (c) 2026 Davy",
+      "downloadLocation": "git+https://github.com/thedavidweng/openkara-models",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "openkara-models",
+      "primaryPackagePurpose": "APPLICATION",
+      "supplier": "Organization: OpenKara",
+      "versionInfo": "df9d79174badec3efc01d6e79e9368460621db56"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs-balanced-fp32-onnx",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs.balanced.fp32.onnx",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs_ft-quality-fp32-onnx",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs_ft.quality.fp32.onnx",
+      "primaryPackagePurpose": "FILE"
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Package-Repo",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

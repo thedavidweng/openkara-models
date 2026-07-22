@@ -1,0 +1,29 @@
+{
+  "attestation": {
+    "note": "Commit-based provenance for the legacy migration release. New releases (#19/#22) add sigstore/github-attestation refs.",
+    "type": "commit-provenance",
+    "url": "https://github.com/thedavidweng/openkara-models/commit/df9d79174badec3efc01d6e79e9368460621db56"
+  },
+  "created_at": "2026-07-20T00:00:00Z",
+  "producer": {
+    "commit_sha": "df9d79174badec3efc01d6e79e9368460621db56",
+    "repo": "thedavidweng/openkara-models",
+    "run_id": "legacy",
+    "workflow": "legacy-model-release"
+  },
+  "release_id": "2026-07-20-001",
+  "subject": [
+    {
+      "artifact_id": "htdemucs.balanced.fp32.onnx",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx",
+      "sha256": "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9",
+      "size": 354970480
+    },
+    {
+      "artifact_id": "htdemucs_ft.quality.fp32.onnx",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx",
+      "sha256": "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b",
+      "size": 1421207127
+    }
+  ]
+}
