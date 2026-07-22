@@ -347,44 +347,34 @@ int main(int argc, char** argv) {
         // Reset options for each attempt.
         OrtSessionOptions* o = nullptr;
         if (api->CreateSessionOptions(&o) != nullptr) return nullptr;
+        // ORT v1.27.1 exposes a single generic
+        // SessionOptionsAppendExecutionProvider(options, provider_name,
+        //   provider_options_keys, provider_options_values, num_keys).
+        // The per-provider functions (CPU/CoreML/Xnnpack/DML) do not exist in
+        // the base OrtApi struct; they are registered by name here.
+        std::string ep_name;
         if (prov == "cpu" || prov == "CPUExecutionProvider") {
-            if (api->SessionOptionsAppendExecutionProvider_CPU(o, 0) != nullptr) {
-                api->ReleaseSessionOptions(o);
-                return nullptr;
-            }
+            ep_name = "CPUExecutionProvider";
         } else if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
-            uint32_t flags = 0;
-            if (api->SessionOptionsAppendExecutionProvider_CoreML(o, flags) != nullptr) {
-                api->ReleaseSessionOptions(o);
-                return nullptr;
-            }
+            ep_name = "CoreMLExecutionProvider";
         } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
-            // XNNPACK EP via the C API: append with default options.
-            // The C API exposes SessionOptionsAppendExecutionProvider_Xnnpack
-            // in newer versions; guard with a version check.
-#if ORT_API_VERSION >= 20
-            OrtStatus* st = api->SessionOptionsAppendExecutionProvider_Xnnpack(o, 0);
-            if (st) {
-                api->ReleaseStatus(st);
-                api->ReleaseSessionOptions(o);
-                return nullptr;
-            }
-#else
-            api->ReleaseSessionOptions(o);
-            return nullptr;
-#endif
+            ep_name = "XnnpackExecutionProvider";
         } else if (prov == "directml" || prov == "DmlExecutionProvider") {
-            int device_id = 0;
-            if (api->SessionOptionsAppendExecutionProvider_DML(o, device_id) != nullptr) {
-                api->ReleaseSessionOptions(o);
-                return nullptr;
-            }
+            ep_name = "DmlExecutionProvider";
         } else {
             api->ReleaseSessionOptions(o);
             return nullptr;
         }
+        // No provider options needed for the smoke harness.
+        OrtStatus* st = api->SessionOptionsAppendExecutionProvider(
+            o, ep_name.c_str(), nullptr, nullptr, 0);
+        if (st) {
+            api->ReleaseStatus(st);
+            api->ReleaseSessionOptions(o);
+            return nullptr;
+        }
         OrtSession* sess = nullptr;
-        OrtStatus* st = api->CreateSessionFromArray(
+        st = api->CreateSessionFromArray(
             env, model_bytes.data(), model_bytes.size(), o, &sess);
         api->ReleaseSessionOptions(o);
         if (st) {
@@ -459,8 +449,8 @@ int main(int argc, char** argv) {
     std::vector<float> input_data(input_count, 0.0f);
 
     OrtMemoryInfo* mem_info = nullptr;
-    api->CreateCpuMemoryInfo(&mem_info, OrtAllocatorType::OrtDeviceAllocator,
-                              OrtMemType::OrtMemTypeDefault);
+    api->CreateCpuMemoryInfo(OrtAllocatorType::OrtDeviceAllocator,
+                              OrtMemType::OrtMemTypeDefault, &mem_info);
 
     OrtValue* input_tensor = nullptr;
     OrtStatus* st = api->CreateTensorWithDataAsOrtValue(
@@ -491,11 +481,15 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < n_outputs; ++i) {
         api->SessionGetOutputName(session, i, allocator, &output_names[i]);
     }
+    // Run() takes const char* const* / const OrtValue* const*; build
+    // const-correct arrays from the allocator-returned char* names.
+    std::vector<const char*> output_names_c(n_outputs, nullptr);
+    for (size_t i = 0; i < n_outputs; ++i) output_names_c[i] = output_names[i];
+    const OrtValue* input_arr[] = {input_tensor};
 
     std::vector<OrtValue*> outputs(n_outputs, nullptr);
-    st = api->Run(session, nullptr, input_names, &input_tensor, 1,
-                  output_names.data(), output_names.data() + n_outputs,
-                  n_outputs, outputs.data());
+    st = api->Run(session, nullptr, input_names, input_arr, 1,
+                  output_names_c.data(), n_outputs, outputs.data());
 
     if (st) {
         print_json_field("inference", "failed", false);
@@ -548,7 +542,8 @@ int main(int argc, char** argv) {
             if (out_data && elem_count > 0) {
                 if (!all_finite(out_data, elem_count)) finite = false;
             }
-            api->ReleaseTensorTypeAndShapeInfo(tensor_info);
+            api->ReleaseTensorTypeAndShapeInfo(
+                const_cast<OrtTensorTypeAndShapeInfo*>(tensor_info));
         }
         if (type_info) api->ReleaseTypeInfo(type_info);
     }

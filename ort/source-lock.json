@@ -162,8 +162,8 @@
         "cpu",
         "directml"
       ],
-      "runner": "windows-latest",
-      "runner_note": "Windows x64 native runner with MSVC. DirectML uses the Microsoft.AI.DirectML NuGet package (dynamic CRT, MultiThreadedDLL)."
+      "runner": "windows-2022",
+      "runner_note": "Windows x64 native runner with MSVC VS 2022 (pinned to windows-2022 to satisfy the toolchain visual_studio_version requirement; windows-latest may ship a newer VS)."
     },
     "x86_64-unknown-linux-gnu": {
       "archive_format": "tar.gz",

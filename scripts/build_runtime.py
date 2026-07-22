@@ -212,12 +212,13 @@ def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
         # Visual Studio generator finds MSVC via the registry/vswhere without
         # vcvars, so the build itself works, but a direct cl.exe probe fails.
         # Use vswhere (always present on GitHub Windows runners and any VS
-        # install) to detect Visual Studio 2022 (version 17.x) instead.
+        # install) to detect the installed Visual Studio and verify its major
+        # version matches the requirement (17.x = VS 2022).
+        vs_major = {"2022": 17, "2019": 16}
+        expected_major = vs_major.get(str(required_vs))
         vswhere = Path(r"C:\Program Files (x86)\Microsoft Visual Studio"
                        r"\Installer\vswhere.exe")
-        vs_year = {"2022": "[17.0,18.0)", "2019": "[16.0,17.0)"}
-        version_range = vs_year.get(str(required_vs))
-        if version_range is None:
+        if expected_major is None:
             errors.append(
                 f"visual_studio_version: unknown required {required_vs}"
             )
@@ -226,15 +227,22 @@ def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
                           "absent)")
         else:
             r = subprocess.run(
-                [str(vswhere), "-latest", "-version", version_range,
-                 "-products", "*", "-property", "displayName"],
+                [str(vswhere), "-latest", "-products", "*",
+                 "-property", "installationVersion"],
                 capture_output=True, text=True,
             )
-            if r.returncode != 0 or not r.stdout.strip():
+            ver_str = r.stdout.strip()
+            major = 0
+            if ver_str:
+                try:
+                    major = int(ver_str.split(".")[0])
+                except ValueError:
+                    pass
+            if major != expected_major:
                 errors.append(
                     f"visual studio: expected {required_vs} "
-                    f"(version range {version_range}) not found by vswhere "
-                    f"(exit {r.returncode}, stdout={r.stdout.strip()!r})"
+                    f"(major {expected_major}), got version "
+                    f"{ver_str or 'none'} (major {major})"
                 )
 
     if errors:
