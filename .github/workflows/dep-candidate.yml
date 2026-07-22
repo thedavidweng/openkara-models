@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       branch_name: ${{ steps.branch.outputs.branch_name }}
+      is_ort_update: ${{ steps.branch.outputs.is_ort_update }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -38,11 +39,18 @@ jobs:
           python-version: "3.11"
       - name: Generate candidate branch name
         id: branch
+        env:
+          ORT_TAG: ${{ inputs.ort_tag }}
+          ORT_COMMIT: ${{ inputs.ort_commit }}
+          MODEL: ${{ inputs.model }}
+          MODEL_COMMIT: ${{ inputs.model_commit }}
         run: |
-          if [ -n "${{ inputs.ort_tag }}" ]; then
-            BRANCH="deps/candidate-ort-${{ inputs.ort_tag }}"
-          elif [ -n "${{ inputs.model }}" ]; then
-            BRANCH="deps/candidate-${{ inputs.model }}-${{ inputs.model_commit }}"
+          if [ -n "$ORT_TAG" ]; then
+            BRANCH="deps/candidate-ort-$ORT_TAG"
+            echo "is_ort_update=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$MODEL" ]; then
+            BRANCH="deps/candidate-$MODEL-$MODEL_COMMIT"
+            echo "is_ort_update=false" >> "$GITHUB_OUTPUT"
           else
             echo "ERROR: no update specified"
             exit 1
@@ -50,17 +58,22 @@ jobs:
           echo "branch_name=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "Branch: $BRANCH"
       - name: Prepare lock update
+        env:
+          ORT_TAG: ${{ inputs.ort_tag }}
+          ORT_COMMIT: ${{ inputs.ort_commit }}
+          MODEL: ${{ inputs.model }}
+          MODEL_COMMIT: ${{ inputs.model_commit }}
         run: |
-          if [ -n "${{ inputs.ort_tag }}" ]; then
+          if [ -n "$ORT_TAG" ]; then
             python scripts/generate_dep_candidate.py \
-              --ort-tag "${{ inputs.ort_tag }}" \
-              --ort-commit "${{ inputs.ort_commit }}" \
+              --ort-tag "$ORT_TAG" \
+              --ort-commit "$ORT_COMMIT" \
               --output candidate-summary.json \
               --markdown candidate-summary.md
           else
             python scripts/generate_dep_candidate.py \
-              --model "${{ inputs.model }}" \
-              --model-commit "${{ inputs.model_commit }}" \
+              --model "$MODEL" \
+              --model-commit "$MODEL_COMMIT" \
               --output candidate-summary.json \
               --markdown candidate-summary.md
           fi
@@ -102,8 +115,13 @@ jobs:
           name: candidate-summary
       - name: Apply lock update
         run: |
-          # The lock was updated in the prepare job; download and overwrite.
-          # (In a real implementation, this would checkout the candidate branch.)
+          # The downloaded candidate-summary artifact includes ort/source-lock.json
+          # (overwriting the checked-out version). Verify it is present before building.
+          if [ ! -f ort/source-lock.json ]; then
+            echo "ERROR: candidate ort/source-lock.json not found in downloaded artifact"
+            exit 1
+          fi
+          echo "Applied candidate source-lock.json"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -137,7 +155,7 @@ jobs:
           pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
           pip install -r requirements.txt
       - name: Run detection + candidate tests
-        run: python -m pytest tests/test_dep_detection.py -q
+        run: python -m pytest tests/test_dep_detection.py tests/test_dep_candidate.py -q
       - name: Run quality suite (PR tier)
         run: |
           # This requires a model file; skip if not available.
@@ -154,7 +172,7 @@ jobs:
             quality-report.json
             candidate-summary.md
 
-  # Create the candidate PR with the summary.
+  # Create the candidate PR with the summary and verification artifacts.
   create-pr:
     needs: [prepare, build-runtimes, quality-gates]
     if: always() && needs.prepare.result == 'success'
@@ -162,26 +180,114 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: candidate-summary
+      # Download the runtime + quality artifacts produced by earlier jobs so
+      # the candidate PR body can reference them and so we can gate PR creation
+      # on their presence. Without this, the PR claimed validation results that
+      # were never attached to the candidate.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: quality-reports
+          path: artifacts/quality-reports
+        if: needs.quality-gates.result == 'success'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: runtime-*
+          path: artifacts/runtimes
+          merge-multiple: true
+        if: needs.build-runtimes.result == 'success'
+      - name: Verify artifacts and build PR body
+        env:
+          IS_ORT_UPDATE: ${{ needs.prepare.outputs.is_ort_update }}
+          BUILD_RUNTIMES_RESULT: ${{ needs.build-runtimes.result }}
+          QUALITY_GATES_RESULT: ${{ needs.quality-gates.result }}
+        run: |
+          set -euo pipefail
+          # Build an artifact manifest appended to the candidate summary.
+          MANIFEST="artifacts/PR-ARTIFACT-MANIFEST.md"
+          {
+            echo ""
+            echo "## Verification artifacts"
+            echo ""
+            echo "This candidate PR was produced by workflow run "
+            echo "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo ""
+            echo "| Artifact | Job result | Files |"
+            echo "|----------|------------|-------|"
+          } > "$MANIFEST"
+
+          # Quality reports.
+          if [ "$QUALITY_GATES_RESULT" = "success" ] && [ -d artifacts/quality-reports ]; then
+            QFILES=$(find artifacts/quality-reports -type f -printf '%f\n' | sort | tr '\n' ' ')
+            echo "| quality-reports | success | $QFILES |" >> "$MANIFEST"
+          else
+            echo "| quality-reports | $QUALITY_GATES_RESULT | (not produced) |" >> "$MANIFEST"
+          fi
+
+          # Runtime archives (ORT updates only).
+          if [ "$IS_ORT_UPDATE" = "true" ]; then
+            if [ "$BUILD_RUNTIMES_RESULT" = "success" ] && [ -d artifacts/runtimes ] && \
+               [ -n "$(find artifacts/runtimes -type f -print -quit)" ]; then
+              RFILES=$(find artifacts/runtimes -type f -printf '%f\n' | sort | tr '\n' ' ')
+              echo "| runtime archives | success | $RFILES |" >> "$MANIFEST"
+            else
+              echo "| runtime archives | $BUILD_RUNTIMES_RESULT | (not produced) |" >> "$MANIFEST"
+              echo "ERROR: ORT update candidate missing runtime build artifacts" >&2
+              exit 1
+            fi
+          fi
+
+          # Combine the candidate summary + manifest into the final PR body.
+          cat candidate-summary.md "$MANIFEST" > pr-body.md
+          echo "PR body assembled:"
+          cat pr-body.md
       - name: Create or update candidate PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ needs.prepare.outputs.branch_name }}
+          IS_ORT_UPDATE: ${{ needs.prepare.outputs.is_ort_update }}
         run: |
-          BRANCH="${{ needs.prepare.outputs.branch_name }}"
-          git checkout -b "$BRANCH" || git checkout "$BRANCH"
-          # Apply lock update if ORT update.
-          if [ -f ort/source-lock.json ]; then
+          set -euo pipefail
+          # Configure git identity (hosted runners have no default identity).
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Create or switch to the candidate branch.
+          git checkout -b "$BRANCH_NAME" 2>/dev/null || git checkout "$BRANCH_NAME"
+          # Stage only the lock file for ORT updates; model-weight updates have
+          # no lock changes yet (the conversion workflow handles those).
+          if [ "$IS_ORT_UPDATE" = "true" ]; then
             git add ort/source-lock.json
           fi
-          git commit -m "deps: candidate update" || true
-          git push origin "$BRANCH" || true
-          # Create PR with summary.
-          gh pr create \
-            --title "deps: candidate update ($BRANCH)" \
-            --body-file candidate-summary.md \
-            --head "$BRANCH" \
+          # Commit only if there are staged changes.
+          if ! git diff --cached --quiet; then
+            git commit -m "deps: candidate update"
+          fi
+          # Push the branch (force-with-lease to replace stale candidates).
+          git push --force-with-lease origin "$BRANCH_NAME"
+          # Create PR or update existing PR body. gh pr create exits non-zero
+          # when a PR already exists for the head branch; distinguish that from
+          # other failures by inspecting the output.
+          PR_CREATE_OUTPUT=$(gh pr create \
+            --title "deps: candidate update ($BRANCH_NAME)" \
+            --body-file pr-body.md \
+            --head "$BRANCH_NAME" \
             --base main \
-            --label "dependencies" || \
-          gh pr edit "$BRANCH" --body-file candidate-summary.md
+            --label "dependencies" 2>&1) && {
+            echo "Created new candidate PR"
+            echo "$PR_CREATE_OUTPUT"
+          } || {
+            # gh pr create returns exit 1 when a PR already exists; any other
+            # failure (permissions, network, invalid label) should re-raise.
+            if echo "$PR_CREATE_OUTPUT" | grep -qi "already exists"; then
+              echo "PR already exists, updating body"
+              gh pr edit "$BRANCH_NAME" --body-file pr-body.md
+            else
+              echo "ERROR: gh pr create failed:" >&2
+              echo "$PR_CREATE_OUTPUT" >&2
+              exit 1
+            fi
+          }
