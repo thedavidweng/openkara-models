@@ -60,22 +60,32 @@ def _load_corpus(tier: str | None) -> list[dict[str, Any]]:
 
 
 def _compute_pytorch_reference(model_name: str, inp: np.ndarray) -> np.ndarray:
-    """Run the PyTorch Demucs ensemble reference."""
+    """Run the PyTorch Demucs ensemble reference.
+
+    Returns the output with the batch dimension preserved, matching the ONNX
+    output shape and the corpus manifest's ``expected_output_shape`` (which
+    includes the leading batch dim).
+    """
     import torch
     from demucs_loader import load
-    model = load(model_name)
+    # demucs_loader.load() returns (model, segment_frames) — unpack it.
+    model, _seg = load(model_name)
     with torch.no_grad():
         t = torch.from_numpy(inp).unsqueeze(0)  # add batch dim
         out = model(t)
-    result = out.squeeze(0).numpy()
+    # Keep the batch dim so PyTorch output shape matches ONNX output shape
+    # and the manifest's expected_output_shape (e.g. [1, 4, 2, 343980]).
+    result = out.detach().cpu().numpy()
     del model, t, out
     gc.collect()
     return result
 
 
 def _compute_onnx_output(onnx_path: str, inp: np.ndarray) -> np.ndarray:
-    """Run the ONNX model."""
-    import onnxruntime as ort
+    """Run the ONNX model.
+
+    Returns the first output tensor with the batch dimension preserved.
+    """
     from onnx_runtime_contract import make_contract_compliant_session
     sess = make_contract_compliant_session(Path(onnx_path))
     t = inp[np.newaxis, ...]  # add batch dim
@@ -179,22 +189,37 @@ def main() -> int:
     args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(f"\nreport: {args.report}")
 
-    # Gate: fail on NaN/Inf, shape mismatch, or MSE exceeding threshold.
-    failed = False
-    for r in results:
-        if r["onnx_has_nan"] or r["onnx_has_inf"]:
-            print(f"FAIL: {r['fixture_id']}: NaN/Inf in output", file=sys.stderr)
-            failed = True
-        if r.get("expected_shape_match") is False:
-            print(f"FAIL: {r['fixture_id']}: shape mismatch", file=sys.stderr)
-            failed = True
-        if r.get("mse") is not None and r["mse"] > mse_threshold:
-            print(f"FAIL: {r['fixture_id']}: MSE {r['mse']} > {mse_threshold}", file=sys.stderr)
-            failed = True
-    if failed:
+    # Gate: fail on NaN/Inf, shape mismatch (onnx vs pytorch or vs expected),
+    # or MSE exceeding threshold. The gate must align with the report validator
+    # (validate_quality_report.py) so a passing run always produces a valid report.
+    failures = gate_failures(results, mse_threshold)
+    for msg in failures:
+        print(f"FAIL: {msg}", file=sys.stderr)
+    if failures:
         return 2
     print("OK")
     return 0
+
+
+def gate_failures(results: list[dict[str, Any]], mse_threshold: float) -> list[str]:
+    """Return failure messages for any result that violates the quality gate.
+
+    The gate checks must stay aligned with ``validate_quality_report.validate_report``:
+    any report produced by a passing run must also pass validation, and vice versa.
+    """
+    failures: list[str] = []
+    for r in results:
+        fid = r["fixture_id"]
+        if r["onnx_has_nan"] or r["onnx_has_inf"]:
+            failures.append(f"{fid}: NaN/Inf in output")
+        if r.get("shape_match") is False:
+            failures.append(f"{fid}: ONNX vs PyTorch shape mismatch")
+        if r.get("expected_shape_match") is False:
+            failures.append(f"{fid}: output shape != expected_output_shape")
+        mse = r.get("mse")
+        if mse is not None and mse > mse_threshold:
+            failures.append(f"{fid}: MSE {mse} > {mse_threshold}")
+    return failures
 
 
 if __name__ == "__main__":

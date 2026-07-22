@@ -122,6 +122,61 @@ def test_output_digest_deterministic() -> None:
     assert q._output_digest(a) != q._output_digest(b)
 
 
+def test_gate_failures_on_shape_mismatch_without_expected_shape() -> None:
+    """Regression: gate must fail when onnx vs pytorch shapes disagree, even
+    if expected_shape is not set. Previously the runner returned success in
+    this case but the validator rejected the report."""
+    import run_quality_suite as q
+    results = [{
+        "fixture_id": "fx",
+        "onnx_has_nan": False,
+        "onnx_has_inf": False,
+        "shape_match": False,  # onnx vs pytorch mismatch
+        # expected_shape_match intentionally absent
+        "mse": None,
+    }]
+    failures = q.gate_failures(results, mse_threshold=1e-4)
+    assert any("shape mismatch" in f for f in failures)
+
+
+def test_gate_failures_on_expected_shape_mismatch() -> None:
+    import run_quality_suite as q
+    results = [{
+        "fixture_id": "fx",
+        "onnx_has_nan": False,
+        "onnx_has_inf": False,
+        "shape_match": True,
+        "expected_shape_match": False,
+        "mse": 0.0,
+    }]
+    failures = q.gate_failures(results, mse_threshold=1e-4)
+    assert any("expected_output_shape" in f for f in failures)
+
+
+def test_gate_failures_clean() -> None:
+    import run_quality_suite as q
+    results = [{
+        "fixture_id": "fx",
+        "onnx_has_nan": False,
+        "onnx_has_inf": False,
+        "shape_match": True,
+        "expected_shape_match": True,
+        "mse": 1e-6,
+    }]
+    assert q.gate_failures(results, mse_threshold=1e-4) == []
+
+
+def test_gate_failures_aligned_with_validator() -> None:
+    """Any report that passes the gate must also pass the validator, and
+    vice versa. This is the contract that makes runner + validator coherent."""
+    import run_quality_suite as q
+    import validate_quality_report as v
+    base = _valid_report()
+    # _valid_report() already passes both gate and validator.
+    assert q.gate_failures(base["results"], base["mse_threshold"]) == []
+    assert v.validate_report(base) == []
+
+
 def test_validate_cli() -> None:
     report = _valid_report()
     p = Path("/tmp/test-quality-report.json")
