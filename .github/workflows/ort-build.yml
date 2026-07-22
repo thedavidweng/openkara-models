@@ -7,7 +7,11 @@ on:
       - "scripts/build_runtime.py"
       - "scripts/verify_runtime_package.py"
       - "scripts/validate_source_lock.py"
+      - "scripts/generate_required_operators.py"
+      - "scripts/compare_runtime_builds.py"
       - "tests/test_source_lock.py"
+      - "tests/test_required_operators.py"
+      - "tests/test_compare_runtime_builds.py"
       - ".github/workflows/ort-build.yml"
   push:
     branches: [main]
@@ -16,6 +20,8 @@ on:
       - "scripts/build_runtime.py"
       - "scripts/verify_runtime_package.py"
       - "scripts/validate_source_lock.py"
+      - "scripts/generate_required_operators.py"
+      - "scripts/compare_runtime_builds.py"
 
 jobs:
   validate-source-lock:
@@ -27,13 +33,14 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install "pytest>=8.0"
+        run: pip install "pytest>=8.0" "onnx>=1.22.0"
       - name: Validate source lock
         run: python scripts/validate_source_lock.py
-      - name: Source lock tests
-        run: python -m pytest tests/test_source_lock.py -q
+      - name: Source lock + required-operator + comparison tests
+        run: |
+          python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py -q
       - name: Syntax check build scripts
-        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py
+        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py
 
   build-aarch64-apple-darwin:
     needs: validate-source-lock
@@ -137,3 +144,75 @@ jobs:
           name: ort-x86_64-pc-windows-msvc
           path: ort/packages/onnxruntime-*-x86_64-pc-windows-msvc.zip
           retention-days: 14
+
+  # Reduced-operator build + full-vs-reduced comparison for x86_64 Linux.
+  # Downloads the full build artifact, generates the required-operator config
+  # from the stable catalog model, builds the reduced runtime, and compares
+  # archive size + inference output. Fails if the reduced runtime cannot load
+  # the model (a required kernel was pruned) or output diverges.
+  reduced-build-and-compare:
+    needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      - name: Install Python deps
+        run: pip install "onnx>=1.22.0" "onnxruntime>=1.27.0,<2" "numpy>=1.24"
+
+      - name: Download full build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ort-x86_64-unknown-linux-gnu
+          path: ort/packages
+
+      - name: Download stable model from catalog
+        run: |
+          python - <<'PY'
+          import json, urllib.request, pathlib
+          m = json.load(open("catalog/releases/2026-07-20-001.json"))
+          model = next(a for a in m["artifacts"]["models"]
+                       if a["artifact_id"] == "htdemucs.balanced.fp32.onnx")
+          url = model["download_url"]
+          dest = pathlib.Path("models/htdemucs.onnx")
+          dest.parent.mkdir(parents=True, exist_ok=True)
+          print(f"downloading {url} ...")
+          urllib.request.urlretrieve(url, dest)
+          import hashlib
+          got = hashlib.sha256(dest.read_bytes()).hexdigest()
+          assert got == model["archive_digest"], f"sha256 mismatch {got} != {model['archive_digest']}"
+          print("model downloaded + verified")
+          PY
+
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.onnx
+
+      - name: Build reduced runtime
+        run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu --reduced
+
+      - name: Verify reduced package
+        run: python scripts/verify_runtime_package.py --all
+
+      - name: Compare full vs reduced (size + inference)
+        run: |
+          FULL=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          REDUCED=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
+          python scripts/compare_runtime_builds.py \
+            --full "$FULL" --reduced "$REDUCED" \
+            --model models/htdemucs.onnx --frames 343980 \
+            --warmup 1 --iters 3 --tolerance 0.0 \
+            --report runtime-comparison-report.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: runtime-comparison-report
+          path: runtime-comparison-report.json
+          retention-days: 30

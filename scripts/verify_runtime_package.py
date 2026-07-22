@@ -63,9 +63,13 @@ def _extract_archive(archive: Path) -> dict[str, bytes]:
     return files
 
 
-def _target_from_archive_name(name: str) -> str:
-    """Extract target triple from archive name like onnxruntime-1.27.1-openkara-aarch64-apple-darwin.tar.gz"""
-    # Strip .tar.gz (two extensions) or .zip (one extension)
+def _target_from_archive_name(name: str) -> tuple[str, bool]:
+    """Extract (target_triple, is_reduced) from an archive name.
+
+    Accepts names like:
+      onnxruntime-1.27.1-openkara-aarch64-apple-darwin.tar.gz
+      onnxruntime-1.27.1-openkara-aarch64-apple-darwin-reduced.tar.gz
+    """
     base = name
     if base.endswith(".tar.gz"):
         base = base[:-7]
@@ -74,7 +78,11 @@ def _target_from_archive_name(name: str) -> str:
     segments = base.split("-openkara-")
     if len(segments) != 2:
         raise ValueError(f"cannot parse target from archive name: {name}")
-    return segments[1]
+    target = segments[1]
+    is_reduced = target.endswith("-reduced")
+    if is_reduced:
+        target = target[: -len("-reduced")]
+    return target, is_reduced
 
 
 def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
@@ -82,7 +90,7 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
     errors: list[str] = []
 
     try:
-        target = _target_from_archive_name(archive.name)
+        target, is_reduced = _target_from_archive_name(archive.name)
     except ValueError as e:
         return [str(e)]
 
@@ -151,6 +159,58 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
     has_notice = any("NOTICE" in f.upper() or "THIRDPARTY" in f.upper() for f in files)
     if not has_notice:
         errors.append("missing NOTICE file")
+
+    # Reproducibility: build manifest must not contain build_host (hostname
+    # varies per build host and breaks reproducibility).
+    build_meta = manifest.get("build", {})
+    if "build_host" in build_meta:
+        errors.append(
+            "build-manifest.json contains build_host field; remove it for "
+            "reproducibility (hostname varies per build host)"
+        )
+
+    # Submodule verification: every submodule in the lock must be present in
+    # the build manifest with the expected SHA.
+    expected_submodules = lock.get("submodules", {})
+    actual_submodules = build_meta.get("submodule_state", {})
+    for path, info in expected_submodules.items():
+        expected_sha = info["expected_sha"]
+        actual_sha = actual_submodules.get(path)
+        if actual_sha is None:
+            errors.append(f"submodule {path} missing from build manifest")
+        elif actual_sha != expected_sha:
+            errors.append(
+                f"submodule {path} SHA mismatch (manifest={actual_sha} "
+                f"lock={expected_sha})"
+            )
+
+    # Reduced-build verification: the archive name and build manifest must
+    # agree on whether this is a reduced build. A reduced archive's manifest
+    # must record reduced_build=true and an ops_config_sha256 matching the
+    # committed ort/required-operators.config.
+    if is_reduced != build_meta.get("reduced_build", False):
+        errors.append(
+            f"reduced-build flag mismatch: archive name is_reduced={is_reduced} "
+            f"but manifest reduced_build={build_meta.get('reduced_build', False)}"
+        )
+    if is_reduced:
+        reduced_cfg = lock.get("reduced_build")
+        if not reduced_cfg:
+            errors.append("archive is reduced but source lock has no reduced_build section")
+        else:
+            ops_config_path = ROOT / reduced_cfg["config_path"]
+            if not ops_config_path.is_file():
+                errors.append(
+                    f"required-operators config not found: {ops_config_path}"
+                )
+            else:
+                expected_ops_sha = _sha256_bytes(ops_config_path.read_bytes())
+                actual_ops_sha = build_meta.get("ops_config_sha256")
+                if actual_ops_sha != expected_ops_sha:
+                    errors.append(
+                        f"ops_config_sha256 mismatch (manifest={actual_ops_sha} "
+                        f"config={expected_ops_sha})"
+                    )
 
     return errors
 
