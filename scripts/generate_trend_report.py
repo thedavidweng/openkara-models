@@ -78,7 +78,13 @@ def generate_trend(
             })
         else:
             d = _delta(cval, bval)
-            status = "improved" if d.get("improved") else ("regressed" if d.get("delta", 0) > 0 else "unchanged")
+            delta_val = d.get("delta")
+            if d.get("improved"):
+                status = "improved"
+            elif delta_val is not None and delta_val > 0:
+                status = "regressed"
+            else:
+                status = "unchanged"
             trends.append({
                 "metric": metric, "category": budget["category"],
                 "direction": budget["direction"],
