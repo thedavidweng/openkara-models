@@ -32,7 +32,11 @@ add_executable(ort_smoke ort_smoke.cpp)
 # onnxruntime_c_api.h and is included as <onnxruntime/core/session/...>, so the
 # include directory must be <source>/include. The source root is also added so
 # any ancillary headers referenced relative to it resolve correctly.
+# The smoke source directory is added so #include "profile_parser.hpp"
+# resolves on all compilers (MSVC does not add the source file's directory
+# to the quoted-include search path by default).
 target_include_directories(ort_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
     "${ORT_SOURCE_DIR_ABS}/include"
     "${ORT_SOURCE_DIR_ABS}")
 

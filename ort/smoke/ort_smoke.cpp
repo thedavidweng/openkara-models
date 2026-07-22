@@ -13,6 +13,15 @@
 // The requested execution provider is tried first; if session creation with
 // that provider fails, the harness falls back to CPU and records the fallback.
 //
+// To measure the fallback node count, the harness enables the ORT session
+// profiler before creating the session. After inference it calls
+// SessionEndProfiling to obtain the profile file path, parses the profile
+// JSON, and counts the number of node events whose "args.provider" is
+// "CPUExecutionProvider" — i.e. the number of nodes that ran on the CPU
+// (the fallback EP) rather than the requested provider. When the requested
+// provider is CPU itself, this count is the total node count (every node
+// ran on CPU) and used_fallback is false.
+//
 // It writes a JSON object to stdout with the inference results. A Python
 // wrapper (scripts/run_native_smoke.py) adds the runtime/model digests and
 // target and writes the final report file.
@@ -43,6 +52,9 @@
 
 // ORT C API header (from the pinned source checkout, passed via -I).
 #include <onnxruntime/core/session/onnxruntime_c_api.h>
+
+// Profile JSON parser (shared with the unit test).
+#include "profile_parser.hpp"
 
 namespace {
 
@@ -124,12 +136,7 @@ private:
 
 // Read a file into a buffer.
 std::vector<uint8_t> read_file(const std::string& path, std::string& err) {
-    FILE* f =
-#if defined(_WIN32)
-        fopen(path.c_str(), "rb");
-#else
-        fopen(path.c_str(), "rb");
-#endif
+    FILE* f = fopen(path.c_str(), "rb");
     if (!f) {
         err = "cannot open file: " + path;
         return {};
@@ -150,20 +157,6 @@ std::vector<uint8_t> read_file(const std::string& path, std::string& err) {
     }
     fclose(f);
     return buf;
-}
-
-// Provider name mapping to ORT C API append functions.
-// Returns the ORT execution-provider factory id used by the harness.
-struct ProviderAttempt {
-    std::string name;       // e.g. "cpu", "coreml", "xnnpack", "directml"
-    bool is_cpu;
-};
-
-ProviderAttempt parse_provider(const std::string& s) {
-    ProviderAttempt p;
-    p.name = s;
-    p.is_cpu = (s == "cpu" || s == "CPUExecutionProvider");
-    return p;
 }
 
 // Check that a float buffer is entirely finite (no NaN, no Inf).
@@ -198,6 +191,21 @@ void print_json_field(const char* key, const std::string& value, bool last) {
 
 void print_json_field_bool(const char* key, bool value, bool last) {
     printf("  \"%s\": %s%s\n", key, value ? "true" : "false", last ? "" : ",");
+}
+
+// Print the trailing fields that every JSON output (success or failure)
+// must include so the schema is consistent across all paths. The caller
+// has already printed session_creation / inference / output_shape /
+// finite_output / provider_assignment as appropriate; this prints the
+// final fallback_node_count and used_fallback and closes the object.
+void print_json_trailer(int fallback_node_count, bool used_fallback) {
+    if (fallback_node_count >= 0) {
+        printf("  \"fallback_node_count\": %d,\n", fallback_node_count);
+    } else {
+        printf("  \"fallback_node_count\": null,\n");
+    }
+    print_json_field_bool("used_fallback", used_fallback, true);
+    printf("}\n");
 }
 
 }  // namespace
@@ -242,8 +250,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, false);
         return 1;
     }
 
@@ -258,8 +265,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, false);
         return 1;
     }
 
@@ -272,8 +278,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, false);
         return 1;
     }
 
@@ -288,8 +293,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, false);
         return 1;
     }
 
@@ -321,8 +325,7 @@ int main(int argc, char** argv) {
             print_json_field("output_shape", "", false);
             print_json_field_bool("finite_output", false, false);
             print_json_field("provider_assignment", "", false);
-            printf("  \"fallback_node_count\": null\n");
-            printf("}\n");
+            print_json_trailer(-1, false);
             return 1;
         }
     }
@@ -337,8 +340,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, false);
         api->ReleaseEnv(env);
         return 1;
     }
@@ -352,15 +354,13 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, false);
         api->ReleaseEnv(env);
         return 1;
     }
 
     // Append the requested execution provider. Try the requested one first;
     // on failure fall back to CPU.
-    ProviderAttempt pa = parse_provider(provider);
     std::string provider_assigned;
     bool used_fallback = false;
     std::string last_session_error;  // captured for diagnostics
@@ -405,6 +405,26 @@ int main(int argc, char** argv) {
                 return nullptr;
             }
         }
+        // Enable profiling so we can measure the fallback node count after
+        // inference. The profile file prefix is a path without extension;
+        // ORT appends a timestamp and ".json". Use a unique prefix per
+        // attempt so the profile of a failed attempt does not overwrite the
+        // successful one.
+        static int profile_counter = 0;
+        std::string profile_prefix = "ort_smoke_profile_";
+        profile_prefix += std::to_string(profile_counter++);
+#if defined(_WIN32)
+        // ORTCHAR_T is wchar_t on Windows.
+        std::wstring wprefix(profile_prefix.begin(), profile_prefix.end());
+        st = api->EnableProfiling(o, wprefix.c_str());
+#else
+        st = api->EnableProfiling(o, profile_prefix.c_str());
+#endif
+        if (st) {
+            // Profiling is optional for the smoke test; if it fails to enable
+            // we still proceed (fallback_node_count will be -1 / null).
+            api->ReleaseStatus(st);
+        }
         OrtSession* sess = nullptr;
         st = api->CreateSessionFromArray(
             env, model_bytes.data(), model_bytes.size(), o, &sess);
@@ -441,8 +461,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, used_fallback);
         api->ReleaseSessionOptions(opts);
         api->ReleaseEnv(env);
         return 1;
@@ -462,8 +481,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", provider_assigned, false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, used_fallback);
         api->ReleaseSession(session);
         api->ReleaseSessionOptions(opts);
         api->ReleaseEnv(env);
@@ -500,8 +518,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", provider_assigned, false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, used_fallback);
         if (input_name_c) api->AllocatorFree(allocator, input_name_c);
         api->ReleaseMemoryInfo(mem_info);
         api->ReleaseSession(session);
@@ -534,8 +551,7 @@ int main(int argc, char** argv) {
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", provider_assigned, false);
-        printf("  \"fallback_node_count\": null\n");
-        printf("}\n");
+        print_json_trailer(-1, used_fallback);
         for (size_t i = 0; i < n_outputs; ++i) if (output_names[i]) api->AllocatorFree(allocator, output_names[i]);
         if (input_name_c) api->AllocatorFree(allocator, input_name_c);
         api->ReleaseValue(input_tensor);
@@ -590,13 +606,29 @@ int main(int argc, char** argv) {
     print_json_field_bool("finite_output", finite, false);
     print_json_field("provider_assignment", provider_assigned, false);
 
-    // Fallback node count: the C API does not expose the per-node provider
-    // assignment directly without the profiler. We record whether a fallback
-    // to CPU was used (null = not measured at the node level; the wrapper
-    // can refine this from the session profiler if needed).
-    printf("  \"fallback_node_count\": %s,\n", used_fallback ? "null" : "null");
-    printf("  \"used_fallback\": %s\n", used_fallback ? "true" : "false");
-    printf("}\n");
+    // End profiling and parse the profile file to count the nodes that ran
+    // on the CPU EP (the fallback provider). SessionEndProfiling returns
+    // the path to the profile JSON file via the allocator.
+    int fallback_node_count = -1;
+    char* profile_path_c = nullptr;
+    OrtStatus* prof_st = api->SessionEndProfiling(session, allocator, &profile_path_c);
+    if (prof_st) {
+        // Profiling was not enabled or failed; record null.
+        api->ReleaseStatus(prof_st);
+    } else if (profile_path_c) {
+        std::string profile_path(profile_path_c);
+        api->AllocatorFree(allocator, profile_path_c);
+        std::string prof_err;
+        std::vector<uint8_t> prof_bytes = read_file(profile_path, prof_err);
+        if (!prof_bytes.empty()) {
+            std::string prof_json(prof_bytes.begin(), prof_bytes.end());
+            fallback_node_count = ort_smoke::count_cpu_nodes(prof_json);
+        }
+        // Best-effort cleanup of the profile file (it is also gitignored).
+        remove(profile_path.c_str());
+    }
+
+    print_json_trailer(fallback_node_count, used_fallback);
 
     // Cleanup.
     for (size_t i = 0; i < n_outputs; ++i) {

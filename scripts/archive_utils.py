@@ -180,9 +180,10 @@ def safe_extract(archive: Path, dest: Path) -> Path:
     Applies all safety checks before writing any file to disk. Creates ``dest``
     if it does not exist. Returns ``dest``.
 
-    Symlinks and hardlinks that pass the escape check are materialized as
-    regular file copies of their target within ``dest`` (we do not create
-    links, to avoid TOCTOU and cross-filesystem issues).
+    Symlinks and hardlinks are validated (rejected if they escape ``dest``)
+    but are NOT materialized on disk — they are skipped entirely. This avoids
+    TOCTOU and cross-filesystem issues with creating links, and the runtime
+    archives we process contain only regular files.
     """
     dest.mkdir(parents=True, exist_ok=True)
     base = dest.resolve()

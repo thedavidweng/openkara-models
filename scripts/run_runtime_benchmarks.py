@@ -247,6 +247,9 @@ def main() -> int:
                              "without --catalog so shape validation is enforced.")
     parser.add_argument("--catalog", type=Path, default=None,
                         help="Catalog manifest to resolve compatible models from.")
+    parser.add_argument("--model-artifact-id", type=str, default=None,
+                        help="When using --catalog, select only this artifact_id. "
+                             "If omitted, all compatible models are benchmarked.")
     parser.add_argument("--target", type=str, default=None,
                         help="Target triple for catalog compatibility filtering.")
     parser.add_argument("--frames", type=int, default=343980,
@@ -295,6 +298,12 @@ def main() -> int:
             models.append((args.model.name, args.model, art))
         elif args.catalog:
             arts = _resolve_model_from_catalog(args.catalog, args.download_dir, args.target)
+            if args.model_artifact_id:
+                arts = [a for a in arts if a.get("artifact_id") == args.model_artifact_id]
+                if not arts:
+                    print(f"ERROR: --model-artifact-id {args.model_artifact_id!r} not "
+                          f"found in catalog {args.catalog}", file=sys.stderr)
+                    return 1
             for art in arts:
                 p = _download_model(art, args.download_dir)
                 models.append((art["artifact_id"], p, art))

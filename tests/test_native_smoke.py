@@ -11,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -96,3 +97,76 @@ def test_benchmark_accepts_model_with_explicit_shape(tmp_path: Path) -> None:
     # It should get past the bypass guard; it will fail at inference because
     # the model is fake, but the error should NOT mention expected-output-shape.
     assert "expected-output-shape" not in r.stderr
+
+
+def test_benchmark_rejects_unknown_model_artifact_id(tmp_path: Path) -> None:
+    """--catalog with an unknown --model-artifact-id must fail with a clear
+    error, not silently benchmark nothing."""
+    import io
+    import tarfile
+    archive = tmp_path / "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        data = b"x"
+        info = tarfile.TarInfo(name="libonnxruntime.so")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    archive.write_bytes(buf.getvalue())
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({
+        "artifacts": {"models": [
+            {"artifact_id": "htdemucs.balanced.fp32.onnx",
+             "filename": "htdemucs.onnx", "download_url": "http://example.com/m.onnx",
+             "archive_digest": "0" * 64,
+             "model": {"output_semantics": "[1,4,2,343980]"}},
+        ]},
+        "compatibility": [],
+    }))
+    r = subprocess.run(
+        [sys.executable, str(SCRIPTS / "run_runtime_benchmarks.py"),
+         "--runtime", str(archive), "--catalog", str(catalog),
+         "--model-artifact-id", "nonexistent.onnx",
+         "--target", "x86_64-unknown-linux-gnu",
+         "--report", str(tmp_path / "report.json")],
+        capture_output=True, text=True,
+    )
+    assert r.returncode != 0
+    assert "nonexistent.onnx" in r.stderr or "nonexistent.onnx" in r.stdout
+
+
+def test_benchmark_catalog_resolves_model_artifact_id(tmp_path: Path) -> None:
+    """--catalog with a valid --model-artifact-id must resolve the model and
+    proceed past the catalog resolution stage (it will fail later at
+    download/inference because the URL is fake, but the error should not
+    mention model-artifact-id)."""
+    import io
+    import tarfile
+    archive = tmp_path / "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        data = b"x"
+        info = tarfile.TarInfo(name="libonnxruntime.so")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    archive.write_bytes(buf.getvalue())
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({
+        "artifacts": {"models": [
+            {"artifact_id": "htdemucs.balanced.fp32.onnx",
+             "filename": "htdemucs.onnx", "download_url": "http://example.com/m.onnx",
+             "archive_digest": "0" * 64,
+             "model": {"output_semantics": "[1,4,2,343980]"}},
+        ]},
+        "compatibility": [],
+    }))
+    r = subprocess.run(
+        [sys.executable, str(SCRIPTS / "run_runtime_benchmarks.py"),
+         "--runtime", str(archive), "--catalog", str(catalog),
+         "--model-artifact-id", "htdemucs.balanced.fp32.onnx",
+         "--target", "x86_64-unknown-linux-gnu",
+         "--report", str(tmp_path / "report.json")],
+        capture_output=True, text=True,
+    )
+    # Should fail at download (fake URL), not at model resolution.
+    assert r.returncode != 0
+    assert "not found in catalog" not in r.stderr
