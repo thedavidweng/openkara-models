@@ -1,0 +1,54 @@
+name: Catalog schema & fixtures
+
+on:
+  pull_request:
+    paths:
+      - "catalog/**"
+      - "scripts/catalog_model.py"
+      - "scripts/validate_catalog.py"
+      - "scripts/generate_catalog_fixtures.py"
+      - "tests/test_catalog_validation.py"
+      - "requirements.txt"
+      - "requirements-dev.txt"
+      - ".github/workflows/catalog-validate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "catalog/**"
+      - "scripts/catalog_model.py"
+      - "scripts/validate_catalog.py"
+      - "scripts/generate_catalog_fixtures.py"
+      - "tests/test_catalog_validation.py"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            .github/workflows/catalog-validate.yml
+
+      - name: Install validator deps (no torch)
+        run: pip install "jsonschema>=4.20" "pytest>=8.0"
+
+      - name: Validate all fixtures
+        run: python scripts/validate_catalog.py --all-fixtures
+
+      - name: Catalog unit tests
+        run: python -m pytest tests/test_catalog_validation.py -q
+
+      - name: Fixtures are fresh (regenerate + git diff)
+        run: |
+          python scripts/generate_catalog_fixtures.py
+          git diff --exit-code -- catalog/fixtures
+
+      - name: Syntax check catalog scripts
+        run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py

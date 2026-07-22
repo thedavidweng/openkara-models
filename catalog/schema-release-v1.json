@@ -1,0 +1,521 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/catalog/schema-release-v1.json",
+  "title": "OpenKara catalog immutable release manifest (v1)",
+  "description": "Schema for an immutable openkara-models infrastructure release manifest. One release manifest describes every model, runtime, and bundle artifact published together, plus the compatibility edges and supply-chain references that gate stable-channel promotion. See docs/catalog-contract.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "generation",
+    "created_at",
+    "producer",
+    "artifacts",
+    "compatibility"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "openkara.catalog/release-v1",
+      "description": "Discriminator pinning this manifest to the v1 release-manifest schema."
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}$",
+      "description": "Monotonic, human-sortable release identifier of the form YYYY-MM-DD-NNN. Unique across all releases."
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonically non-decreasing channel generation. Increments on any stable-pointer advance."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp the manifest was generated. Deterministic generators must set this from the release job, not wall-clock ambiguity."
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "commit_sha", "workflow", "run_id"],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "description": "owner/repo that produced the manifest."
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Git commit SHA the manifest was generated from."
+        },
+        "workflow": {
+          "type": "string",
+          "description": "Workflow filename or name that produced the manifest."
+        },
+        "run_id": {
+          "type": "string",
+          "description": "CI run id for provenance traceability."
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["models", "runtimes", "bundles"],
+      "properties": {
+        "models": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/model_artifact"},
+          "minItems": 0
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/runtime_artifact"},
+          "minItems": 0
+        },
+        "bundles": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/bundle_artifact"},
+          "minItems": 0
+        }
+      }
+    },
+    "compatibility": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/compatibility_edge"},
+      "description": "Explicit model/runtime/target/provider edges. The app must not infer compatibility from version strings."
+    },
+    "supply_chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sbom", "license", "notice", "provenance"],
+      "properties": {
+        "sbom": {"$ref": "#/$defs/supply_chain_ref"},
+        "license": {"$ref": "#/$defs/supply_chain_ref"},
+        "notice": {"$ref": "#/$defs/supply_chain_ref"},
+        "provenance": {"$ref": "#/$defs/supply_chain_ref"}
+      },
+      "description": "Optional in v1: issue #18 PR 3 makes it required for new releases and back-fills existing ones."
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quality_report", "performance_report", "compatibility_report"],
+      "properties": {
+        "quality_report": {"$ref": "#/$defs/report_ref"},
+        "performance_report": {"$ref": "#/$defs/report_ref"},
+        "compatibility_report": {"$ref": "#/$defs/report_ref"}
+      },
+      "description": "Optional in v1: issue #21 makes it required for new releases and back-fills existing ones."
+    },
+    "minimum_consumer_schema": {
+      "type": "string",
+      "description": "Minimum catalog schema version an OpenKara app build must understand to safely consume this release."
+    },
+    "maximum_consumer_schema": {
+      "type": "string",
+      "description": "Maximum catalog schema version this release is guaranteed compatible with."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional human-readable release notes. Not parsed by consumers."
+    }
+  },
+  "$defs": {
+    "target_triple": {
+      "type": ["string", "null"],
+      "enum": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+        null
+      ],
+      "description": "Rust-style target triple. null means portable across the declared compatible runtime set."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lowercase hex SHA-256 digest."
+    },
+    "url": {
+      "type": "string",
+      "pattern": "^https://",
+      "description": "Immutable HTTPS URL. Must include a release tag or content-addressed path segment so the same URL never retargets different bytes."
+    },
+    "file_digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["size", "sha256"],
+      "properties": {
+        "size": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "extracted_file_digests": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/file_digest"},
+      "description": "Map of extracted archive path -> {size, sha256}. Every extracted file must be listed."
+    },
+    "supply_chain_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "size", "sha256", "kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["spdx-json", "spdx-tag", "cyclonedx-json", "license-file", "notice-file", "sigstore-attestation", "github-attestation"]
+        },
+        "url": {"$ref": "#/$defs/url"},
+        "size": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "digest_algorithm": {
+          "type": "string",
+          "const": "sha256"
+        }
+      }
+    },
+    "report_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "size", "sha256", "report_id", "schema_version"],
+      "properties": {
+        "report_id": {"type": "string", "minLength": 1},
+        "schema_version": {"type": "string", "minLength": 1},
+        "url": {"$ref": "#/$defs/url"},
+        "size": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "upstream_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "tag"],
+      "properties": {
+        "project": {"type": "string", "minLength": 1},
+        "tag": {"type": "string", "minLength": 1},
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Optional in v1: exact upstream commit. Issue #20 back-fills it for legacy releases and requires it for new releases."
+        },
+        "source_lock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["lock_file_url", "lock_file_sha256"],
+          "properties": {
+            "lock_file_url": {"$ref": "#/$defs/url"},
+            "lock_file_sha256": {"$ref": "#/$defs/sha256"}
+          },
+          "description": "Optional in v1: issue #20 back-fills it for legacy releases and requires it for new releases."
+        },
+        "build_revision": {"type": "string", "minLength": 1},
+        "build_flags": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "deprecation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deprecated"],
+      "properties": {
+        "deprecated": {"type": "boolean"},
+        "replacement_artifact_id": {
+          "type": ["string", "null"]
+        },
+        "sunset_generation": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "reason": {"type": "string"}
+      }
+    },
+    "artifact_common": {
+      "type": "object",
+      "description": "Fields shared by every artifact. Concrete artifact schemas extend this via allOf and close the property set with unevaluatedProperties: false.",
+      "required": [
+        "artifact_id",
+        "kind",
+        "variant",
+        "filename",
+        "download_url",
+        "byte_size",
+        "archive_digest",
+        "extracted_file_digests",
+        "upstream",
+        "deprecation"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "description": "Stable, opaque artifact identifier. Must not be reused for different bytes."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["model", "runtime", "bundle"]
+        },
+        "variant": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "filename": {"type": "string", "minLength": 1},
+        "download_url": {"$ref": "#/$defs/url"},
+        "byte_size": {"type": "integer", "minimum": 1},
+        "archive_digest": {"$ref": "#/$defs/sha256"},
+        "extracted_file_digests": {"$ref": "#/$defs/extracted_file_digests"},
+        "upstream": {"$ref": "#/$defs/upstream_ref"},
+        "supply_chain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sbom", "license", "notice", "provenance"],
+          "properties": {
+            "sbom": {"$ref": "#/$defs/supply_chain_ref"},
+            "license": {"$ref": "#/$defs/supply_chain_ref"},
+            "notice": {"$ref": "#/$defs/supply_chain_ref"},
+            "provenance": {"$ref": "#/$defs/supply_chain_ref"}
+          }
+        },
+        "deprecation": {"$ref": "#/$defs/deprecation"}
+      }
+    },
+    "model_artifact": {
+      "type": "object",
+      "allOf": [{"$ref": "#/$defs/artifact_common"}],
+      "unevaluatedProperties": false,
+      "required": [
+        "profile",
+        "target_triple",
+        "arch",
+        "os",
+        "model"
+      ],
+      "properties": {
+        "kind": {"const": "model"},
+        "profile": {
+          "type": "string",
+          "enum": ["balanced", "quality", "karaoke_2stem"],
+          "description": "Product intent, separate from target/provider/precision/format fields."
+        },
+        "target_triple": {"$ref": "#/$defs/target_triple"},
+        "arch": {
+          "type": ["string", "null"],
+          "enum": ["aarch64", "x86_64", null]
+        },
+        "os": {
+          "type": ["string", "null"],
+          "enum": ["macos", "linux", "windows", null]
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "opset",
+            "ir_version",
+            "tensor_interface",
+            "input_semantics",
+            "output_semantics",
+            "precision",
+            "segment_frames",
+            "sample_rate",
+            "stem_profile",
+            "compatible_runtime_ids"
+          ],
+          "properties": {
+            "format": {"type": "string", "enum": ["onnx", "ort"]},
+            "opset": {"type": "integer", "minimum": 1},
+            "ir_version": {"type": "integer", "minimum": 1},
+            "tensor_interface": {
+              "type": "string",
+              "enum": ["waveform", "spectral-core"],
+              "description": "Public tensor contract. spectral-core is the issue #23 contract."
+            },
+            "input_semantics": {"type": "string", "minLength": 1},
+            "output_semantics": {"type": "string", "minLength": 1},
+            "precision": {
+              "type": "string",
+              "enum": ["fp32", "mixed-fp16", "int8-selective"]
+            },
+            "segment_frames": {"type": "integer", "minimum": 1},
+            "sample_rate": {"type": "integer", "minimum": 1},
+            "stem_profile": {
+              "type": "string",
+              "enum": ["four-stem", "karaoke_2stem"]
+            },
+            "required_operator_config": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["url", "size", "sha256"],
+              "properties": {
+                "url": {"$ref": "#/$defs/url"},
+                "size": {"type": "integer", "minimum": 0},
+                "sha256": {"$ref": "#/$defs/sha256"}
+              },
+              "description": "Operator set this model requires, generated from the graph (issue #19 PR 2). Optional in v1: pre-#19 model releases may omit it; #19 PR 2 makes it required for new releases and back-fills existing ones."
+            },
+            "compatible_runtime_ids": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Runtime artifact IDs that can load this model. Must be explicit; the app does not infer from versions."
+            },
+            "cache_key": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Deterministic cache-busting fingerprint for runtime compiled-model caches."
+            }
+          }
+        },
+        "quality_report": {"$ref": "#/$defs/report_ref"},
+        "performance_report": {"$ref": "#/$defs/report_ref"}
+      }
+    },
+    "runtime_artifact": {
+      "type": "object",
+      "allOf": [{"$ref": "#/$defs/artifact_common"}],
+      "unevaluatedProperties": false,
+      "required": [
+        "target_triple",
+        "arch",
+        "os",
+        "runtime",
+        "toolchain"
+      ],
+      "properties": {
+        "kind": {"const": "runtime"},
+        "target_triple": {"$ref": "#/$defs/target_triple"},
+        "arch": {
+          "type": "string",
+          "enum": ["aarch64", "x86_64"]
+        },
+        "os": {
+          "type": "string",
+          "enum": ["macos", "linux", "windows"]
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "ort_c_api_level",
+            "execution_providers",
+            "companion_files",
+            "deployment_target",
+            "supported_model_artifact_ids"
+          ],
+          "properties": {
+            "version": {"type": "string", "minLength": 1},
+            "ort_c_api_level": {"type": "string", "minLength": 1},
+            "execution_providers": {
+              "type": "array",
+              "items": {"type": "string", "enum": ["cpu", "xnnpack", "coreml", "directml"]},
+              "minItems": 1
+            },
+            "companion_files": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "deployment_target": {"type": "string", "minLength": 1},
+            "supported_model_artifact_ids": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Model artifact IDs this runtime can load. Must be explicit."
+            }
+          }
+        },
+        "toolchain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["image", "compiler", "cmake_flags"],
+          "properties": {
+            "image": {"type": "string", "minLength": 1},
+            "compiler": {"type": "string", "minLength": 1},
+            "sdk": {"type": "string"},
+            "deployment_target": {"type": "string"},
+            "cmake_flags": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "submodule_state": {
+              "type": "object",
+              "additionalProperties": {"type": "string"},
+              "description": "Map of submodule path -> pinned commit SHA."
+            }
+          }
+        }
+      }
+    },
+    "bundle_artifact": {
+      "type": "object",
+      "allOf": [{"$ref": "#/$defs/artifact_common"}],
+      "unevaluatedProperties": false,
+      "required": [
+        "profile",
+        "target_triple",
+        "arch",
+        "os",
+        "model_artifact_id",
+        "runtime_artifact_id",
+        "execution_provider",
+        "precision",
+        "graph_format"
+      ],
+      "properties": {
+        "kind": {"const": "bundle"},
+        "profile": {
+          "type": "string",
+          "enum": ["balanced", "quality", "karaoke_2stem"]
+        },
+        "target_triple": {"$ref": "#/$defs/target_triple"},
+        "arch": {
+          "type": ["string", "null"],
+          "enum": ["aarch64", "x86_64", null]
+        },
+        "os": {
+          "type": ["string", "null"],
+          "enum": ["macos", "linux", "windows", null]
+        },
+        "model_artifact_id": {"type": "string"},
+        "runtime_artifact_id": {"type": "string"},
+        "execution_provider": {
+          "type": "string",
+          "enum": ["cpu", "xnnpack", "coreml", "directml"]
+        },
+        "precision": {
+          "type": "string",
+          "enum": ["fp32", "mixed-fp16", "int8-selective"]
+        },
+        "graph_format": {
+          "type": "string",
+          "enum": ["onnx", "ort"]
+        },
+        "quality_report": {"$ref": "#/$defs/report_ref"},
+        "performance_report": {"$ref": "#/$defs/report_ref"}
+      }
+    },
+    "compatibility_edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_artifact_id", "runtime_artifact_id", "target_triple", "execution_provider", "status"],
+      "properties": {
+        "model_artifact_id": {"type": "string"},
+        "runtime_artifact_id": {"type": "string"},
+        "target_triple": {"$ref": "#/$defs/target_triple"},
+        "execution_provider": {
+          "type": "string",
+          "enum": ["cpu", "xnnpack", "coreml", "directml"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["supported", "deprecated"]
+        },
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

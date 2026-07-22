@@ -1,0 +1,6 @@
+{
+  "expected_stage": "invariant",
+  "expected_error_codes": [
+    "target_arch_mismatch"
+  ]
+}

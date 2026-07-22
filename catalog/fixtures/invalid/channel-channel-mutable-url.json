@@ -1,0 +1,11 @@
+{
+  "schema_version": "openkara.catalog/channel-v1",
+  "channel": "stable",
+  "generation": 1,
+  "release_id": "2026-07-20-001",
+  "release_manifest_url": "https://example.com/latest/release-manifest.json",
+  "release_manifest_sha256": "8080808080808080808080808080808080808080808080808080808080808080",
+  "release_manifest_size": 16384,
+  "updated_at": "2026-07-20T12:05:00Z",
+  "previous_release_id": null
+}

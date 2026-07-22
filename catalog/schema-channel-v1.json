@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/catalog/schema-channel-v1.json",
+  "title": "OpenKara catalog stable-channel pointer (v1)",
+  "description": "Small, mutable pointer that advances only after every referenced immutable release manifest and its gates pass. OpenKara bootstraps from this pointer. See docs/catalog-contract.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "channel",
+    "generation",
+    "release_id",
+    "release_manifest_url",
+    "release_manifest_sha256",
+    "release_manifest_size",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "openkara.catalog/channel-v1"
+    },
+    "channel": {
+      "type": "string",
+      "enum": ["stable", "candidate"]
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}$"
+    },
+    "release_manifest_url": {
+      "type": "string",
+      "pattern": "^https://",
+      "description": "Immutable URL of the release manifest this pointer references."
+    },
+    "release_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the release manifest bytes at release_manifest_url. The app must verify this before trusting the manifest."
+    },
+    "release_manifest_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "previous_release_id": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}$"
+    }
+  }
+}
