@@ -126,7 +126,12 @@ The runtime-side contract is now:
 OpenKara consumes the runtime via the catalog entry's `download_url` +
 `archive_digest`, loading the shared library dynamically. The Rust `ort`
 crate's C API level must be compatible with the runtime's
-`ort_c_api_level` (currently 21, for ORT v1.27.1).
+`ort_c_api_level` (27, for ORT v1.27.1). The API version is no longer
+manually maintained in `ort/source-lock.json`; it is parsed at build time
+from `ORT_API_VERSION` in the pinned ORT header
+(`include/onnxruntime/core/session/onnxruntime_c_api.h`) and recorded in
+`build-manifest.json` and `provenance.json`. The app owns its own Rust
+`ort` crate version (the infrastructure source lock no longer pins it).
 
 ## Related files
 

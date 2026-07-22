@@ -37,8 +37,6 @@ import argparse
 import hashlib
 import json
 import sys
-import tarfile
-import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +46,9 @@ PACKAGES_DIR = ROOT / "ort" / "packages"
 SPECS_DIR = ROOT / "catalog" / "specs"
 RELEASES_DIR = ROOT / "catalog" / "releases"
 GENERATOR_VERSION = "openkara.runtime-catalog-entries/v1"
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import archive_utils  # noqa: E402
 
 
 def _sha256_file(path: Path) -> tuple[int, str]:
@@ -61,25 +62,7 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 
 def _read_archive(archive: Path) -> dict[str, bytes]:
-    files: dict[str, bytes] = {}
-    if archive.name.endswith(".tar.gz"):
-        with tarfile.open(archive, "r:gz") as tar:
-            for member in tar.getmembers():
-                if member.isfile():
-                    f = tar.extractfile(member)
-                    if f:
-                        name = member.name
-                        if name.startswith("./"):
-                            name = name[2:]
-                        files[name] = f.read()
-    elif archive.suffix == ".zip":
-        with zipfile.ZipFile(archive, "r") as zf:
-            for info in zf.infolist():
-                if not info.is_dir():
-                    files[info.filename] = zf.read(info)
-    else:
-        raise ValueError(f"unknown archive format: {archive.name}")
-    return files
+    return archive_utils.safe_read_archive(archive)
 
 
 def _parse_target(archive_name: str) -> tuple[str, str, str, bool]:
@@ -186,7 +169,7 @@ def _build_entry(
         "os": os_name,
         "runtime": {
             "version": lock["upstream"]["tag"],
-            "ort_c_api_level": str(lock["c_api_level"]["ort_api_version"]),
+            "ort_c_api_level": str(manifest.get("c_api_level", {}).get("ort_api_version")),
             "execution_providers": target_config["execution_providers"],
             "companion_files": target_config.get("companion_libraries", []),
             "deployment_target": target_config.get("deployment_target") or "n/a",

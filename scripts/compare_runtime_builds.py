@@ -45,13 +45,13 @@ import hashlib
 import json
 import statistics
 import sys
-import tarfile
 import time
-import zipfile
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+import archive_utils  # noqa: E402
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -59,25 +59,7 @@ def _sha256_bytes(b: bytes) -> str:
 
 
 def _extract_archive(archive: Path) -> dict[str, bytes]:
-    files: dict[str, bytes] = {}
-    if archive.name.endswith(".tar.gz"):
-        with tarfile.open(archive, "r:gz") as tar:
-            for member in tar.getmembers():
-                if member.isfile():
-                    f = tar.extractfile(member)
-                    if f:
-                        name = member.name
-                        if name.startswith("./"):
-                            name = name[2:]
-                        files[name] = f.read()
-    elif archive.suffix == ".zip":
-        with zipfile.ZipFile(archive, "r") as zf:
-            for info in zf.infolist():
-                if not info.is_dir():
-                    files[info.filename] = zf.read(info)
-    else:
-        raise ValueError(f"unknown archive format: {archive.name}")
-    return files
+    return archive_utils.safe_read_archive(archive)
 
 
 def _find_lib(files: dict[str, bytes]) -> str | None:

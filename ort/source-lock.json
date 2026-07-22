@@ -1,8 +1,6 @@
 {
   "c_api_level": {
-    "ort_api_version": 21,
-    "ort_api_version_note": "ORT C API version exported by the shared library. OpenKara's Rust `ort` crate must be compatible with this API level.",
-    "rust_ort_crate_version": ">=2.0,<3.0"
+    "ort_api_version_note": "The ORT C API version is no longer manually maintained here. It is parsed at build time from ORT_API_VERSION in include/onnxruntime/core/session/onnxruntime_c_api.h of the pinned source, required to be 27 for v1.27.1, and recorded in build-manifest.json and provenance.json. The app owns its Rust `ort` crate version (rust_ort_crate_version was removed from this lock)."
   },
   "lock_version": "openkara.ort-source-lock/v1",
   "note_on_submodules": "Git submodules pinned at the ORT upstream commit. The expected_sha values are the exact commit SHAs recorded in the ORT git tree at the pinned upstream commit_sha. The build script verifies these after checkout and records them in the build manifest.",

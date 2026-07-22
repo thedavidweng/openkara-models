@@ -38,9 +38,13 @@ def _make_build_manifest(target: str = "x86_64-unknown-linux-gnu",
             "cmake_args": lock["targets"][target]["cmake_args"],
             "build_os": "Linux 6.0",
             "build_arch": "x86_64",
+            "ort_api_version": 27,
         },
         "toolchain": lock["toolchain"],
-        "c_api_level": lock["c_api_level"],
+        "c_api_level": {
+            "ort_api_version": 27,
+            "ort_api_version_note": "Parsed at build time from ORT_API_VERSION.",
+        },
         "files": {
             "libonnxruntime.so": {"size": 100, "sha256": "a" * 64},
             "LICENSE.onnxruntime": {"size": 10, "sha256": "b" * 64},
@@ -117,7 +121,7 @@ def test_build_entry_full(tmp_path: Path) -> None:
     assert entry["arch"] == "x86_64"
     assert entry["os"] == "linux"
     assert entry["runtime"]["version"] == lock["upstream"]["tag"]
-    assert entry["runtime"]["ort_c_api_level"] == str(lock["c_api_level"]["ort_api_version"])
+    assert entry["runtime"]["ort_c_api_level"] == "27"
     assert "cpu" in entry["runtime"]["execution_providers"]
     assert entry["runtime"]["supported_model_artifact_ids"] == ["htdemucs.balanced.fp32.onnx"]
     assert entry["runtime"]["reduced_build"] is False

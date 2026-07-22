@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,9 @@ LOCK_PATH = ROOT / "ort" / "source-lock.json"
 BUILD_DIR = ROOT / "ort" / "build"
 SOURCE_DIR = ROOT / "ort" / "source"
 PACKAGES_DIR = ROOT / "ort" / "packages"
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import ort_api_version  # noqa: E402
 
 
 def _load_lock() -> dict[str, Any]:
@@ -128,6 +132,106 @@ def _get_submodule_state(source_dir: Path) -> dict[str, str]:
     return submodules
 
 
+def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
+    """Assert the local toolchain matches the source lock before building.
+
+    Checks Python version, CMake minimum version, the configured compiler
+    version, and Xcode version (on Apple targets). Fails the build on
+    mismatch. This runs before any CMake invocation so a wrong toolchain is
+    caught early instead of producing a broken library.
+    """
+    tc = lock.get("toolchain", {})
+    errors: list[str] = []
+
+    # Python version.
+    required_py = tc.get("python_version", "3.11")
+    actual_py = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if actual_py != required_py:
+        errors.append(f"python version: expected {required_py}, got {actual_py}")
+
+    # CMake minimum version.
+    required_cmake = tc.get("cmake_minimum_version", "3.28")
+    try:
+        r = subprocess.run(["cmake", "--version"], capture_output=True, text=True)
+        if r.returncode != 0:
+            errors.append("cmake: not found on PATH")
+        else:
+            first = r.stdout.strip().splitlines()[0]
+            # "cmake version 3.28.3"
+            parts = first.split()
+            ver = parts[-1] if parts else "0"
+            if not _version_ge(ver, required_cmake):
+                errors.append(
+                    f"cmake version: expected >= {required_cmake}, got {ver}"
+                )
+    except FileNotFoundError:
+        errors.append("cmake: not found on PATH")
+
+    # Xcode version (Apple targets only).
+    if "darwin" in target:
+        required_xcode = tc.get("xcode_version", "16.0")
+        try:
+            r = subprocess.run(["xcodebuild", "-version"], capture_output=True,
+                               text=True)
+            if r.returncode != 0:
+                errors.append("xcodebuild: not found (Xcode not installed?)")
+            else:
+                first = r.stdout.strip().splitlines()[0]
+                # "Xcode 16.0"
+                parts = first.split()
+                ver = parts[-1] if parts else "0"
+                if not _version_ge(ver, required_xcode):
+                    errors.append(
+                        f"xcode version: expected >= {required_xcode}, got {ver}"
+                    )
+        except FileNotFoundError:
+            errors.append("xcodebuild: not found (Xcode not installed?)")
+
+    # Compiler version.
+    if "linux" in target:
+        required_gcc = tc.get("gcc_version", "13")
+        try:
+            r = subprocess.run(["gcc", "--version"], capture_output=True, text=True)
+            if r.returncode != 0:
+                errors.append("gcc: not found on PATH")
+            else:
+                first = r.stdout.strip().splitlines()[0]
+                # "gcc (Ubuntu 13.x.x) 13.x.x"
+                m = re.search(r"(\d+)\.", first)
+                major = m.group(1) if m else "0"
+                if major != str(required_gcc):
+                    errors.append(
+                        f"gcc major version: expected {required_gcc}, got {major}"
+                    )
+        except FileNotFoundError:
+            errors.append("gcc: not found on PATH")
+    elif "windows" in target:
+        required_vs = tc.get("visual_studio_version", "2022")
+        # MSVC version is checked via cl.exe; we only assert it is present.
+        # The exact VS version is enforced by the runner image selection.
+        try:
+            r = subprocess.run(["cl", "/?"], capture_output=True, text=True)
+            if r.returncode != 0:
+                errors.append("cl.exe: MSVC compiler not found on PATH")
+        except FileNotFoundError:
+            errors.append("cl.exe: MSVC compiler not found on PATH")
+
+    if errors:
+        for e in errors:
+            print(f"  TOOLCHAIN MISMATCH: {e}", file=sys.stderr)
+        raise RuntimeError(
+            f"toolchain verification failed ({len(errors)} error(s)); "
+            "the local toolchain does not match ort/source-lock.json"
+        )
+
+
+def _version_ge(actual: str, required: str) -> bool:
+    """Return True if ``actual`` >= ``required`` as a dotted version."""
+    def _key(v: str) -> tuple[int, ...]:
+        return tuple(int(p) for p in re.split(r"[.]", v) if p.isdigit())
+    return _key(actual) >= _key(required)
+
+
 def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
                   build_dir: Path, *, reduced: bool = False) -> dict[str, Any]:
     target_config = lock["targets"][target]
@@ -140,6 +244,18 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
                 "source lock has no reduced_build section; cannot build reduced runtime"
             )
         cmake_args.extend(reduced_cfg.get("extra_cmake_args", []))
+
+    # Assert the toolchain matches the source lock before building.
+    _assert_toolchain(lock, target)
+
+    # Derive the ORT C API version from the pinned source header. This
+    # replaces the manually maintained c_api_level.ort_api_version value that
+    # used to live in source-lock.json. For v1.27.1 the parsed value must be
+    # 27; ort_api_version.assert_api_version exits non-zero on mismatch.
+    tag = lock["upstream"]["tag"]
+    ort_api_version_value = ort_api_version.assert_api_version(
+        source_dir, tag, label=f"build:{target}",
+    )
 
     # Set SOURCE_DATE_EPOCH for reproducible builds. This environment
     # variable is respected by many build tools (cmake, gcc, clang, etc.)
@@ -193,6 +309,7 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
         "cmake_args": cmake_args,
         "build_os": f"{platform.system()} {platform.release()}",
         "build_arch": platform.machine(),
+        "ort_api_version": ort_api_version_value,
     }
     if reduced:
         meta["reduced_build"] = True
@@ -249,7 +366,14 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
         "upstream": lock["upstream"],
         "build": build_meta,
         "toolchain": lock["toolchain"],
-        "c_api_level": lock["c_api_level"],
+        "c_api_level": {
+            "ort_api_version": build_meta.get("ort_api_version"),
+            "ort_api_version_note": (
+                "Parsed at build time from ORT_API_VERSION in "
+                "include/onnxruntime/core/session/onnxruntime_c_api.h of the "
+                "pinned source."
+            ),
+        },
         "files": {},
     }
 
