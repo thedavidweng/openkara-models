@@ -4,6 +4,14 @@ Validate the converted ONNX model against PyTorch reference output.
 
 Runs the same input through both the PyTorch model and the ONNX model,
 then compares outputs to ensure numerical equivalence (MSE < 1e-4).
+
+This is the **conversion pipeline smoke test** — a fast single-input check
+that runs immediately after ONNX export in the convert.yml workflow. It is
+NOT the release quality gate. The release gate is scripts/run_quality_suite.py,
+which runs the full corpus fixture set (see quality/corpus-manifest.json) and
+enforces tiered budgets (see quality/budgets.json). A stable catalog release
+must not rely solely on this single-input MSE check; it must also pass the
+full quality suite + runtime quality suite + enforce_quality_gates.py.
 """
 
 import argparse
