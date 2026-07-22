@@ -10,9 +10,13 @@ on:
       - "scripts/validate_quality_report.py"
       - "scripts/run_runtime_quality_suite.py"
       - "scripts/validate_runtime_quality_report.py"
+      - "scripts/enforce_quality_gates.py"
+      - "quality/baselines.json"
+      - "quality/budgets.json"
       - "tests/test_corpus_manifest.py"
       - "tests/test_quality_report.py"
       - "tests/test_runtime_quality_report.py"
+      - "tests/test_quality_gates.py"
       - ".github/workflows/quality-gates.yml"
   push:
     branches: [main]
@@ -24,6 +28,9 @@ on:
       - "scripts/validate_quality_report.py"
       - "scripts/run_runtime_quality_suite.py"
       - "scripts/validate_runtime_quality_report.py"
+      - "scripts/enforce_quality_gates.py"
+      - "quality/baselines.json"
+      - "quality/budgets.json"
 
 jobs:
   validate-corpus:
@@ -38,7 +45,7 @@ jobs:
         run: pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
       - name: Validate corpus manifest
         run: python scripts/validate_corpus_manifest.py
-      - name: Corpus + quality + runtime quality tests
-        run: python -m pytest tests/test_corpus_manifest.py tests/test_quality_report.py tests/test_runtime_quality_report.py -q
+      - name: Corpus + quality + runtime quality + gate tests
+        run: python -m pytest tests/test_corpus_manifest.py tests/test_quality_report.py tests/test_runtime_quality_report.py tests/test_quality_gates.py -q
       - name: Syntax check
-        run: python -m compileall -q scripts/synthetic_fixtures.py scripts/validate_corpus_manifest.py scripts/run_quality_suite.py scripts/validate_quality_report.py scripts/run_runtime_quality_suite.py scripts/validate_runtime_quality_report.py
+        run: python -m compileall -q scripts/synthetic_fixtures.py scripts/validate_corpus_manifest.py scripts/run_quality_suite.py scripts/validate_quality_report.py scripts/run_runtime_quality_suite.py scripts/validate_runtime_quality_report.py scripts/enforce_quality_gates.py
