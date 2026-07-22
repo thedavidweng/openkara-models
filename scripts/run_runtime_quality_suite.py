@@ -82,14 +82,71 @@ def _load_corpus(tier: str | None) -> list[dict[str, Any]]:
     return fixtures
 
 
+def _safe_extract_dest(dest: Path) -> Path:
+    """Resolve dest to an absolute path with no symlinks for containment checks."""
+    return dest.resolve()
+
+
+def _assert_within(member_path: Path, base: Path) -> None:
+    """Raise if member_path escapes base after resolution (path traversal)."""
+    base_resolved = base.resolve()
+    member_resolved = member_path.resolve()
+    try:
+        member_resolved.relative_to(base_resolved)
+    except ValueError:
+        raise ValueError(
+            f"unsafe archive member escapes extraction dir: {member_path} "
+            f"(resolves to {member_resolved}, outside {base_resolved})"
+        )
+
+
+def _safe_extract_tar(tar: tarfile.TarFile, dest: Path) -> None:
+    """Extract a tar archive rejecting path traversal, absolute paths, and
+    symlinks/hardlinks that escape dest. Equivalent to PEP 706 'data' filter
+    but works on Python 3.11."""
+    base = _safe_extract_dest(dest)
+    for member in tar.getmembers():
+        # Reject absolute paths and drive prefixes.
+        name = member.name
+        if name.startswith("/") or (len(name) > 2 and name[1] == ":"):
+            raise ValueError(f"unsafe tar member (absolute path): {name}")
+        target = dest / name
+        _assert_within(target, base)
+        # Reject links that point outside dest.
+        if member.issym() or member.islnk():
+            link_target = (target.parent / member.linkname).resolve()
+            try:
+                link_target.relative_to(base)
+            except ValueError:
+                raise ValueError(
+                    f"unsafe tar link {name} -> {member.linkname} escapes dest"
+                )
+    tar.extractall(dest)
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extract a zip archive rejecting path traversal and absolute paths."""
+    base = _safe_extract_dest(dest)
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        name = info.filename
+        if name.startswith("/") or (len(name) > 2 and name[1] == ":"):
+            raise ValueError(f"unsafe zip member (absolute path): {name}")
+        target = dest / name
+        _assert_within(target, base)
+        # zipfile.extract already writes to the joined path; we validated it.
+        zf.extract(info, dest)
+
+
 def _extract_runtime(archive: Path, dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     if archive.name.endswith(".tar.gz"):
         with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(dest)
+            _safe_extract_tar(tar, dest)
     elif archive.suffix == ".zip":
         with zipfile.ZipFile(archive, "r") as zf:
-            zf.extractall(dest)
+            _safe_extract_zip(zf, dest)
     else:
         raise ValueError(f"unknown archive format: {archive.name}")
     for p in dest.rglob("*"):
@@ -253,6 +310,16 @@ def main() -> int:
         return 1
     if not args.onnx.is_file():
         print(f"ERROR: ONNX model not found: {args.onnx}", file=sys.stderr)
+        return 1
+    # Validate iteration counts up front so empty-iterable median errors and
+    # divide-by-zero RTF errors never surface as unhandled exceptions.
+    if args.warmup < 0:
+        print(f"ERROR: --warmup must be >= 0 (got {args.warmup})", file=sys.stderr)
+        return 1
+    if args.iters < 1:
+        print(f"ERROR: --iters must be >= 1 (got {args.iters}); "
+              f"at least one measured iteration is required for median/p95",
+              file=sys.stderr)
         return 1
 
     fixtures = _load_corpus(args.tier)
