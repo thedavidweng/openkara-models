@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install "pytest>=8.0" "onnx>=1.22.0"
+        run: pip install "pytest>=8.0" "onnx>=1.22.0" "jsonschema>=4.20"
       - name: Validate source lock
         run: python scripts/validate_source_lock.py
       - name: Source lock + required-operator + comparison + supply-chain + benchmark + catalog-entry tests

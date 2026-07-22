@@ -1,0 +1,61 @@
+name: Dependency detection (ORT + model weights)
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Every Monday at 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  detect-ort:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      update_available: ${{ steps.detect.outputs.update_available }}
+      latest_tag: ${{ steps.detect.outputs.latest_tag }}
+      latest_commit: ${{ steps.detect.outputs.latest_commit }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Detect ORT release
+        id: detect
+        run: |
+          set +e
+          python scripts/detect_ort_release.py --json > /tmp/ort-detection.json
+          EXIT_CODE=$?
+          cat /tmp/ort-detection.json
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "update_available=true" >> "$GITHUB_OUTPUT"
+            echo "latest_tag=$(python3 -c "import json; print(json.load(open('/tmp/ort-detection.json'))['latest']['tag'])")" >> "$GITHUB_OUTPUT"
+            echo "latest_commit=$(python3 -c "import json; print(json.load(open('/tmp/ort-detection.json'))['latest']['commit_sha'])")" >> "$GITHUB_OUTPUT"
+          elif [ $EXIT_CODE -eq 1 ]; then
+            echo "update_available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "API failure (exit $EXIT_CODE)"
+            exit 1
+          fi
+      - name: Detection tests
+        run: |
+          pip install "pytest>=8.0"
+          python -m pytest tests/test_dep_detection.py -q
+
+  detect-model-weights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        model: [htdemucs, htdemucs_ft]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Detect ${{ matrix.model }} weight revision
+        run: |
+          python scripts/detect_model_weight_revision.py --model ${{ matrix.model }} --json || true
