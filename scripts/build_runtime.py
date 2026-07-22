@@ -317,7 +317,7 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
             )
         _run([sys.executable, str(script),
               "--cmake_build_dir", str(build_dir),
-              "--config", str(config_path)], env=env)
+              str(config_path)], env=env)
 
     # Build.
     nproc = os.cpu_count() or 4

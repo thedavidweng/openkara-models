@@ -312,24 +312,14 @@ jobs:
         with:
           name: ort-x86_64-unknown-linux-gnu
           path: ort/packages
+          merge-multiple: true
 
       - name: Download stable model from catalog
-        run: |
-          python - <<'PY'
-          import json, urllib.request, pathlib
-          m = json.load(open("catalog/releases/2026-07-20-001.json"))
-          model = next(a for a in m["artifacts"]["models"]
-                       if a["artifact_id"] == "htdemucs.balanced.fp32.onnx")
-          url = model["download_url"]
-          dest = pathlib.Path("models/htdemucs.onnx")
-          dest.parent.mkdir(parents=True, exist_ok=True)
-          print(f"downloading {url} ...")
-          urllib.request.urlretrieve(url, dest)
-          import hashlib
-          got = hashlib.sha256(dest.read_bytes()).hexdigest()
-          assert got == model["archive_digest"], f"sha256 mismatch {got} != {model['archive_digest']}"
-          print("model downloaded + verified")
-          PY
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-07-20-001.json
+          --artifact htdemucs.balanced.fp32.onnx
+          --dest models/htdemucs.onnx
 
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.onnx
@@ -385,6 +375,7 @@ jobs:
         with:
           name: ort-x86_64-unknown-linux-gnu
           path: ort/packages
+          merge-multiple: true
 
       - name: Download stable model from catalog
         run: >
