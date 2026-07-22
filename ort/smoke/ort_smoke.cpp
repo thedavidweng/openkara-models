@@ -578,8 +578,11 @@ int main(int argc, char** argv) {
             if (out_data && elem_count > 0) {
                 if (!all_finite(out_data, elem_count)) finite = false;
             }
-            api->ReleaseTensorTypeAndShapeInfo(
-                const_cast<OrtTensorTypeAndShapeInfo*>(tensor_info));
+            // NOTE: Do NOT call ReleaseTensorTypeAndShapeInfo on tensor_info.
+            // CastTypeInfoToTensorInfo returns a non-owning cast pointer
+            // ("Do not free this value, it will be valid until type_info is
+            // freed"). Freeing it causes a double-free / heap corruption.
+            // It is released when type_info is released below.
         }
         if (type_info) api->ReleaseTypeInfo(type_info);
     }
