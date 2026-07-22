@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/quality/schema-metric-definitions-v1.json",
+  "title": "OpenKara quality metric definitions (v1)",
+  "description": "Defines the metrics computed by the quality and performance gates, their units, and their schema. Reports conforming to this schema are produced by scripts/run_quality_suite.py and scripts/run_runtime_benchmarks.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "metrics"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "openkara.metric-definitions/v1"},
+    "metrics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/metric"}
+    }
+  },
+  "$defs": {
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "category", "unit", "direction", "description"],
+      "properties": {
+        "name": {"type": "string"},
+        "category": {"type": "string", "enum": ["correctness", "audio-quality", "runtime", "size"]},
+        "unit": {"type": "string"},
+        "direction": {"type": "string", "enum": ["lower-is-better", "higher-is-better", "equality"]},
+        "description": {"type": "string"},
+        "threshold": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pr_max": {"type": "number"},
+            "release_max": {"type": "number"},
+            "pr_min": {"type": "number"},
+            "release_min": {"type": "number"}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/quality/schema-corpus-manifest-v1.json",
+  "title": "OpenKara quality corpus manifest (v1)",
+  "description": "Manifest of audio fixtures used by the quality and performance gates. Synthetic fixtures are generated deterministically and committed; real-audio fixtures are fetched from licensed sources with immutable digests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "fixtures"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "openkara.corpus-manifest/v1"
+    },
+    "fixtures": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/fixture"},
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixture_id", "kind", "tier", "category", "channels", "sample_rate", "frames", "generator", "license"],
+      "properties": {
+        "fixture_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "kind": {"type": "string", "enum": ["synthetic", "real-audio"]},
+        "tier": {"type": "string", "enum": ["pr", "release"]},
+        "category": {
+          "type": "string",
+          "enum": [
+            "male-vocals", "female-vocals", "harmony", "choir", "rap", "spoken",
+            "dense-guitar", "synthesizer", "drum-transients", "bass-heavy",
+            "reverb", "delay", "live-recording", "clipping", "silence",
+            "low-level", "channel-imbalance", "impulse", "sine-sweep",
+            "multitone", "noise", "chunk-boundary", "full-song"
+          ]
+        },
+        "channels": {"type": "integer", "enum": [1, 2]},
+        "sample_rate": {"type": "integer", "minimum": 1},
+        "frames": {"type": "integer", "minimum": 1},
+        "generator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {"type": "string", "enum": ["deterministic", "fetch"]},
+            "module": {"type": "string"},
+            "function": {"type": "string"},
+            "params": {"type": "object"},
+            "url": {"type": "string"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "license": {"type": "string"}
+          }
+        },
+        "license": {"type": "string"},
+        "expected_output_shape": {
+          "type": "array",
+          "items": {"type": "integer"}
+        },
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}
