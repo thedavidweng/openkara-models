@@ -227,13 +227,14 @@ def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
         else:
             r = subprocess.run(
                 [str(vswhere), "-latest", "-version", version_range,
-                 "-property", "displayName"],
+                 "-products", "*", "-property", "displayName"],
                 capture_output=True, text=True,
             )
             if r.returncode != 0 or not r.stdout.strip():
                 errors.append(
                     f"visual studio: expected {required_vs} "
-                    f"(version range {version_range}) not found by vswhere"
+                    f"(version range {version_range}) not found by vswhere "
+                    f"(exit {r.returncode}, stdout={r.stdout.strip()!r})"
                 )
 
     if errors:

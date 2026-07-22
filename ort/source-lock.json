@@ -63,13 +63,13 @@
         "-Donnxruntime_USE_XNNPACK=OFF",
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
-      "deployment_target": "13.0",
+      "deployment_target": "15.0",
       "execution_providers": [
         "cpu",
         "coreml"

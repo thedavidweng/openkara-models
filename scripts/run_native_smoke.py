@@ -76,8 +76,12 @@ def _find_lib(dest: Path) -> Path:
 def _build_harness(ort_source: Path, build_dir: Path) -> Path:
     """Build the C++ smoke harness via CMake. Returns the binary path."""
     build_dir.mkdir(parents=True, exist_ok=True)
+    # Pass an absolute ORT_SOURCE_DIR so cmake's get_filename_component(...
+    # ABSOLUTE) resolves the include directory correctly regardless of the
+    # cmake working directory / CMAKE_CURRENT_SOURCE_DIR.
+    ort_source_abs = ort_source.resolve()
     configure = ["cmake", "-S", str(SMOKE_DIR), "-B", str(build_dir),
-                 f"-DORT_SOURCE_DIR={ort_source}", "-DCMAKE_BUILD_TYPE=Release"]
+                 f"-DORT_SOURCE_DIR={ort_source_abs}", "-DCMAKE_BUILD_TYPE=Release"]
     r = subprocess.run(configure, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"cmake configure failed:\n{r.stderr}")
