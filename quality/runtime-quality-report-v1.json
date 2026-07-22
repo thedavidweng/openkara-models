@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/quality/schema-runtime-quality-report-v1.json",
+  "title": "OpenKara runtime quality report (v1)",
+  "description": "Schema for the runtime benchmark + quality report produced by scripts/run_runtime_quality_suite.py. Combines runtime metrics (load, latency, RTF, RSS) with correctness checks (shape, finiteness) across the corpus fixtures.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "runtime_archive", "onnx_path", "tier", "rtf_threshold", "results"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "openkara.runtime-quality-report/v1"},
+    "runtime_archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size", "installed_size"],
+      "properties": {
+        "name": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size": {"type": "integer", "minimum": 0},
+        "installed_size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "onnx_path": {"type": "string"},
+    "tier": {"type": "string", "enum": ["pr", "release"]},
+    "rtf_threshold": {"type": "number", "minimum": 0},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fixture_id", "category", "tier", "frames", "audio_duration_s",
+                      "cold_load_s", "first_window_s", "warm_median_s", "warm_p95_s",
+                      "warm_iters", "rtf_first", "rtf_warm", "peak_rss_kb",
+                      "rss_delta_kb", "providers", "output_shape", "shape_errors"],
+        "properties": {
+          "fixture_id": {"type": "string"},
+          "category": {"type": "string"},
+          "tier": {"type": "string"},
+          "frames": {"type": "integer", "minimum": 1},
+          "audio_duration_s": {"type": "number", "minimum": 0},
+          "cold_load_s": {"type": "number", "minimum": 0},
+          "first_window_s": {"type": "number", "minimum": 0},
+          "warm_median_s": {"type": "number", "minimum": 0},
+          "warm_p95_s": {"type": "number", "minimum": 0},
+          "warm_iters": {"type": "integer", "minimum": 0},
+          "rtf_first": {"type": "number", "minimum": 0},
+          "rtf_warm": {"type": "number", "minimum": 0},
+          "peak_rss_kb": {"type": "integer", "minimum": 0},
+          "rss_delta_kb": {"type": "integer"},
+          "providers": {"type": "array", "items": {"type": "string"}},
+          "fallback_node_count": {"type": ["integer", "null"], "minimum": 0},
+          "output_shape": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+          "shape_errors": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}
