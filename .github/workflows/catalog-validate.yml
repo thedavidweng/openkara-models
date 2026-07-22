@@ -11,9 +11,11 @@ on:
       - "scripts/generate_catalog_release.py"
       - "scripts/generate_supply_chain.py"
       - "scripts/verify_supply_chain.py"
+      - "scripts/publish_catalog_release.py"
       - "tests/test_catalog_validation.py"
       - "tests/test_catalog_generator.py"
       - "tests/test_supply_chain.py"
+      - "tests/test_publish_catalog.py"
       - "requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/catalog-validate.yml"
@@ -28,9 +30,11 @@ on:
       - "scripts/generate_catalog_release.py"
       - "scripts/generate_supply_chain.py"
       - "scripts/verify_supply_chain.py"
+      - "scripts/publish_catalog_release.py"
       - "tests/test_catalog_validation.py"
       - "tests/test_catalog_generator.py"
       - "tests/test_supply_chain.py"
+      - "tests/test_publish_catalog.py"
 
 jobs:
   validate:
@@ -62,8 +66,8 @@ jobs:
       - name: Verify supply-chain records
         run: python scripts/verify_supply_chain.py --all
 
-      - name: Catalog unit + generator + supply-chain tests
-        run: python -m pytest tests/test_catalog_validation.py tests/test_catalog_generator.py tests/test_supply_chain.py -q
+      - name: Catalog unit + generator + supply-chain + publish tests
+        run: python -m pytest tests/test_catalog_validation.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py -q
 
       - name: Fixtures are fresh (regenerate + git diff)
         run: |
@@ -78,7 +82,12 @@ jobs:
       - name: Generated catalog is fresh (regenerate + git diff)
         run: |
           python scripts/generate_catalog_release.py --spec catalog/specs/2026-07-20-001.spec.json
-          git diff --exit-code -- catalog/releases catalog/channels latest.json
+          git diff --exit-code -- catalog/releases latest.json
+
+      - name: Publication dry-run (verifies asset URLs + SHA-256)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/publish_catalog_release.py --release 2026-07-20-001
 
       - name: Syntax check catalog scripts
-        run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py scripts/generate_catalog_release.py scripts/generate_supply_chain.py scripts/verify_supply_chain.py
+        run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py scripts/generate_catalog_release.py scripts/generate_supply_chain.py scripts/verify_supply_chain.py scripts/publish_catalog_release.py

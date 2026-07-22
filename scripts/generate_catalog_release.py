@@ -211,7 +211,16 @@ def _build_latest_adapter(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]
 # --------------------------------------------------------------------------- #
 
 
-def _existing_releases(exclude_id: str, releases_dir: Path) -> list[dict[str, Any]]:
+def _load_existing_release(release_id: str, releases_dir: Path) -> Path | None:
+    """Return the path of an already-committed manifest with this release_id, if any."""
+    if not releases_dir.is_dir():
+        return None
+    candidate = releases_dir / f"{release_id}.json"
+    return candidate if candidate.is_file() else None
+
+
+def _other_releases(release_id: str, releases_dir: Path) -> list[dict[str, Any]]:
+    """All committed manifests except the one matching ``release_id``."""
     if not releases_dir.is_dir():
         return []
     out: list[dict[str, Any]] = []
@@ -220,34 +229,57 @@ def _existing_releases(exclude_id: str, releases_dir: Path) -> list[dict[str, An
             doc = _load_json(path)
         except (json.JSONDecodeError, OSError):
             continue
-        if doc.get("release_id") == exclude_id:
+        if doc.get("release_id") == release_id:
             continue
         out.append(doc)
     return out
 
 
+class GuardError(Exception):
+    """Raised when a release cannot be (re)generated without violating invariants."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(f"[{code}] {message}")
+
+
 def _guard_against_contradictory_releases(
-    new_id: str, new_gen: int, new_bytes: bytes, releases_dir: Path
+    new_id: str,
+    new_gen: int,
+    new_bytes: bytes,
+    releases_dir: Path,
+    *,
+    force: bool = False,
 ) -> None:
-    others = _existing_releases(new_id, releases_dir)
-    for doc in others:
-        if doc.get("release_id") == new_id:
-            raise CatalogIntegrityError(
-                [
-                    ValueError(  # type: ignore[list-item]
-                        f"release_id {new_id!r} already exists with different content; "
-                        "use --force only to rewrite identical bytes"
-                    )
-                ]
+    """Reject regeneration that would change bytes for an existing release_id,
+    regress generation, or break monotonicity.
+
+    ``force`` allows rewriting an existing release_id only when the new bytes
+    are byte-identical to the committed manifest (idempotent regeneration).
+    Different bytes for an existing release_id are always rejected — release
+    manifests are immutable; bump ``generation`` and use a new ``release_id``.
+    """
+    existing_path = _load_existing_release(new_id, releases_dir)
+    if existing_path is not None:
+        existing_bytes = existing_path.read_bytes()
+        if existing_bytes != new_bytes:
+            raise GuardError(
+                "immutable_release_id",
+                f"release_id {new_id!r} already exists at {existing_path} with different "
+                "content. Release manifests are immutable; do not regenerate a published "
+                "release with changed bytes. Bump generation and use a new release_id.",
             )
+        # Identical bytes: idempotent regeneration is allowed (with or without
+        # --force). --force is accepted for backward compatibility but is not
+        # required for identical rewrites.
+
+    others = _other_releases(new_id, releases_dir)
     if others and max(d.get("generation", 0) for d in others) > new_gen:
-        raise CatalogIntegrityError(
-            [
-                ValueError(  # type: ignore[list-item]
-                    f"generation {new_gen} < existing max "
-                    f"{max(d.get('generation', 0) for d in others)}"
-                )
-            ]
+        raise GuardError(
+            "non_monotonic_generation",
+            f"generation {new_gen} < existing max "
+            f"{max(d.get('generation', 0) for d in others)}",
         )
     # Monotonicity across the full set including the new release.
     new_doc = json.loads(new_bytes.decode("utf-8"))
@@ -274,7 +306,9 @@ def main() -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Allow rewriting an existing release_id with identical content.",
+        help="Accepted for backward compatibility. Idempotent regeneration (byte-identical "
+        "output for an existing release_id) is always allowed; mutating a published "
+        "release is always rejected — bump generation and use a new release_id instead.",
     )
     parser.add_argument(
         "--catalog-dir",
@@ -326,9 +360,13 @@ def main() -> int:
 
     try:
         _guard_against_contradictory_releases(
-            release_id, manifest["generation"], manifest_bytes, releases_dir
+            release_id,
+            manifest["generation"],
+            manifest_bytes,
+            releases_dir,
+            force=args.force,
         )
-    except CatalogIntegrityError as e:
+    except (CatalogIntegrityError, GuardError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
@@ -337,7 +375,11 @@ def main() -> int:
     manifest_size = release_path.stat().st_size
     _, manifest_sha = _sha256_file(release_path)
 
-    # Stable pointer.
+    # Validate the candidate pointer shape but DO NOT write the stable pointer.
+    # The stable pointer is advanced only by publish_catalog_release.py after
+    # every referenced asset is uploaded and SHA-256-verified. Writing it here
+    # would advance the pointer before the assets exist, breaking the
+    # atomicity contract (issue #18 PR 4).
     publish_url = args.manifest_publish_url or (
         f"https://github.com/thedavidweng/openkara-models/releases/download/"
         f"infra-{release_id}/release-manifest.json"
@@ -345,7 +387,7 @@ def main() -> int:
     pointer = _build_pointer(spec, publish_url, manifest_sha, manifest_size)
     pointer_result = validate_document(pointer, schema="channel")
     if not pointer_result.ok:
-        print("ERROR: stable pointer failed validation:", file=sys.stderr)
+        print("ERROR: candidate stable pointer failed validation:", file=sys.stderr)
         for e in pointer_result.schema_errors:
             print(f"  SCHEMA: {e}", file=sys.stderr)
         for e in pointer_result.invariant_errors:
@@ -353,7 +395,6 @@ def main() -> int:
         # Roll back the manifest write so a bad pointer never leaves a half state.
         release_path.unlink(missing_ok=True)
         return 1
-    _dump_json(channels_dir / "stable.json", pointer)
 
     # latest.json migration adapter.
     adapter = _build_latest_adapter(manifest)
@@ -361,7 +402,7 @@ def main() -> int:
 
     print(f"OK: release {release_id} (generation {manifest['generation']})")
     print(f"  manifest:  {release_path} ({manifest_size} bytes, sha256 {manifest_sha[:12]}...)")
-    print(f"  pointer:   {channels_dir / 'stable.json'}")
+    print(f"  pointer:   NOT advanced (use scripts/publish_catalog_release.py --execute)")
     print(f"  adapter:   {args.latest_json_path} ({len(adapter)} variants)")
     return 0
 

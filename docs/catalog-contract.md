@@ -115,8 +115,54 @@ OpenKara PR #165 currently fetches an ad hoc `latest.json` of the form:
 ```
 
 Issue #18 PR 2 generates this file from the stable pointer as a **migration
-alias only**. It is deleted in issue #18 PR 4 once OpenKara #167 switches to
-the versioned schema. It must not grow new fields or become a second contract.
+alias only**. It is deleted once OpenKara #167 switches to the versioned
+schema. It must not grow new fields or become a second contract.
+
+**Deletion procedure (blocked on OpenKara #167):**
+1. OpenKara #167 merges — the app fetches `catalog/channels/stable.json` and
+   `catalog/releases/<release-id>.json` instead of `latest.json`.
+2. Remove `latest.json` from the repo root.
+3. Remove `_build_latest_adapter` and the `--latest-json-path` option from
+   `scripts/generate_catalog_release.py`.
+4. Remove the `latest.json` freshness guard from
+   `.github/workflows/catalog-validate.yml`.
+
+Step 5 of the original procedure (remove the stale README pin table and Rust
+`ModelDescriptor` constant block) is **already complete** — it was done in
+PR 4 commit `42fe5a3` ahead of the OpenKara #167 switch, since the catalog is
+the single authority and the duplicated constants were incorrect (the HTDEMUCS
+pin carried the v2.0.1 digest while claiming v2.1.0).
+
+Until OpenKara #167 merges, `latest.json` remains generated from the stable
+pointer and verified by CI on every PR.
+
+## Atomic publication
+
+`scripts/publish_catalog_release.py --release <release-id> [--execute]`
+publishes a catalog release as an immutable GitHub release and advances the
+stable pointer atomically:
+
+1. **Dry-run (default):** verifies the manifest validates, supply-chain records
+   match local files, every referenced artifact asset URL resolves to an
+   existing GitHub release asset whose SHA-256 matches the manifest, and
+   generation is monotonic. Exits 0 if ready to publish. No `--skip-asset-check`
+   escape hatch exists — every asset must be reachable and verifiable.
+2. **Execute (`--execute`):**
+   1. Creates a draft GitHub release tagged `infra-<release-id>`.
+   2. Uploads the manifest + supply-chain files as release assets.
+   3. Downloads every uploaded asset and verifies its SHA-256 and size match
+      the manifest.
+   4. Advances `catalog/channels/stable.json` to point at the new release
+      (only after every asset is verified).
+   5. Publishes (undrafts) the release.
+   On any failure before step 4, the release is deleted and the stable pointer
+   is not moved.
+
+`generate_catalog_release.py` writes the immutable manifest and `latest.json`
+adapter only. It does **not** advance the stable pointer — that is the sole
+responsibility of `publish_catalog_release.py` after asset verification. This
+enforces the issue #18 PR 4 atomicity contract: the stable pointer never
+references a release whose assets have not been uploaded and verified.
 
 ## Cross-repository pairing
 

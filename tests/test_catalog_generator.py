@@ -151,6 +151,64 @@ class GuardTests(unittest.TestCase):
             self.assertFalse((tdp / "cat" / "channels" / "stable.json").is_file())
             self.assertFalse((tdp / "cat" / "releases").is_dir() and any((tdp / "cat" / "releases").iterdir()))
 
+    def test_mutating_existing_release_id_rejected(self):
+        """Regenerating an existing release_id with different bytes must fail;
+        --force must not bypass immutability for changed content."""
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            # First, generate the canonical release into a temp catalog.
+            r1 = _run(
+                ["--spec", str(SPEC), "--catalog-dir", str(tdp / "cat"),
+                 "--latest-json-path", str(tdp / "latest.json")]
+            )
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            original = (tdp / "cat" / "releases" / "2026-07-20-001.json").read_bytes()
+            # Now build a spec that produces different bytes for the same id.
+            mutated = _load(SPEC)
+            mutated["notes"] = "mutated notes that change the manifest bytes"
+            mutated_path = tdp / "mutated.spec.json"
+            with mutated_path.open("w") as fh:
+                json.dump(mutated, fh)
+            # Without --force: must fail.
+            r2 = _run(
+                ["--spec", str(mutated_path), "--catalog-dir", str(tdp / "cat"),
+                 "--latest-json-path", str(tdp / "latest.json")]
+            )
+            self.assertNotEqual(r2.returncode, 0, r2.stderr or r2.stdout)
+            self.assertIn("immutable_release_id", r2.stderr)
+            # The committed manifest must be untouched.
+            self.assertEqual(
+                (tdp / "cat" / "releases" / "2026-07-20-001.json").read_bytes(),
+                original,
+            )
+            # With --force: still rejected because bytes differ.
+            r3 = _run(
+                ["--spec", str(mutated_path), "--catalog-dir", str(tdp / "cat"),
+                 "--latest-json-path", str(tdp / "latest.json"), "--force"]
+            )
+            self.assertNotEqual(r3.returncode, 0, r3.stderr or r3.stdout)
+            self.assertIn("immutable_release_id", r3.stderr)
+
+    def test_idempotent_regeneration_allowed(self):
+        """Regenerating the same spec into a catalog that already contains the
+        identical release must succeed (idempotent)."""
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            r1 = _run(
+                ["--spec", str(SPEC), "--catalog-dir", str(tdp / "cat"),
+                 "--latest-json-path", str(tdp / "latest.json")]
+            )
+            self.assertEqual(r1.returncode, 0, r1.stderr)
+            before = (tdp / "cat" / "releases" / "2026-07-20-001.json").read_bytes()
+            # Regenerate the same spec into the same catalog dir.
+            r2 = _run(
+                ["--spec", str(SPEC), "--catalog-dir", str(tdp / "cat"),
+                 "--latest-json-path", str(tdp / "latest.json")]
+            )
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+            after = (tdp / "cat" / "releases" / "2026-07-20-001.json").read_bytes()
+            self.assertEqual(before, after)
+
 
 class FreshnessTests(unittest.TestCase):
     def test_committed_catalog_matches_generator(self):
@@ -166,6 +224,24 @@ class FreshnessTests(unittest.TestCase):
                 RELEASE.read_bytes(),
             )
             self.assertEqual((tdp / "latest.json").read_bytes(), LATEST.read_bytes())
+
+    def test_generator_does_not_advance_stable_pointer(self):
+        """The generator must NOT write catalog/channels/stable.json. The stable
+        pointer is advanced only by publish_catalog_release.py after every
+        referenced asset is uploaded and SHA-256-verified (issue #18 PR 4
+        atomicity contract)."""
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            r = _run(
+                ["--spec", str(SPEC), "--catalog-dir", str(tdp / "cat"),
+                 "--latest-json-path", str(tdp / "latest.json")]
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse(
+                (tdp / "cat" / "channels" / "stable.json").is_file(),
+                "generate_catalog_release.py must not advance the stable pointer; "
+                "use publish_catalog_release.py --execute instead.",
+            )
 
 
 if __name__ == "__main__":
