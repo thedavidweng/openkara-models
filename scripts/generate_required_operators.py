@@ -55,14 +55,23 @@ DEFAULT_OUTPUT_STEM = ROOT / "ort" / "required-operators"
 GENERATOR_VERSION = "openkara.required-operators/v1"
 
 
-def extract_operators(model_path: Path) -> dict[str, set[str]]:
-    """Return ``{domain: {op_type, ...}}`` for every node in the model graph.
+def extract_operators(model_path: Path) -> tuple[dict[str, set[str]], dict[str, set[int]]]:
+    """Return ``({domain: {op_type, ...}}, {domain: {opset, ...}})`` for the model.
 
-    Recurses into subgraphs (if/loop bodies) so that control-flow operators are
-    included. The empty domain (``""``) maps to the default ``ai.onnx`` domain.
+    The first dict maps each domain to the set of operator types used. The
+    second dict maps each domain to the set of opset versions imported by the
+    model for that domain. Both recurse into subgraphs (if/loop bodies) so
+    that control-flow operators are included. The empty domain (``""``) maps
+    to the default ``ai.onnx`` domain.
     """
     model = onnx.load(str(model_path), load_external_data=False)
     domains: dict[str, set[str]] = {}
+    opsets: dict[str, set[int]] = {}
+
+    # Collect opset imports from the model.
+    for imp in model.opset_import:
+        domain = imp.domain or ""
+        opsets.setdefault(domain, set()).add(imp.version)
 
     def _walk(graph: onnx.GraphProto) -> None:
         for node in graph.node:
@@ -77,29 +86,41 @@ def extract_operators(model_path: Path) -> dict[str, set[str]]:
                         _walk(sub)
 
     _walk(model.graph)
-    return domains
+    return domains, opsets
 
 
-def merge_operator_sets(per_model: list[tuple[str, dict[str, set[str]]]]) -> dict[str, set[str]]:
-    merged: dict[str, set[str]] = {}
-    for _, domains in per_model:
+def merge_operator_sets(
+    per_model: list[tuple[str, dict[str, set[str]], dict[str, set[int]]]],
+) -> tuple[dict[str, set[str]], dict[str, set[int]]]:
+    merged_ops: dict[str, set[str]] = {}
+    merged_opsets: dict[str, set[int]] = {}
+    for _, domains, opsets in per_model:
         for domain, ops in domains.items():
-            merged.setdefault(domain, set()).update(ops)
-    return merged
+            merged_ops.setdefault(domain, set()).update(ops)
+        for domain, vers in opsets.items():
+            merged_opsets.setdefault(domain, set()).update(vers)
+    return merged_ops, merged_opsets
 
 
-def write_ort_config(union: dict[str, set[str]], config_path: Path) -> None:
+def write_ort_config(
+    union_ops: dict[str, set[str]],
+    union_opsets: dict[str, set[int]],
+    config_path: Path,
+) -> None:
     """Write the ORT reduced-build config file.
 
-    Format: one line per domain, ``<domain>;<op1>,op2,...``. The default
-    ``ai.onnx`` domain is written with an empty domain prefix (``;Conv,Add,...``)
-    matching ORT's ``create_reduced_build_config.py`` output. Domains are sorted
-    for deterministic output; ops within a domain are sorted.
+    Format: one line per domain, ``<domain>;<opset1>,<opset2>,...;<op1>,<op2>,...``.
+    The default ``ai.onnx`` domain is written with an empty domain prefix
+    (``;19;Conv,Add,...``) matching ORT's ``reduced_build_config_parser.parse_config``
+    expectations (3 semicolon-separated fields). Domains are sorted for
+    deterministic output; opsets and ops within a domain are sorted.
     """
     lines: list[str] = []
-    for domain in sorted(union):
-        ops = sorted(union[domain])
-        lines.append(f"{domain};{','.join(ops)}")
+    for domain in sorted(union_ops):
+        ops = sorted(union_ops[domain])
+        vers = sorted(union_opsets.get(domain, set()))
+        opset_str = ",".join(str(v) for v in vers) if vers else ""
+        lines.append(f"{domain};{opset_str};{','.join(ops)}")
     config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -173,18 +194,18 @@ def _resolve_catalog_models(manifest_path: Path, download_dir: Path) -> list[Pat
 
 def generate(model_paths: list[Path], output_stem: Path) -> dict[str, Any]:
     """Generate the config + sidecar. Returns the sidecar dict."""
-    per_model: list[tuple[str, dict[str, set[str]]]] = []
+    per_model: list[tuple[str, dict[str, set[str]], dict[str, set[int]]]] = []
     for p in model_paths:
-        domains = extract_operators(p)
+        domains, opsets = extract_operators(p)
         size, sha = _sha256_file(p)
-        per_model.append((p.name, domains))
+        per_model.append((p.name, domains, opsets))
         print(f"  {p.name}: {sum(len(o) for o in domains.values())} ops across "
               f"{len(domains)} domain(s)")
 
-    union = merge_operator_sets(per_model)
+    union_ops, union_opsets = merge_operator_sets(per_model)
     config_path = output_stem.with_suffix(".config")
     sidecar_path = output_stem.with_suffix(".json")
-    write_ort_config(union, config_path)
+    write_ort_config(union_ops, union_opsets, config_path)
 
     lock_ref: dict[str, Any] = {}
     if LOCK_PATH.is_file():
@@ -194,7 +215,7 @@ def generate(model_paths: list[Path], output_stem: Path) -> dict[str, Any]:
             "upstream_commit_sha": lock["upstream"]["commit_sha"],
         }
 
-    union_serializable = {d: sorted(ops) for d, ops in sorted(union.items())}
+    union_serializable = {d: sorted(ops) for d, ops in sorted(union_ops.items())}
     sidecar = {
         "schema_version": GENERATOR_VERSION,
         "source_lock": lock_ref,
@@ -203,7 +224,7 @@ def generate(model_paths: list[Path], output_stem: Path) -> dict[str, Any]:
                 "filename": name,
                 "operator_domains": {d: sorted(ops) for d, ops in sorted(domains.items())},
             }
-            for name, domains in per_model
+            for name, domains, _ in per_model
         ],
         "union_operator_set": union_serializable,
         "config_file": {

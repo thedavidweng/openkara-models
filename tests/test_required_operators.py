@@ -43,8 +43,9 @@ def test_extract_operators_single_domain(tmp_path: Path) -> None:
     import generate_required_operators as gen
     m = tmp_path / "m.onnx"
     _make_model(m, [("", "Add"), ("", "Relu"), ("", "Mul")])
-    ops = gen.extract_operators(m)
+    ops, opsets = gen.extract_operators(m)
     assert ops == {"": {"Add", "Relu", "Mul"}}
+    assert opsets == {"": {17}}
 
 
 def test_extract_operators_multiple_domains(tmp_path: Path) -> None:
@@ -52,17 +53,20 @@ def test_extract_operators_multiple_domains(tmp_path: Path) -> None:
     import generate_required_operators as gen
     m = tmp_path / "m.onnx"
     _make_model(m, [("", "Add"), ("com.microsoft", "Mul"), ("", "Relu")])
-    ops = gen.extract_operators(m)
+    ops, opsets = gen.extract_operators(m)
     assert ops == {"": {"Add", "Relu"}, "com.microsoft": {"Mul"}}
+    assert opsets == {"": {17}, "com.microsoft": {17}}
 
 
 def test_merge_operator_sets(tmp_path: Path) -> None:
     sys.path.insert(0, str(SCRIPTS))
     import generate_required_operators as gen
-    a = ("a.onnx", {"": {"Add", "Relu"}})
-    b = ("b.onnx", {"": {"Add", "Mul"}, "com.microsoft": {"Foo"}})
-    merged = gen.merge_operator_sets([a, b])
-    assert merged == {"": {"Add", "Relu", "Mul"}, "com.microsoft": {"Foo"}}
+    a = ("a.onnx", {"": {"Add", "Relu"}}, {"": {17}})
+    b = ("b.onnx", {"": {"Add", "Mul"}, "com.microsoft": {"Foo"}},
+         {"": {17}, "com.microsoft": {17}})
+    merged_ops, merged_opsets = gen.merge_operator_sets([a, b])
+    assert merged_ops == {"": {"Add", "Relu", "Mul"}, "com.microsoft": {"Foo"}}
+    assert merged_opsets == {"": {17}, "com.microsoft": {17}}
 
 
 def test_write_ort_config_format(tmp_path: Path) -> None:
@@ -71,12 +75,14 @@ def test_write_ort_config_format(tmp_path: Path) -> None:
     cfg = tmp_path / "ops.config"
     gen.write_ort_config(
         {"": {"Add", "Mul"}, "com.microsoft": {"Foo", "Bar"}},
+        {"": {17}, "com.microsoft": {17}},
         cfg,
     )
     lines = cfg.read_text().strip().split("\n")
     # Empty domain first (sorted), then com.microsoft.
-    assert lines[0] == ";Add,Mul"
-    assert lines[1] == "com.microsoft;Bar,Foo"
+    # Format: <domain>;<opset>;<ops>
+    assert lines[0] == ";17;Add,Mul"
+    assert lines[1] == "com.microsoft;17;Bar,Foo"
 
 
 def test_generate_end_to_end(tmp_path: Path) -> None:
@@ -89,8 +95,8 @@ def test_generate_end_to_end(tmp_path: Path) -> None:
     stem = tmp_path / "reqops"
     sidecar = gen.generate([m1, m2], stem)
     cfg = (tmp_path / "reqops.config").read_text().strip().split("\n")
-    assert cfg[0] == ";Add,Mul,Relu"
-    assert cfg[1] == "com.microsoft;Foo"
+    assert cfg[0] == ";17;Add,Mul,Relu"
+    assert cfg[1] == "com.microsoft;17;Foo"
     assert sidecar["schema_version"] == "openkara.required-operators/v1"
     assert len(sidecar["contributors"]) == 2
     assert set(sidecar["union_operator_set"][""]) == {"Add", "Mul", "Relu"}
