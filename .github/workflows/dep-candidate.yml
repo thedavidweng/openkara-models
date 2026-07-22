@@ -140,6 +140,17 @@ jobs:
           path: ort/packages/onnxruntime-*-${{ matrix.target }}.*
 
   # Run quality gates (for both ORT and model-weight updates).
+  #
+  # Each gate is classified as one of:
+  #   passed      — ran and succeeded.
+  #   failed      — ran and failed (non-zero exit or error in report).
+  #   not_run     — skipped (e.g. model file missing).
+  #   unavailable — the tooling/script is not present in this checkout.
+  #
+  # The job itself always completes (so artifacts are uploaded) but
+  # individual suite steps record their outcome in the report files.
+  # The gate-status generator (generate_gate_status.py) reads those
+  # reports and produces the final classification used in the PR body.
   quality-gates:
     needs: [prepare, build-runtimes]
     if: always() && needs.prepare.result == 'success'
@@ -155,14 +166,78 @@ jobs:
           pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
           pip install -r requirements.txt
       - name: Run detection + candidate tests
-        run: python -m pytest tests/test_dep_detection.py tests/test_dep_candidate.py -q
-      - name: Run quality suite (PR tier)
+        run: python -m pytest tests/test_dep_detection.py tests/test_dep_candidate.py tests/test_gate_status.py -q
+      - name: Run model quality suite
+        id: model_quality
+        continue-on-error: true
         run: |
-          # This requires a model file; skip if not available.
-          if [ -f models/htdemucs.onnx ]; then
-            python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.onnx --report quality-report.json || true
+          set +e
+          if [ ! -f scripts/run_quality_suite.py ]; then
+            echo "status=unavailable" >> "$GITHUB_OUTPUT"
+            echo "Model quality suite script not present in this checkout"
+            exit 0
+          fi
+          if [ ! -f models/htdemucs.onnx ]; then
+            echo "status=not_run" >> "$GITHUB_OUTPUT"
+            echo "No model file available (models/htdemucs.onnx); quality suite not run"
+            exit 0
+          fi
+          python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.onnx --report quality-report.json
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            printf '{"status": "failed", "error": "quality suite exited with code %s"}\n' "$EXIT_CODE" > quality-report.json
+            echo "Model quality suite FAILED (exit code $EXIT_CODE)"
+            exit 0
+          fi
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+      - name: Run runtime quality suite
+        id: runtime_quality
+        continue-on-error: true
+        run: |
+          set +e
+          if [ ! -f scripts/run_runtime_quality_suite.py ]; then
+            echo "status=unavailable" >> "$GITHUB_OUTPUT"
+            echo "Runtime quality suite script not present in this checkout"
+            exit 0
+          fi
+          python scripts/run_runtime_quality_suite.py --tier pr --report runtime-quality-report.json
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            printf '{"status": "failed", "error": "runtime quality suite exited with code %s"}\n' "$EXIT_CODE" > runtime-quality-report.json
+            echo "Runtime quality suite FAILED (exit code $EXIT_CODE)"
+            exit 0
+          fi
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+      - name: Run gate enforcement
+        id: gate_enforcement
+        continue-on-error: true
+        run: |
+          set +e
+          if [ ! -f scripts/enforce_quality_gates.py ]; then
+            echo "status=unavailable" >> "$GITHUB_OUTPUT"
+            echo "Gate enforcer script not present in this checkout"
+            exit 0
+          fi
+          if [ ! -f quality-report.json ] || [ ! -f runtime-quality-report.json ]; then
+            echo "status=not_run" >> "$GITHUB_OUTPUT"
+            echo "Required reports missing; gate enforcement not run"
+            exit 0
+          fi
+          python scripts/enforce_quality_gates.py \
+            --artifact-id htdemucs.balanced.fp32.onnx \
+            --quality-report quality-report.json \
+            --runtime-report runtime-quality-report.json \
+            --tier pr
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 0 ]; then
+            printf '{"overall": "passed", "exit_code": 0}\n' > gate-result.json
+            echo "status=passed" >> "$GITHUB_OUTPUT"
           else
-            echo "No model file available; skipping quality suite"
+            printf '{"overall": "failed", "exit_code": %s}\n' "$EXIT_CODE" > gate-result.json
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            echo "Gate enforcement FAILED (exit code $EXIT_CODE)"
           fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
@@ -170,9 +245,15 @@ jobs:
           name: quality-reports
           path: |
             quality-report.json
+            runtime-quality-report.json
+            gate-result.json
             candidate-summary.md
 
   # Create the candidate PR with the summary and verification artifacts.
+  # The PR is always created (even if gates failed) so it can serve as a
+  # failure-diagnosis record. However, the PR body MUST clearly state the
+  # gate status and MUST NOT describe an incomplete candidate as verified,
+  # ready, or passed. The stable pointer is never modified by this workflow.
   create-pr:
     needs: [prepare, build-runtimes, quality-gates]
     if: always() && needs.prepare.result == 'success'
@@ -185,29 +266,91 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: candidate-summary
-      # Download the runtime + quality artifacts produced by earlier jobs so
-      # the candidate PR body can reference them and so we can gate PR creation
-      # on their presence. Without this, the PR claimed validation results that
-      # were never attached to the candidate.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: quality-reports
           path: artifacts/quality-reports
-        if: needs.quality-gates.result == 'success'
+        if: always()
+        continue-on-error: true
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: runtime-*
           path: artifacts/runtimes
           merge-multiple: true
         if: needs.build-runtimes.result == 'success'
-      - name: Verify artifacts and build PR body
+        continue-on-error: true
+      - name: Verify stable pointer not modified
+        run: |
+          # The candidate workflow must never modify the stable pointer.
+          # This step verifies the file (if it exists) has not been touched
+          # by any earlier step in this workflow.
+          if [ -f catalog/channels/stable.json ]; then
+            STABLE_HASH=$(git rev-parse HEAD:catalog/channels/stable.json 2>/dev/null || echo "untracked")
+            echo "Stable pointer present: $STABLE_HASH"
+            # Ensure the working tree copy matches the committed version.
+            if ! git diff --quiet -- catalog/channels/stable.json 2>/dev/null; then
+              echo "ERROR: stable pointer was modified during candidate workflow" >&2
+              git diff -- catalog/channels/stable.json >&2
+              exit 1
+            fi
+            echo "Stable pointer verified: not modified"
+          else
+            echo "No stable pointer file in this checkout (catalog stack not merged yet)"
+          fi
+      - name: Generate gate status and build PR body
         env:
           IS_ORT_UPDATE: ${{ needs.prepare.outputs.is_ort_update }}
           BUILD_RUNTIMES_RESULT: ${{ needs.build-runtimes.result }}
           QUALITY_GATES_RESULT: ${{ needs.quality-gates.result }}
         run: |
           set -euo pipefail
-          # Build an artifact manifest appended to the candidate summary.
+          CANDIDATE_TYPE="model"
+          if [ "$IS_ORT_UPDATE" = "true" ]; then
+            CANDIDATE_TYPE="ort"
+          fi
+
+          # Locate reports downloaded from the quality-gates job.
+          QUALITY_REPORT=""
+          RUNTIME_REPORT=""
+          GATE_RESULT=""
+          if [ -f artifacts/quality-reports/quality-report.json ]; then
+            QUALITY_REPORT="artifacts/quality-reports/quality-report.json"
+          fi
+          if [ -f artifacts/quality-reports/runtime-quality-report.json ]; then
+            RUNTIME_REPORT="artifacts/quality-reports/runtime-quality-report.json"
+          fi
+          if [ -f artifacts/quality-reports/gate-result.json ]; then
+            GATE_RESULT="artifacts/quality-reports/gate-result.json"
+          fi
+
+          # Generate the gate status. This script exits non-zero if the
+          # candidate is incomplete — we capture that without failing the
+          # job so the PR can still be created as a diagnosis record.
+          GATE_ARGS=(
+            --candidate-type "$CANDIDATE_TYPE"
+            --output gate-status.json
+            --markdown gate-status.md
+          )
+          if [ -n "$QUALITY_REPORT" ]; then GATE_ARGS+=(--quality-report "$QUALITY_REPORT"); fi
+          if [ -n "$RUNTIME_REPORT" ]; then GATE_ARGS+=(--runtime-report "$RUNTIME_REPORT"); fi
+          if [ -n "$GATE_RESULT" ]; then GATE_ARGS+=(--gate-result "$GATE_RESULT"); fi
+          if [ "$IS_ORT_UPDATE" = "true" ] && [ -d artifacts/runtimes ]; then
+            GATE_ARGS+=(--runtime-artifacts-dir artifacts/runtimes)
+          fi
+
+          set +e
+          python scripts/generate_gate_status.py "${GATE_ARGS[@]}"
+          GATE_EXIT=$?
+          set -e
+
+          if [ $GATE_EXIT -ne 0 ]; then
+            echo "Gate status: INCOMPLETE or FAILED (exit code $GATE_EXIT)"
+            echo "The candidate PR will be created but marked as incomplete."
+          else
+            echo "Gate status: PASSED"
+          fi
+
+          # Build the artifact manifest.
           MANIFEST="artifacts/PR-ARTIFACT-MANIFEST.md"
           {
             echo ""
@@ -220,29 +363,25 @@ jobs:
             echo "|----------|------------|-------|"
           } > "$MANIFEST"
 
-          # Quality reports.
           if [ "$QUALITY_GATES_RESULT" = "success" ] && [ -d artifacts/quality-reports ]; then
-            QFILES=$(find artifacts/quality-reports -type f -printf '%f\n' | sort | tr '\n' ' ')
+            QFILES=$(find artifacts/quality-reports -type f -printf '%f\n' 2>/dev/null | sort | tr '\n' ' ' || true)
             echo "| quality-reports | success | $QFILES |" >> "$MANIFEST"
           else
             echo "| quality-reports | $QUALITY_GATES_RESULT | (not produced) |" >> "$MANIFEST"
           fi
 
-          # Runtime archives (ORT updates only).
           if [ "$IS_ORT_UPDATE" = "true" ]; then
             if [ "$BUILD_RUNTIMES_RESULT" = "success" ] && [ -d artifacts/runtimes ] && \
-               [ -n "$(find artifacts/runtimes -type f -print -quit)" ]; then
-              RFILES=$(find artifacts/runtimes -type f -printf '%f\n' | sort | tr '\n' ' ')
+               [ -n "$(find artifacts/runtimes -type f -print -quit 2>/dev/null || true)" ]; then
+              RFILES=$(find artifacts/runtimes -type f -printf '%f\n' 2>/dev/null | sort | tr '\n' ' ' || true)
               echo "| runtime archives | success | $RFILES |" >> "$MANIFEST"
             else
               echo "| runtime archives | $BUILD_RUNTIMES_RESULT | (not produced) |" >> "$MANIFEST"
-              echo "ERROR: ORT update candidate missing runtime build artifacts" >&2
-              exit 1
             fi
           fi
 
-          # Combine the candidate summary + manifest into the final PR body.
-          cat candidate-summary.md "$MANIFEST" > pr-body.md
+          # Combine: candidate summary + gate status + artifact manifest.
+          cat candidate-summary.md gate-status.md "$MANIFEST" > pr-body.md
           echo "PR body assembled:"
           cat pr-body.md
       - name: Create or update candidate PR
@@ -259,8 +398,16 @@ jobs:
           git checkout -b "$BRANCH_NAME" 2>/dev/null || git checkout "$BRANCH_NAME"
           # Stage only the lock file for ORT updates; model-weight updates have
           # no lock changes yet (the conversion workflow handles those).
+          # NEVER stage catalog/channels/stable.json — the stable pointer is
+          # not advanced by candidate workflows.
           if [ "$IS_ORT_UPDATE" = "true" ]; then
             git add ort/source-lock.json
+          fi
+          # Explicitly verify the stable pointer is not staged.
+          if git diff --cached --name-only | grep -q "^catalog/channels/stable.json$"; then
+            echo "ERROR: stable pointer was staged — aborting" >&2
+            git reset HEAD -- catalog/channels/stable.json
+            exit 1
           fi
           # Commit only if there are staged changes.
           if ! git diff --cached --quiet; then
