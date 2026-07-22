@@ -1,40 +1,59 @@
 {
   "schema_version": "openkara.quality-baselines/v1",
-  "note": "Baseline report IDs and metric values for current stable artifacts. These are the reference points for non-regression budgets. PR 4 of #21 freezes these; subsequent PRs must not regress beyond the budgets defined in budgets.json. When a new stable artifact is promoted, its baseline report ID is added here.",
+  "note": "Baseline report IDs and metric values for current stable artifacts. These are the reference points for non-regression budgets. A baseline is FROZEN only when all required fields are populated with real measured values from a complete quality + runtime report run on the stable artifact. A not-frozen baseline means release gates are NOT landed and no artifact can be promoted to the stable channel.",
+  "required_fields_for_freeze": [
+    "artifact_id",
+    "model",
+    "model_digest",
+    "runtime_id",
+    "target",
+    "provider",
+    "baseline_quality_report_id",
+    "baseline_quality_report_digest",
+    "baseline_runtime_report_id",
+    "baseline_runtime_report_digest",
+    "baseline_metrics",
+    "artifact_size_bytes",
+    "frozen_at",
+    "generation_time",
+    "benchmark_environment"
+  ],
   "stable_baselines": [
     {
       "artifact_id": "htdemucs.balanced.fp32.onnx",
       "model": "htdemucs",
-      "baseline_quality_report_id": "pending-pr4-freeze",
-      "baseline_runtime_report_id": "pending-pr4-freeze",
-      "baseline_metrics": {
-        "mse": 0.0,
-        "mae": 0.0,
-        "max_abs_error": 0.0,
-        "rtf_warm": 0.14,
-        "cold_load_s": 1.5,
-        "warm_median_s": 1.1,
-        "peak_rss_kb": 500000
-      },
-      "frozen_at": "pending",
-      "note": "Initial placeholder. The actual baseline is frozen when the first complete quality + runtime report is produced on the stable artifact. Until then, the initial promotion policy from issue #21 applies."
+      "model_digest": null,
+      "runtime_id": null,
+      "target": null,
+      "provider": null,
+      "baseline_quality_report_id": null,
+      "baseline_quality_report_digest": null,
+      "baseline_runtime_report_id": null,
+      "baseline_runtime_report_digest": null,
+      "baseline_metrics": {},
+      "artifact_size_bytes": null,
+      "frozen_at": null,
+      "generation_time": null,
+      "benchmark_environment": null,
+      "note": "NOT FROZEN. No real model quality report, runtime quality report, or native target runtime benchmark has been produced yet. Release gates are NOT landed. To freeze: run run_quality_suite.py --tier release on the stable artifact, run run_runtime_quality_suite.py --tier release on all 5 native targets, compute the model digest and artifact size, and fill in all required fields with the measured values."
     },
     {
       "artifact_id": "htdemucs_ft.balanced.fp32.onnx",
       "model": "htdemucs_ft",
-      "baseline_quality_report_id": "pending-pr4-freeze",
-      "baseline_runtime_report_id": "pending-pr4-freeze",
-      "baseline_metrics": {
-        "mse": 0.0,
-        "mae": 0.0,
-        "max_abs_error": 0.0,
-        "rtf_warm": 0.14,
-        "cold_load_s": 1.5,
-        "warm_median_s": 1.1,
-        "peak_rss_kb": 500000
-      },
-      "frozen_at": "pending",
-      "note": "Initial placeholder. The actual baseline is frozen when the first complete quality + runtime report is produced on the stable artifact."
+      "model_digest": null,
+      "runtime_id": null,
+      "target": null,
+      "provider": null,
+      "baseline_quality_report_id": null,
+      "baseline_quality_report_digest": null,
+      "baseline_runtime_report_id": null,
+      "baseline_runtime_report_digest": null,
+      "baseline_metrics": {},
+      "artifact_size_bytes": null,
+      "frozen_at": null,
+      "generation_time": null,
+      "benchmark_environment": null,
+      "note": "NOT FROZEN. No real model quality report, runtime quality report, or native target runtime benchmark has been produced yet. Release gates are NOT landed. To freeze: run run_quality_suite.py --tier release on the stable artifact, run run_runtime_quality_suite.py --tier release on all 5 native targets, compute the model digest and artifact size, and fill in all required fields with the measured values."
     }
   ]
 }

@@ -140,6 +140,24 @@ def _check_pareto(
     return None
 
 
+def _is_baseline_frozen(entry: dict[str, Any]) -> bool:
+    """Check if a baseline entry has been frozen with real measured values.
+
+    A baseline is frozen when ``frozen_at`` is a non-null timestamp and the
+    required report IDs are non-null. A ``pending-pr4-freeze`` or null
+    ``frozen_at`` means the baseline is NOT frozen.
+    """
+    if entry.get("frozen_at") is None:
+        return False
+    if entry.get("frozen_at") == "pending":
+        return False
+    if entry.get("baseline_quality_report_id") in (None, "pending-pr4-freeze"):
+        return False
+    if entry.get("baseline_runtime_report_id") in (None, "pending-pr4-freeze"):
+        return False
+    return True
+
+
 def enforce_gates(
     artifact_id: str, quality_report: dict[str, Any] | None,
     runtime_report: dict[str, Any] | None, tier: str,
@@ -158,8 +176,19 @@ def enforce_gates(
         errors.append(f"no baseline found for artifact_id={artifact_id}")
         return errors
 
-    if baseline_entry.get("baseline_quality_report_id") == "pending-pr4-freeze":
-        # Baseline not yet frozen — use initial policy (absolute thresholds only).
+    frozen = _is_baseline_frozen(baseline_entry)
+    if not frozen and tier == "release":
+        # Release tier requires a frozen baseline. Without one, release gates
+        # are NOT landed and no artifact can be promoted to the stable channel.
+        errors.append(
+            f"baseline for {artifact_id} is NOT FROZEN — release-tier gates "
+            f"cannot pass without a real measured baseline. Run the quality "
+            f"and runtime suites on the stable artifact and freeze the baseline."
+        )
+        return errors
+
+    if not frozen:
+        # PR tier: use absolute thresholds only (no baseline comparison).
         baseline_metrics: dict[str, Any] = {}
     else:
         baseline_metrics = baseline_entry.get("baseline_metrics", {})

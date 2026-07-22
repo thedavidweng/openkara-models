@@ -49,8 +49,9 @@ def _runtime_report(rtf: float = 0.14, cold_load: float = 1.5, peak_rss: int = 5
     }
 
 
-def test_enforce_gates_passes_with_pending_baseline() -> None:
-    """With a pending baseline, only absolute thresholds apply."""
+def test_enforce_gates_rejects_release_with_unfrozen_baseline() -> None:
+    """Release tier must FAIL when baseline is not frozen — release gates
+    are NOT landed and no artifact can be promoted without a real baseline."""
     import enforce_quality_gates as g
     errors = g.enforce_gates(
         "htdemucs.balanced.fp32.onnx",
@@ -58,7 +59,47 @@ def test_enforce_gates_passes_with_pending_baseline() -> None:
         _runtime_report(rtf=0.14),
         tier="release",
     )
+    assert len(errors) == 1, errors
+    assert "NOT FROZEN" in errors[0]
+
+
+def test_enforce_gates_pr_tier_passes_with_unfrozen_baseline() -> None:
+    """PR tier uses absolute thresholds only — no frozen baseline required."""
+    import enforce_quality_gates as g
+    errors = g.enforce_gates(
+        "htdemucs.balanced.fp32.onnx",
+        _quality_report(mse=1e-6),
+        _runtime_report(rtf=0.14),
+        tier="pr",
+    )
     assert errors == [], errors
+
+
+def test_is_baseline_frozen_rejects_pending() -> None:
+    """_is_baseline_frozen returns False for pending-pr4-freeze and null."""
+    import enforce_quality_gates as g
+    assert g._is_baseline_frozen({"frozen_at": None}) is False
+    assert g._is_baseline_frozen({"frozen_at": "pending"}) is False
+    assert g._is_baseline_frozen({
+        "frozen_at": "2026-07-21T00:00:00Z",
+        "baseline_quality_report_id": "pending-pr4-freeze",
+        "baseline_runtime_report_id": "real-id",
+    }) is False
+    assert g._is_baseline_frozen({
+        "frozen_at": "2026-07-21T00:00:00Z",
+        "baseline_quality_report_id": None,
+        "baseline_runtime_report_id": "real-id",
+    }) is False
+
+
+def test_is_baseline_frozen_accepts_real() -> None:
+    """_is_baseline_frozen returns True when all required fields are real."""
+    import enforce_quality_gates as g
+    assert g._is_baseline_frozen({
+        "frozen_at": "2026-07-21T00:00:00Z",
+        "baseline_quality_report_id": "real-quality-id",
+        "baseline_runtime_report_id": "real-runtime-id",
+    }) is True
 
 
 def test_enforce_gates_rejects_nan() -> None:
