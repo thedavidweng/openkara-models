@@ -342,42 +342,55 @@ int main(int argc, char** argv) {
     ProviderAttempt pa = parse_provider(provider);
     std::string provider_assigned;
     bool used_fallback = false;
+    std::string last_session_error;  // captured for diagnostics
 
     auto try_create_session = [&](const std::string& prov) -> OrtSession* {
         // Reset options for each attempt.
         OrtSessionOptions* o = nullptr;
-        if (api->CreateSessionOptions(&o) != nullptr) return nullptr;
+        OrtStatus* st = api->CreateSessionOptions(&o);
+        if (st) {
+            last_session_error = std::string("CreateSessionOptions: ") +
+                                 api->GetErrorMessage(st);
+            api->ReleaseStatus(st);
+            return nullptr;
+        }
         // ORT v1.27.1 exposes a single generic
         // SessionOptionsAppendExecutionProvider(options, provider_name,
         //   provider_options_keys, provider_options_values, num_keys).
         // The per-provider functions (CPU/CoreML/Xnnpack/DML) do not exist in
         // the base OrtApi struct; they are registered by name here.
-        std::string ep_name;
-        if (prov == "cpu" || prov == "CPUExecutionProvider") {
-            ep_name = "CPUExecutionProvider";
-        } else if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
-            ep_name = "CoreMLExecutionProvider";
-        } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
-            ep_name = "XnnpackExecutionProvider";
-        } else if (prov == "directml" || prov == "DmlExecutionProvider") {
-            ep_name = "DmlExecutionProvider";
-        } else {
-            api->ReleaseSessionOptions(o);
-            return nullptr;
-        }
-        // No provider options needed for the smoke harness.
-        OrtStatus* st = api->SessionOptionsAppendExecutionProvider(
-            o, ep_name.c_str(), nullptr, nullptr, 0);
-        if (st) {
-            api->ReleaseStatus(st);
-            api->ReleaseSessionOptions(o);
-            return nullptr;
+        // CPU EP is the default and does not need to be appended explicitly;
+        // appending it can return an error, so skip it for the cpu provider.
+        if (prov != "cpu" && prov != "CPUExecutionProvider") {
+            std::string ep_name;
+            if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
+                ep_name = "CoreMLExecutionProvider";
+            } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
+                ep_name = "XnnpackExecutionProvider";
+            } else if (prov == "directml" || prov == "DmlExecutionProvider") {
+                ep_name = "DmlExecutionProvider";
+            } else {
+                last_session_error = "unknown provider: " + prov;
+                api->ReleaseSessionOptions(o);
+                return nullptr;
+            }
+            st = api->SessionOptionsAppendExecutionProvider(
+                o, ep_name.c_str(), nullptr, nullptr, 0);
+            if (st) {
+                last_session_error = std::string("AppendExecutionProvider(") +
+                                     ep_name + "): " + api->GetErrorMessage(st);
+                api->ReleaseStatus(st);
+                api->ReleaseSessionOptions(o);
+                return nullptr;
+            }
         }
         OrtSession* sess = nullptr;
         st = api->CreateSessionFromArray(
             env, model_bytes.data(), model_bytes.size(), o, &sess);
         api->ReleaseSessionOptions(o);
         if (st) {
+            last_session_error = std::string("CreateSessionFromArray: ") +
+                                 api->GetErrorMessage(st);
             api->ReleaseStatus(st);
             return nullptr;
         }
@@ -399,7 +412,9 @@ int main(int argc, char** argv) {
     if (!session) {
         print_json_field("session_creation", "failed", false);
         print_json_field("session_creation_error",
-                         "session creation failed for requested provider and CPU fallback",
+                         last_session_error.empty()
+                             ? "session creation failed for requested provider and CPU fallback"
+                             : last_session_error,
                          false);
         print_json_field("inference", "not_attempted", false);
         print_json_field("output_shape", "", false);

@@ -247,6 +247,12 @@ def main() -> int:
     )
     if failed:
         print("FAIL: native smoke harness detected errors", file=sys.stderr)
+        if report.get("session_creation_error"):
+            print(f"  session_creation_error: {report['session_creation_error']}",
+                  file=sys.stderr)
+        if report.get("inference_error"):
+            print(f"  inference_error: {report['inference_error']}",
+                  file=sys.stderr)
         return 2
     print("OK")
     return 0
