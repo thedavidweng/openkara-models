@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -47,10 +48,19 @@ def _github_get(url: str, token: str | None = None) -> Any:
 
 
 def _is_prerelease(tag: str) -> bool:
-    """Filter prerelease tags: rc, alpha, beta, preview, dev."""
+    """Filter prerelease tags: rc, alpha, beta, preview, dev, pre.
+
+    Matches prerelease markers only when they appear as a hyphen-delimited
+    segment or followed by digits (e.g. ``v1.28.0-rc1``, ``v1.28.0-alpha``).
+    This avoids false positives like ``v1.28.0-architecture`` matching ``rc``.
+    """
     low = tag.lower()
-    markers = ("rc", "alpha", "beta", "preview", "dev", "-pre")
-    return any(m in low for m in markers)
+    # Match markers at a segment boundary: after '-' or at start, optionally
+    # followed by digits/dots/dashes (version suffix), before end or another
+    # segment boundary. This avoids false positives like ``v1.28.0-architecture``
+    # matching ``rc``.
+    pattern = r"(?:^|-)(?:rc|alpha|beta|preview|dev|pre)(?:[\d.-]|$)"
+    return re.search(pattern, low) is not None
 
 
 def _tag_commit_sha(repo: str, tag: str, token: str | None = None) -> str:

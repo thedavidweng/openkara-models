@@ -30,8 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Model -> HuggingFace repo mapping.
 HF_MODELS = {
-    "htdemucs": "facebook/htdemucs",
-    "htdemucs_ft": "facebook/htdemucs_ft",
+    "htdemucs": "adefossez/HTDemucs",
+    "htdemucs_ft": "adefossez/HTDemucs-ft",
 }
 
 

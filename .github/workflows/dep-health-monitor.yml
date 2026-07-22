@@ -1,0 +1,53 @@
+name: Dependency automation health monitor
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Every Monday at 09:00 UTC (same as dep-detection)
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+  actions: read
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Run health check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python scripts/check_dep_automation_health.py --json > /tmp/health.json
+          EXIT_CODE=$?
+          cat /tmp/health.json
+          if [ $EXIT_CODE -ne 0 ]; then
+            # Open or update a maintenance issue.
+            ISSUE_BODY=$(python3 -c "
+          import json
+          d = json.load(open('/tmp/health.json'))
+          lines = ['## Dependency automation health alert', '']
+          for k, v in d.items():
+              lines.append(f'### {k}')
+              lines.append(f'\`\`\`json')
+              lines.append(json.dumps(v, indent=2))
+              lines.append(f'\`\`\`')
+              lines.append('')
+          print('\n'.join(lines))
+          ")
+            gh issue create \
+              --title "deps: automation health alert (stale or failed)" \
+              --body "$ISSUE_BODY" \
+              --label "dependencies" || true
+            exit $EXIT_CODE
+          fi
+      - name: Health check tests
+        run: |
+          pip install "pytest>=8.0"
+          python -m pytest tests/test_dep_health.py -q

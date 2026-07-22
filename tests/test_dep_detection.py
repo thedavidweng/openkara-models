@@ -19,6 +19,18 @@ def test_is_prerelease_filters_rc() -> None:
     assert d._is_prerelease("v1.28.0-beta1") is True
     assert d._is_prerelease("v1.28.0-preview") is True
     assert d._is_prerelease("v1.28.0-dev") is True
+    assert d._is_prerelease("v1.28.0-pre") is True
+    assert d._is_prerelease("v1.28.0-pre.1") is True
+    assert d._is_prerelease("v2.0.0-alpha.2") is True
+
+
+def test_is_prerelease_no_false_positives() -> None:
+    """Tags containing prerelease markers as substrings of other words."""
+    import detect_ort_release as d
+    assert d._is_prerelease("v1.28.0-architecture") is False
+    assert d._is_prerelease("v2.0.0-march") is False
+    assert d._is_prerelease("v2.0.0-mrc") is False
+    assert d._is_prerelease("v1.0.0-arch") is False
 
 
 def test_is_prerelease_passes_stable() -> None:
@@ -85,4 +97,5 @@ def test_hf_models_mapping() -> None:
     import detect_model_weight_revision as d
     assert "htdemucs" in d.HF_MODELS
     assert "htdemucs_ft" in d.HF_MODELS
-    assert d.HF_MODELS["htdemucs"] == "facebook/htdemucs"
+    assert d.HF_MODELS["htdemucs"] == "adefossez/HTDemucs"
+    assert d.HF_MODELS["htdemucs_ft"] == "adefossez/HTDemucs-ft"
