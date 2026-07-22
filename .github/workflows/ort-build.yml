@@ -12,11 +12,13 @@ on:
       - "scripts/generate_runtime_supply_chain.py"
       - "scripts/run_runtime_benchmarks.py"
       - "scripts/validate_benchmark_report.py"
+      - "scripts/generate_runtime_catalog_entries.py"
       - "tests/test_source_lock.py"
       - "tests/test_required_operators.py"
       - "tests/test_compare_runtime_builds.py"
       - "tests/test_runtime_supply_chain.py"
       - "tests/test_benchmark_report.py"
+      - "tests/test_runtime_catalog_entries.py"
       - ".github/workflows/ort-build.yml"
   push:
     branches: [main]
@@ -30,6 +32,7 @@ on:
       - "scripts/generate_runtime_supply_chain.py"
       - "scripts/run_runtime_benchmarks.py"
       - "scripts/validate_benchmark_report.py"
+      - "scripts/generate_runtime_catalog_entries.py"
 
 jobs:
   validate-source-lock:
@@ -44,11 +47,11 @@ jobs:
         run: pip install "pytest>=8.0" "onnx>=1.22.0"
       - name: Validate source lock
         run: python scripts/validate_source_lock.py
-      - name: Source lock + required-operator + comparison + supply-chain + benchmark tests
+      - name: Source lock + required-operator + comparison + supply-chain + benchmark + catalog-entry tests
         run: |
-          python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py tests/test_runtime_supply_chain.py tests/test_benchmark_report.py -q
+          python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py tests/test_runtime_supply_chain.py tests/test_benchmark_report.py tests/test_runtime_catalog_entries.py -q
       - name: Syntax check build scripts
-        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py
+        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py
 
   build-aarch64-apple-darwin:
     needs: validate-source-lock
