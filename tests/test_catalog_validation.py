@@ -186,6 +186,29 @@ class InvariantTests(unittest.TestCase):
         self.assertIn("mutable_manifest_url", codes)
 
 
+    def test_empty_model_runtime_list_rejected_when_runtime_supports_model(self):
+        doc = _valid_release()
+        doc["generation"] = 3
+        doc["artifacts"]["models"][0]["model"]["compatible_runtime_ids"] = []
+        codes = {e.code for e in validate_release_invariants(doc)}
+        self.assertIn("empty_runtime_compatibility", codes)
+        self.assertIn("asymmetric_model_support", codes)
+
+    def test_asymmetric_model_runtime_declarations_rejected(self):
+        doc = _valid_release()
+        doc["generation"] = 3
+        doc["artifacts"]["runtimes"][0]["runtime"]["supported_model_artifact_ids"] = []
+        codes = {e.code for e in validate_release_invariants(doc)}
+        self.assertIn("asymmetric_runtime_support", codes)
+
+    def test_reciprocal_pair_requires_compatibility_edge(self):
+        doc = _valid_release()
+        doc["generation"] = 3
+        doc["compatibility"] = []
+        codes = {e.code for e in validate_release_invariants(doc)}
+        self.assertIn("missing_compatibility_edge", codes)
+
+
 class GenerationMonotonicityTests(unittest.TestCase):
     def _rel(self, release_id: str, generation: int) -> dict:
         doc = _valid_release()

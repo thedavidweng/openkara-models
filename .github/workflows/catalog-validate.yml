@@ -60,8 +60,9 @@ jobs:
 
       - name: Validate committed release manifests + pointer
         run: |
-          python scripts/validate_catalog.py catalog/releases/2026-07-20-001.json
-          python scripts/validate_catalog.py catalog/releases/2026-07-23-001.json
+          for manifest in catalog/releases/*.json; do
+            python scripts/validate_catalog.py "$manifest"
+          done
           python scripts/validate_catalog.py --schema channel catalog/channels/stable.json
 
       - name: Verify supply-chain records
@@ -83,14 +84,15 @@ jobs:
 
       - name: Generated catalog is fresh (regenerate + git diff)
         run: |
-          python scripts/generate_catalog_release.py --spec catalog/specs/2026-07-20-001.spec.json
-          python scripts/generate_catalog_release.py --spec catalog/specs/2026-07-23-001.spec.json
+          for spec in catalog/specs/*.spec.json; do
+            python scripts/generate_catalog_release.py --spec "$spec"
+          done
           git diff --exit-code -- catalog/releases latest.json
 
       - name: Publication dry-run (verifies asset URLs + SHA-256)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/publish_catalog_release.py --release 2026-07-23-001
+        run: python scripts/publish_catalog_release.py --release 2026-07-23-003
 
       - name: Syntax check catalog scripts
         run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py scripts/generate_catalog_release.py scripts/generate_supply_chain.py scripts/verify_supply_chain.py scripts/publish_catalog_release.py
