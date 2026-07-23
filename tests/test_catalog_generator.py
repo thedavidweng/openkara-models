@@ -79,7 +79,11 @@ class GeneratedCatalogTests(unittest.TestCase):
         import hashlib
 
         pointer = _load(POINTER)
-        manifest_bytes = RELEASE.read_bytes()
+        # Dynamically resolve the manifest the pointer actually references,
+        # so the test works across generation advances.
+        release_id = pointer["release_id"]
+        manifest_path = ROOT_DIR / "catalog" / "releases" / f"{release_id}.json"
+        manifest_bytes = manifest_path.read_bytes()
         self.assertEqual(
             pointer["release_manifest_sha256"], hashlib.sha256(manifest_bytes).hexdigest()
         )
