@@ -272,7 +272,9 @@ def _guard_against_contradictory_releases(
             )
         # Identical bytes: idempotent regeneration is allowed (with or without
         # --force). --force is accepted for backward compatibility but is not
-        # required for identical rewrites.
+        # required for identical rewrites. Skip the monotonicity check since
+        # we are not creating a new release — just verifying immutability.
+        return
 
     others = _other_releases(new_id, releases_dir)
     if others and max(d.get("generation", 0) for d in others) > new_gen:
