@@ -1,0 +1,116 @@
+name: One-shot catalog generation 3 correction
+
+on:
+  push:
+    branches: [fix/catalog-generation-3-compatibility]
+
+permissions:
+  contents: write
+
+jobs:
+  correct:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: fix/catalog-generation-3-compatibility
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install validator dependencies
+        run: pip install 'jsonschema>=4.20' 'pytest>=8.0'
+      - name: Create generation 3 and reciprocal validation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: thedavidweng/openkara-models
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          root = Path('.')
+          old_id = '2026-07-23-001'
+          new_id = '2026-07-23-002'
+          src = root / 'catalog/specs' / f'{old_id}.spec.json'
+          dst = root / 'catalog/specs' / f'{new_id}.spec.json'
+          spec = json.loads(src.read_text())
+          runtime_ids = sorted(r['artifact_id'] for r in spec['artifacts']['runtimes'])
+          for model in spec['artifacts']['models']:
+              model['model']['compatible_runtime_ids'] = runtime_ids
+          spec['release_id'] = new_id
+          spec['generation'] = 3
+          spec['previous_release_id'] = old_id
+          spec['created_at'] = '2026-07-23T09:30:00Z'
+          spec['notes'] = ('Generation 3 corrective catalog release: makes model-side runtime compatibility '
+                           'explicit and reciprocal with runtime declarations and compatibility edges. '
+                           'Reuses the verified generation 2 model and runtime artifacts.')
+          spec['producer'] = {
+              'repo': 'thedavidweng/openkara-models',
+              'workflow': 'one-shot-generation-3.yml',
+              'run_id': '${{ github.run_id }}',
+              'commit_sha': '${{ github.sha }}',
+          }
+          def rewrite_urls(value):
+              if isinstance(value, dict):
+                  return {k: rewrite_urls(v) for k, v in value.items()}
+              if isinstance(value, list):
+                  return [rewrite_urls(v) for v in value]
+              if isinstance(value, str):
+                  return value.replace(f'infra-{old_id}', f'infra-{new_id}')
+              return value
+          spec = rewrite_urls(spec)
+          dst.write_text(json.dumps(spec, indent=2, sort_keys=True) + '\n')
+
+          model_path = root / 'scripts/catalog_model.py'
+          text = model_path.read_text()
+          marker = '    # 7. Deprecation replacement must point at an existing artifact in this release.\n'
+          insertion = '''    # 7. Model/runtime declarations and compatibility edges must be reciprocal.\n    edge_pairs = {\n        (edge.get("model_artifact_id"), edge.get("runtime_artifact_id"))\n        for edge in manifest.get("compatibility", [])\n        if edge.get("status") == "supported"\n    }\n    for mid, model in ref.models.items():\n        declared = set(model.get("model", {}).get("compatible_runtime_ids", []))\n        supporting = {\n            rid for rid, runtime in ref.runtimes.items()\n            if mid in set(runtime.get("runtime", {}).get("supported_model_artifact_ids", []))\n        }\n        if supporting and not declared:\n            errors.append(ValidationError(\n                "empty_runtime_compatibility",\n                f"model {mid!r} has supporting runtimes but compatible_runtime_ids is empty",\n                f"artifacts.models[{mid}].model.compatible_runtime_ids",\n            ))\n        for rid in declared & set(ref.runtimes):\n            supported_models = set(\n                ref.runtimes[rid].get("runtime", {}).get("supported_model_artifact_ids", [])\n            )\n            if mid not in supported_models:\n                errors.append(ValidationError(\n                    "asymmetric_runtime_support",\n                    f"model {mid!r} declares runtime {rid!r}, but the runtime does not declare the model",\n                    f"artifacts.models[{mid}].model.compatible_runtime_ids",\n                ))\n            if (mid, rid) not in edge_pairs:\n                errors.append(ValidationError(\n                    "missing_compatibility_edge",\n                    f"model {mid!r} and runtime {rid!r} are reciprocal but have no supported compatibility edge",\n                    "compatibility",\n                ))\n        for rid in supporting:\n            if rid not in declared:\n                errors.append(ValidationError(\n                    "asymmetric_model_support",\n                    f"runtime {rid!r} declares model {mid!r}, but the model does not declare the runtime",\n                    f"artifacts.runtimes[{rid}].runtime.supported_model_artifact_ids",\n                ))\n    for mid, rid in edge_pairs:\n        model = ref.models.get(mid)\n        runtime = ref.runtimes.get(rid)\n        if model is None or runtime is None:\n            continue\n        model_runtimes = set(model.get("model", {}).get("compatible_runtime_ids", []))\n        runtime_models = set(runtime.get("runtime", {}).get("supported_model_artifact_ids", []))\n        if rid not in model_runtimes or mid not in runtime_models:\n            errors.append(ValidationError(\n                "asymmetric_compatibility_edge",\n                f"supported edge {mid!r} -> {rid!r} is not represented by both artifact declarations",\n                "compatibility",\n            ))\n\n    # 8. Deprecation replacement must point at an existing artifact in this release.\n'''
+          if marker not in text:
+              raise SystemExit('catalog invariant insertion marker not found')
+          text = text.replace(marker, insertion, 1)
+          text = text.replace('    # 8. arch/os must be consistent with target_triple when both are present.\n',
+                              '    # 9. arch/os must be consistent with target_triple when both are present.\n', 1)
+          model_path.write_text(text)
+
+          tests_path = root / 'tests/test_catalog_validation.py'
+          tests = tests_path.read_text()
+          test_marker = '\n\nclass GenerationMonotonicityTests(unittest.TestCase):\n'
+          test_block = '''\n\n    def test_empty_model_runtime_list_rejected_when_runtime_supports_model(self):\n        doc = _valid_release()\n        doc["artifacts"]["models"][0]["model"]["compatible_runtime_ids"] = []\n        codes = {e.code for e in validate_release_invariants(doc)}\n        self.assertIn("empty_runtime_compatibility", codes)\n        self.assertIn("asymmetric_model_support", codes)\n\n    def test_asymmetric_model_runtime_declarations_rejected(self):\n        doc = _valid_release()\n        doc["artifacts"]["runtimes"][0]["runtime"]["supported_model_artifact_ids"] = []\n        codes = {e.code for e in validate_release_invariants(doc)}\n        self.assertIn("asymmetric_runtime_support", codes)\n\n    def test_reciprocal_pair_requires_compatibility_edge(self):\n        doc = _valid_release()\n        doc["compatibility"] = []\n        codes = {e.code for e in validate_release_invariants(doc)}\n        self.assertIn("missing_compatibility_edge", codes)\n'''
+          if test_marker not in tests:
+              raise SystemExit('test insertion marker not found')
+          tests_path.write_text(tests.replace(test_marker, test_block + test_marker, 1))
+
+          ci_path = root / '.github/workflows/catalog-validate.yml'
+          ci = ci_path.read_text()
+          old_validate = '''          python scripts/validate_catalog.py catalog/releases/2026-07-20-001.json\n          python scripts/validate_catalog.py catalog/releases/2026-07-23-001.json\n          python scripts/validate_catalog.py --schema channel catalog/channels/stable.json\n'''
+          new_validate = '''          for manifest in catalog/releases/*.json; do\n            python scripts/validate_catalog.py "$manifest"\n          done\n          python scripts/validate_catalog.py --schema channel catalog/channels/stable.json\n'''
+          if old_validate not in ci:
+              raise SystemExit('catalog CI validation block not found')
+          ci = ci.replace(old_validate, new_validate, 1)
+          old_fresh = '''          python scripts/generate_catalog_release.py --spec catalog/specs/2026-07-20-001.spec.json\n          python scripts/generate_catalog_release.py --spec catalog/specs/2026-07-23-001.spec.json\n          git diff --exit-code -- catalog/releases latest.json\n'''
+          new_fresh = '''          for spec in catalog/specs/*.spec.json; do\n            python scripts/generate_catalog_release.py --spec "$spec"\n          done\n          git diff --exit-code -- catalog/releases latest.json\n'''
+          if old_fresh not in ci:
+              raise SystemExit('catalog CI freshness block not found')
+          ci = ci.replace(old_fresh, new_fresh, 1)
+          ci = ci.replace('python scripts/publish_catalog_release.py --release 2026-07-23-001',
+                          'python scripts/publish_catalog_release.py --release 2026-07-23-002', 1)
+          ci_path.write_text(ci)
+          PY
+
+          python scripts/generate_supply_chain.py --release 2026-07-23-002
+          python scripts/generate_catalog_release.py --spec catalog/specs/2026-07-23-002.spec.json
+          python -m pytest tests/test_catalog_validation.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py -q
+          python -m compileall -q scripts
+          python scripts/publish_catalog_release.py --release 2026-07-23-002 --execute
+          python scripts/generate_catalog_release.py --spec catalog/specs/2026-07-23-002.spec.json
+          python scripts/validate_catalog.py catalog/releases/2026-07-23-002.json
+          python scripts/validate_catalog.py --schema channel catalog/channels/stable.json
+
+          rm .github/workflows/one-shot-generation-3.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/one-shot-generation-3.yml .github/workflows/catalog-validate.yml scripts/catalog_model.py tests/test_catalog_validation.py catalog latest.json
+          git commit -m 'fix(catalog): publish reciprocal runtime compatibility generation'
+          git push origin HEAD:fix/catalog-generation-3-compatibility
