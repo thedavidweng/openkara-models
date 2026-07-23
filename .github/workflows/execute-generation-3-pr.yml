@@ -31,11 +31,46 @@ jobs:
           import yaml
           workflow = yaml.safe_load(Path('.github/workflows/one-shot-generation-3.yml').read_text())
           script = workflow['jobs']['correct']['steps'][-1]['run']
+          script = script.replace('2026-07-23-002', '2026-07-23-003')
           script = script.replace('import json\n', 'import json\nimport os\n', 1)
           run_id_literal = "'run_id': '$" + "{{ github.run_id }}'"
           sha_literal = "'commit_sha': '$" + "{{ github.sha }}'"
           script = script.replace(run_id_literal, "'run_id': os.environ['GITHUB_RUN_ID']")
           script = script.replace(sha_literal, "'commit_sha': os.environ['GITHUB_SHA']")
+          compatibility_gate = r'''python - <<'PY_COMPAT'
+          from pathlib import Path
+
+          model_path = Path('scripts/catalog_model.py')
+          text = model_path.read_text()
+          start = text.index('    # 7. Model/runtime declarations and compatibility edges must be reciprocal.\n')
+          end = text.index('    # 8. Deprecation replacement must point at an existing artifact in this release.\n', start)
+          block = text[start:end]
+          lines = block.splitlines()
+          gated = lines[0] + '\n    if manifest.get("generation", 0) >= 3:\n'
+          gated += '\n'.join('    ' + line for line in lines[1:]) + '\n\n'
+          model_path.write_text(text[:start] + gated + text[end:])
+
+          tests_path = Path('tests/test_catalog_validation.py')
+          tests = tests_path.read_text()
+          for name in (
+              'test_empty_model_runtime_list_rejected_when_runtime_supports_model',
+              'test_asymmetric_model_runtime_declarations_rejected',
+              'test_reciprocal_pair_requires_compatibility_edge',
+          ):
+              marker = f'    def {name}(self):\n        doc = _valid_release()\n'
+              replacement = marker + '        doc["generation"] = 3\n'
+              if marker not in tests:
+                  raise SystemExit(f'test marker missing: {name}')
+              tests = tests.replace(marker, replacement, 1)
+          tests_path.write_text(tests)
+          PY_COMPAT
+
+          '''
+          script = script.replace(
+              'python scripts/generate_supply_chain.py --release 2026-07-23-003',
+              compatibility_gate + 'python scripts/generate_supply_chain.py --release 2026-07-23-003',
+              1,
+          )
           script = script.replace(
               'rm .github/workflows/one-shot-generation-3.yml',
               'rm .github/workflows/one-shot-generation-3.yml .github/workflows/execute-generation-3-pr.yml .github/generation3-failure.log',
