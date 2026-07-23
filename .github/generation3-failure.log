@@ -1,0 +1,13 @@
+OK: supply-chain records for 2026-07-23-002 in /home/runner/work/openkara-models/openkara-models/catalog/supply-chain/2026-07-23-002
+  sbom:        5595 bytes  sha256 d12d04e5760c...
+  license:     1061 bytes  sha256 02d7a4091364...
+  notice:      435 bytes  sha256 7a1f3866739d...
+  provenance:  2918 bytes  sha256 3c3e6e9560db...
+  spec updated: /home/runner/work/openkara-models/openkara-models/catalog/specs/2026-07-23-002.spec.json
+Traceback (most recent call last):
+  File "/home/runner/work/openkara-models/openkara-models/scripts/generate_catalog_release.py", line 53, in <module>
+    from validate_catalog import validate_document  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/openkara-models/openkara-models/scripts/validate_catalog.py", line 28, in <module>
+    import jsonschema
+ModuleNotFoundError: No module named 'jsonschema'
