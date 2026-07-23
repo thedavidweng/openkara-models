@@ -32,8 +32,10 @@ jobs:
           workflow = yaml.safe_load(Path('.github/workflows/one-shot-generation-3.yml').read_text())
           script = workflow['jobs']['correct']['steps'][-1]['run']
           script = script.replace('import json\n', 'import json\nimport os\n', 1)
-          script = script.replace("'run_id': '${{ github.run_id }}'", "'run_id': os.environ['GITHUB_RUN_ID']")
-          script = script.replace("'commit_sha': '${{ github.sha }}'", "'commit_sha': os.environ['GITHUB_SHA']")
+          run_id_literal = "'run_id': '$" + "{{ github.run_id }}'"
+          sha_literal = "'commit_sha': '$" + "{{ github.sha }}'"
+          script = script.replace(run_id_literal, "'run_id': os.environ['GITHUB_RUN_ID']")
+          script = script.replace(sha_literal, "'commit_sha': os.environ['GITHUB_SHA']")
           script = script.replace(
               'rm .github/workflows/one-shot-generation-3.yml',
               'rm .github/workflows/one-shot-generation-3.yml .github/workflows/execute-generation-3-pr.yml .github/generation3-failure.log',
