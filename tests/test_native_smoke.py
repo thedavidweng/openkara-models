@@ -16,6 +16,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import run_native_smoke  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 
@@ -42,6 +45,52 @@ def test_run_native_smoke_requires_args() -> None:
     )
     # Should fail because the runtime archive / source do not exist.
     assert r.returncode != 0
+
+
+def _valid_smoke_report(provider: str) -> dict[str, object]:
+    return {
+        "requested_provider": provider,
+        "harness_exit_code": 0,
+        "session_creation": "ok",
+        "inference": "ok",
+        "finite_output": True,
+        "output_shape": "[1,4,2,343980]",
+        "used_fallback": False,
+        "provider_assignment": provider,
+        "provider_node_count": 1,
+        "total_node_count": 10,
+    }
+
+
+def test_strict_smoke_gate_accepts_requested_provider() -> None:
+    assert run_native_smoke.validation_failures(
+        _valid_smoke_report("directml"), "directml"
+    ) == []
+
+
+def test_strict_smoke_gate_rejects_whole_session_cpu_fallback() -> None:
+    report = _valid_smoke_report("directml")
+    report["provider_assignment"] = "cpu"
+    report["used_fallback"] = True
+    report["provider_node_count"] = 0
+    failures = run_native_smoke.validation_failures(report, "directml")
+    assert any("fallback" in failure for failure in failures)
+    assert any("assignment mismatch" in failure for failure in failures)
+    assert any("provider_node_count" in failure for failure in failures)
+
+
+def test_strict_smoke_gate_rejects_wrong_shape() -> None:
+    report = _valid_smoke_report("xnnpack")
+    report["output_shape"] = "[1,3,2,343980]"
+    failures = run_native_smoke.validation_failures(report, "xnnpack")
+    assert any("output_shape" in failure for failure in failures)
+
+
+def test_strict_smoke_gate_rejects_zero_provider_nodes() -> None:
+    report = _valid_smoke_report("coreml")
+    report["provider_node_count"] = 0
+    failures = run_native_smoke.validation_failures(report, "coreml")
+    assert any("provider_node_count" in failure for failure in failures)
 
 
 def test_benchmark_rejects_bare_model_without_shape(tmp_path: Path) -> None:

@@ -176,9 +176,9 @@ inline void skip_value(JsonLexer& lex, const JsonTok& tok) {
 // need to fully deserialize nested structures — when we descend into a
 // nested object or array we just skip it (the provider field is a direct
 // child of args, which is a direct child of the event object).
-inline int count_cpu_nodes(const std::string& profile_json) {
+inline int count_nodes(const std::string& profile_json, const char* provider_filter) {
     JsonLexer lex(profile_json);
-    int cpu_node_count = 0;
+    int node_count = 0;
     JsonTok tok = lex.next();
     if (tok.type != JsonTok::Type::LBracket) return -1;  // expect top-level array
 
@@ -240,11 +240,20 @@ inline int count_cpu_nodes(const std::string& profile_json) {
                 skip_value(lex, tok);
             }
         }
-        if (is_node && have_provider && provider == "CPUExecutionProvider") {
-            ++cpu_node_count;
+        if (is_node && have_provider &&
+            (provider_filter == nullptr || provider == provider_filter)) {
+            ++node_count;
         }
     }
-    return cpu_node_count;
+    return node_count;
+}
+
+inline int count_cpu_nodes(const std::string& profile_json) {
+    return count_nodes(profile_json, "CPUExecutionProvider");
+}
+
+inline int count_total_nodes(const std::string& profile_json) {
+    return count_nodes(profile_json, nullptr);
 }
 
 }  // namespace ort_smoke

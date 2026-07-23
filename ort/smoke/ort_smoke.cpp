@@ -10,8 +10,9 @@
 //   output [1, 4, 2, 343980] (drums/bass/other/vocals)
 // and rejects any output containing NaN or Inf.
 //
-// The requested execution provider is tried first; if session creation with
-// that provider fails, the harness falls back to CPU and records the fallback.
+// The requested execution provider is mandatory. CPU is tested in a separate
+// invocation; a non-CPU provider failure must never be hidden by a replacement
+// CPU session.
 //
 // To measure the fallback node count, the harness enables the ORT session
 // profiler before creating the session. After inference it calls
@@ -86,7 +87,8 @@ public:
 
     explicit DynLib(const std::string& path) : handle_(nullptr), error_("") {
 #if defined(_WIN32)
-        handle_ = LoadLibraryA(path.c_str());
+        handle_ = LoadLibraryExA(
+            path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
         if (!handle_) {
             DWORD code = GetLastError();
             error_ = "LoadLibraryA failed (code " + std::to_string(code) + ") for " + path;
@@ -194,15 +196,26 @@ void print_json_field_bool(const char* key, bool value, bool last) {
 }
 
 // Print the trailing fields that every JSON output (success or failure)
-// must include so the schema is consistent across all paths. The caller
-// has already printed session_creation / inference / output_shape /
-// finite_output / provider_assignment as appropriate; this prints the
-// final fallback_node_count and used_fallback and closes the object.
-void print_json_trailer(int fallback_node_count, bool used_fallback) {
-    if (fallback_node_count >= 0) {
-        printf("  \"fallback_node_count\": %d,\n", fallback_node_count);
+// must include so the schema is consistent across all paths.
+void print_json_trailer(int cpu_node_count, bool used_fallback,
+                        int total_node_count = -1,
+                        int provider_node_count = -1) {
+    if (total_node_count >= 0) {
+        printf("  \"total_node_count\": %d,\n", total_node_count);
     } else {
+        printf("  \"total_node_count\": null,\n");
+    }
+    if (cpu_node_count >= 0) {
+        printf("  \"cpu_node_count\": %d,\n", cpu_node_count);
+        printf("  \"fallback_node_count\": %d,\n", cpu_node_count);
+    } else {
+        printf("  \"cpu_node_count\": null,\n");
         printf("  \"fallback_node_count\": null,\n");
+    }
+    if (provider_node_count >= 0) {
+        printf("  \"provider_node_count\": %d,\n", provider_node_count);
+    } else {
+        printf("  \"provider_node_count\": null,\n");
     }
     print_json_field_bool("used_fallback", used_fallback, true);
     printf("}\n");
@@ -345,20 +358,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Session options.
-    OrtSessionOptions* opts = nullptr;
-    if (api->CreateSessionOptions(&opts) != nullptr) {
-        print_json_field("session_creation", "failed", false);
-        print_json_field("session_creation_error", "CreateSessionOptions failed", false);
-        print_json_field("inference", "not_attempted", false);
-        print_json_field("output_shape", "", false);
-        print_json_field_bool("finite_output", false, false);
-        print_json_field("provider_assignment", "", false);
-        print_json_trailer(-1, false);
-        api->ReleaseEnv(env);
-        return 1;
-    }
-
     // Append the requested execution provider. Try the requested one first;
     // on failure fall back to CPU.
     std::string provider_assigned;
@@ -375,34 +374,59 @@ int main(int argc, char** argv) {
             api->ReleaseStatus(st);
             return nullptr;
         }
-        // ORT v1.27.1 exposes a single generic
-        // SessionOptionsAppendExecutionProvider(options, provider_name,
-        //   provider_options_keys, provider_options_values, num_keys).
-        // The per-provider functions (CPU/CoreML/Xnnpack/DML) do not exist in
-        // the base OrtApi struct; they are registered by name here.
-        // CPU EP is the default and does not need to be appended explicitly;
-        // appending it can return an error, so skip it for the cpu provider.
+        // CPU EP is the default and does not need to be appended explicitly.
         if (prov != "cpu" && prov != "CPUExecutionProvider") {
-            std::string ep_name;
-            if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
-                ep_name = "CoreMLExecutionProvider";
-            } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
-                ep_name = "XnnpackExecutionProvider";
-            } else if (prov == "directml" || prov == "DmlExecutionProvider") {
-                ep_name = "DmlExecutionProvider";
+            if (prov == "directml" || prov == "DmlExecutionProvider") {
+                // DirectML requires sequential execution and disabled memory
+                // patterns. The source-built Windows runtime exports the DML
+                // provider factory beside OrtGetApiBase.
+                st = api->DisableMemPattern(o);
+                if (!st) st = api->SetSessionExecutionMode(o, ORT_SEQUENTIAL);
+                if (st) {
+                    last_session_error = std::string("configure DirectML session: ") +
+                                         api->GetErrorMessage(st);
+                    api->ReleaseStatus(st);
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
+
+                using AppendDmlFn = OrtStatus*(ORT_API_CALL*)(OrtSessionOptions*, int);
+                std::string dml_symbol_error;
+                auto append_dml = lib.sym<AppendDmlFn>(
+                    "OrtSessionOptionsAppendExecutionProvider_DML", dml_symbol_error);
+                if (!append_dml) {
+                    last_session_error = dml_symbol_error;
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
+                st = append_dml(o, 0);
+                if (st) {
+                    last_session_error = std::string("AppendExecutionProvider(DML): ") +
+                                         api->GetErrorMessage(st);
+                    api->ReleaseStatus(st);
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
             } else {
-                last_session_error = "unknown provider: " + prov;
-                api->ReleaseSessionOptions(o);
-                return nullptr;
-            }
-            st = api->SessionOptionsAppendExecutionProvider(
-                o, ep_name.c_str(), nullptr, nullptr, 0);
-            if (st) {
-                last_session_error = std::string("AppendExecutionProvider(") +
-                                     ep_name + "): " + api->GetErrorMessage(st);
-                api->ReleaseStatus(st);
-                api->ReleaseSessionOptions(o);
-                return nullptr;
+                std::string ep_name;
+                if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
+                    ep_name = "CoreMLExecutionProvider";
+                } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
+                    ep_name = "XnnpackExecutionProvider";
+                } else {
+                    last_session_error = "unknown provider: " + prov;
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
+                st = api->SessionOptionsAppendExecutionProvider(
+                    o, ep_name.c_str(), nullptr, nullptr, 0);
+                if (st) {
+                    last_session_error = std::string("AppendExecutionProvider(") +
+                                         ep_name + "): " + api->GetErrorMessage(st);
+                    api->ReleaseStatus(st);
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
             }
         }
         // Enable profiling so we can measure the fallback node count after
@@ -441,20 +465,13 @@ int main(int argc, char** argv) {
     OrtSession* session = try_create_session(provider);
     if (session) {
         provider_assigned = provider;
-    } else {
-        // Fallback to CPU.
-        session = try_create_session("cpu");
-        if (session) {
-            provider_assigned = "cpu";
-            used_fallback = true;
-        }
     }
 
     if (!session) {
         print_json_field("session_creation", "failed", false);
         print_json_field("session_creation_error",
                          last_session_error.empty()
-                             ? "session creation failed for requested provider and CPU fallback"
+                             ? "session creation failed for requested provider"
                              : last_session_error,
                          false);
         print_json_field("inference", "not_attempted", false);
@@ -462,7 +479,6 @@ int main(int argc, char** argv) {
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", "", false);
         print_json_trailer(-1, used_fallback);
-        api->ReleaseSessionOptions(opts);
         api->ReleaseEnv(env);
         return 1;
     }
@@ -483,7 +499,6 @@ int main(int argc, char** argv) {
         print_json_field("provider_assignment", provider_assigned, false);
         print_json_trailer(-1, used_fallback);
         api->ReleaseSession(session);
-        api->ReleaseSessionOptions(opts);
         api->ReleaseEnv(env);
         return 1;
     }
@@ -522,7 +537,6 @@ int main(int argc, char** argv) {
         if (input_name_c) api->AllocatorFree(allocator, input_name_c);
         api->ReleaseMemoryInfo(mem_info);
         api->ReleaseSession(session);
-        api->ReleaseSessionOptions(opts);
         api->ReleaseEnv(env);
         return 1;
     }
@@ -557,7 +571,6 @@ int main(int argc, char** argv) {
         api->ReleaseValue(input_tensor);
         api->ReleaseMemoryInfo(mem_info);
         api->ReleaseSession(session);
-        api->ReleaseSessionOptions(opts);
         api->ReleaseEnv(env);
         return 1;
     }
@@ -603,13 +616,14 @@ int main(int argc, char** argv) {
         if (type_info) api->ReleaseTypeInfo(type_info);
     }
     print_json_field("output_shape", shape_str, false);
+    const bool shape_valid = shape_str == "[1,4,2,343980]";
     print_json_field_bool("finite_output", finite, false);
     print_json_field("provider_assignment", provider_assigned, false);
 
-    // End profiling and parse the profile file to count the nodes that ran
-    // on the CPU EP (the fallback provider). SessionEndProfiling returns
-    // the path to the profile JSON file via the allocator.
-    int fallback_node_count = -1;
+    // End profiling and count total, CPU, and exact requested-provider nodes.
+    int cpu_node_count = -1;
+    int total_node_count = -1;
+    std::string profile_json;
     char* profile_path_c = nullptr;
     OrtStatus* prof_st = api->SessionEndProfiling(session, allocator, &profile_path_c);
     if (prof_st) {
@@ -621,14 +635,36 @@ int main(int argc, char** argv) {
         std::string prof_err;
         std::vector<uint8_t> prof_bytes = read_file(profile_path, prof_err);
         if (!prof_bytes.empty()) {
-            std::string prof_json(prof_bytes.begin(), prof_bytes.end());
-            fallback_node_count = ort_smoke::count_cpu_nodes(prof_json);
+            profile_json.assign(prof_bytes.begin(), prof_bytes.end());
+            cpu_node_count = ort_smoke::count_cpu_nodes(profile_json);
+            total_node_count = ort_smoke::count_total_nodes(profile_json);
         }
         // Best-effort cleanup of the profile file (it is also gitignored).
         remove(profile_path.c_str());
     }
 
-    print_json_trailer(fallback_node_count, used_fallback);
+    const char* requested_profile_provider = nullptr;
+    if (provider == "cpu") {
+        requested_profile_provider = "CPUExecutionProvider";
+    } else if (provider == "coreml") {
+        requested_profile_provider = "CoreMLExecutionProvider";
+    } else if (provider == "xnnpack") {
+        requested_profile_provider = "XnnpackExecutionProvider";
+    } else if (provider == "directml") {
+        requested_profile_provider = "DmlExecutionProvider";
+    }
+
+    int provider_node_count = -1;
+    if (!profile_json.empty() && requested_profile_provider != nullptr) {
+        provider_node_count = ort_smoke::count_nodes(
+            profile_json, requested_profile_provider);
+    }
+    print_json_trailer(
+        cpu_node_count, used_fallback, total_node_count, provider_node_count);
+
+    const bool provider_used =
+        provider_assigned == provider && provider_node_count > 0;
+    const bool strict_success = finite && shape_valid && provider_used && !used_fallback;
 
     // Cleanup.
     for (size_t i = 0; i < n_outputs; ++i) {
@@ -639,7 +675,6 @@ int main(int argc, char** argv) {
     api->ReleaseValue(input_tensor);
     api->ReleaseMemoryInfo(mem_info);
     api->ReleaseSession(session);
-    api->ReleaseSessionOptions(opts);
     api->ReleaseEnv(env);
-    return finite ? 0 : 3;
+    return strict_success ? 0 : 3;
 }

@@ -153,6 +153,45 @@ def run_smoke(
     return data
 
 
+def validation_failures(report: dict[str, Any], requested_provider: str) -> list[str]:
+    """Return strict native-smoke gate failures.
+
+    CPU and accelerated providers are tested in separate invocations. A
+    non-CPU invocation must use the requested provider for at least one node;
+    creating a replacement CPU session is a failure.
+    """
+    failures: list[str] = []
+    if report.get("requested_provider") != requested_provider:
+        failures.append(
+            "requested provider identity mismatch: "
+            f"report={report.get('requested_provider')!r}, expected={requested_provider!r}"
+        )
+    if report.get("harness_exit_code") != 0:
+        failures.append(f"harness_exit_code={report.get('harness_exit_code')}")
+    if report.get("session_creation") != "ok":
+        failures.append("session creation did not succeed")
+    if report.get("inference") != "ok":
+        failures.append("inference did not succeed")
+    if report.get("finite_output") is not True:
+        failures.append("output contains NaN/Inf or was not produced")
+    if report.get("output_shape") != "[1,4,2,343980]":
+        failures.append(f"unexpected output_shape={report.get('output_shape')!r}")
+    if report.get("used_fallback") is True:
+        failures.append("whole-session CPU fallback was used")
+    if report.get("provider_assignment") != requested_provider:
+        failures.append(
+            "provider assignment mismatch: "
+            f"requested={requested_provider!r}, assigned={report.get('provider_assignment')!r}"
+        )
+    provider_nodes = report.get("provider_node_count")
+    if not isinstance(provider_nodes, int) or provider_nodes <= 0:
+        failures.append(f"provider_node_count must be > 0, got {provider_nodes!r}")
+    total_nodes = report.get("total_node_count")
+    if not isinstance(total_nodes, int) or total_nodes <= 0:
+        failures.append(f"total_node_count must be > 0, got {total_nodes!r}")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the native ORT smoke harness.")
     parser.add_argument("--runtime", required=True, type=Path,
@@ -230,6 +269,9 @@ def main() -> int:
         "inference": result.get("inference", "not_attempted"),
         "inference_error": result.get("inference_error"),
         "provider_assignment": result.get("provider_assignment", ""),
+        "total_node_count": result.get("total_node_count"),
+        "cpu_node_count": result.get("cpu_node_count"),
+        "provider_node_count": result.get("provider_node_count"),
         "fallback_node_count": result.get("fallback_node_count"),
         "used_fallback": result.get("used_fallback", False),
         "harness_exit_code": result.get("harness_exit_code"),
@@ -242,14 +284,8 @@ def main() -> int:
     print(f"  finite_output: {report['finite_output']}")
     print(f"  provider_assignment: {report['provider_assignment']}")
 
-    # Fail if the smoke test did not produce a finite output with ok session
-    # creation and ok inference.
-    failed = (
-        report["session_creation"] != "ok"
-        or report["inference"] != "ok"
-        or not report["finite_output"]
-    )
-    if failed:
+    failures = validation_failures(report, args.provider)
+    if failures:
         print("FAIL: native smoke harness detected errors", file=sys.stderr)
         if report.get("session_creation_error"):
             print(f"  session_creation_error: {report['session_creation_error']}",
@@ -257,6 +293,8 @@ def main() -> int:
         if report.get("inference_error"):
             print(f"  inference_error: {report['inference_error']}",
                   file=sys.stderr)
+        for failure in failures:
+            print(f"  {failure}", file=sys.stderr)
         return 2
     print("OK")
     return 0

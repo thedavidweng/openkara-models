@@ -11,6 +11,8 @@
 #include "profile_parser.hpp"
 
 using ort_smoke::count_cpu_nodes;
+using ort_smoke::count_nodes;
+using ort_smoke::count_total_nodes;
 
 static int failures = 0;
 
@@ -51,6 +53,20 @@ int main() {
             {"cat":"Node","name":"n2","args":{"provider":"CPUExecutionProvider"}}
         ])"),
         2, "mixed_cpu_and_coreml");
+
+
+    // Count all provider-labelled node events.
+    check_eq(count_total_nodes(
+        R"([{"cat":"Node","args":{"provider":"CPUExecutionProvider"}},
+             {"cat":"Node","args":{"provider":"CoreMLExecutionProvider"}}])"),
+        2, "total_node_count");
+
+    // Count a requested accelerated provider.
+    check_eq(count_nodes(
+        R"([{"cat":"Node","args":{"provider":"CPUExecutionProvider"}},
+             {"cat":"Node","args":{"provider":"CoreMLExecutionProvider"}}])",
+        "CoreMLExecutionProvider"),
+        1, "requested_provider_count");
 
     // Node with no provider field — should not count.
     check_eq(count_cpu_nodes(
