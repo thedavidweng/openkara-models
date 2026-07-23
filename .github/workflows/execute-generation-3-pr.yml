@@ -1,0 +1,40 @@
+name: Execute catalog generation 3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/execute-generation-3-pr.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  execute:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: fix/catalog-generation-3-compatibility
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Execute embedded correction script
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install pyyaml
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          workflow = yaml.safe_load(Path('.github/workflows/one-shot-generation-3.yml').read_text())
+          script = workflow['jobs']['correct']['steps'][-1]['run']
+          script = script.replace(
+              'rm .github/workflows/one-shot-generation-3.yml',
+              'rm .github/workflows/one-shot-generation-3.yml .github/workflows/execute-generation-3-pr.yml',
+          )
+          Path('/tmp/generation-3.sh').write_text('set -euo pipefail\n' + script)
+          PY
+          bash /tmp/generation-3.sh
