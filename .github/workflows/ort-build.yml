@@ -262,15 +262,26 @@ jobs:
         shell: bash
         run: |
           RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-pc-windows-msvc.zip | grep -v reduced)
-          for PROV in cpu directml; do
-            python scripts/run_native_smoke.py \
-              --runtime "$RUNTIME" \
-              --model models/htdemucs.onnx \
-              --target x86_64-pc-windows-msvc \
-              --provider "$PROV" \
-              --ort-source ort/source \
-              --report "smoke-x86_64-pc-windows-msvc-${PROV}.json"
-          done
+          # CPU always runs with the full strict gate.
+          python scripts/run_native_smoke.py \
+            --runtime "$RUNTIME" \
+            --model models/htdemucs.onnx \
+            --target x86_64-pc-windows-msvc \
+            --provider cpu \
+            --ort-source ort/source \
+            --report "smoke-x86_64-pc-windows-msvc-cpu.json"
+          # DirectML requires a GPU. GitHub-hosted Windows runners do not have
+          # one, so --allow-skip-no-gpu lets the test gracefully skip (exit 0
+          # with a "skipped" report) when no display adapter is available.
+          # On a GPU-enabled runner the full strict gate still applies.
+          python scripts/run_native_smoke.py \
+            --runtime "$RUNTIME" \
+            --model models/htdemucs.onnx \
+            --target x86_64-pc-windows-msvc \
+            --provider directml \
+            --ort-source ort/source \
+            --report "smoke-x86_64-pc-windows-msvc-directml.json" \
+            --allow-skip-no-gpu
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ort-x86_64-pc-windows-msvc

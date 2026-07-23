@@ -93,6 +93,61 @@ def test_strict_smoke_gate_rejects_zero_provider_nodes() -> None:
     assert any("provider_node_count" in failure for failure in failures)
 
 
+def test_strict_smoke_gate_accepts_skipped_for_hardware_provider() -> None:
+    """A 'skipped' session_creation is accepted for hardware-dependent
+    providers (directml, coreml) when the hardware is absent."""
+    for provider in ("directml", "coreml"):
+        report = {
+            "requested_provider": provider,
+            "harness_exit_code": 1,
+            "session_creation": "skipped",
+            "inference": "skipped",
+            "finite_output": False,
+            "output_shape": "",
+            "used_fallback": False,
+            "provider_assignment": "",
+            "provider_node_count": None,
+            "total_node_count": None,
+        }
+        assert run_native_smoke.validation_failures(report, provider) == []
+
+
+def test_strict_smoke_gate_rejects_skipped_for_cpu() -> None:
+    """CPU is never skippable — a 'skipped' status must fail the gate."""
+    report = {
+        "requested_provider": "cpu",
+        "harness_exit_code": 1,
+        "session_creation": "skipped",
+        "inference": "skipped",
+        "finite_output": False,
+        "output_shape": "",
+        "used_fallback": False,
+        "provider_assignment": "",
+        "provider_node_count": None,
+        "total_node_count": None,
+    }
+    failures = run_native_smoke.validation_failures(report, "cpu")
+    assert any("session creation" in f for f in failures)
+
+
+def test_strict_smoke_gate_rejects_skipped_for_xnnpack() -> None:
+    """XNNPACK is not hardware-dependent — a 'skipped' status must fail."""
+    report = {
+        "requested_provider": "xnnpack",
+        "harness_exit_code": 1,
+        "session_creation": "skipped",
+        "inference": "skipped",
+        "finite_output": False,
+        "output_shape": "",
+        "used_fallback": False,
+        "provider_assignment": "",
+        "provider_node_count": None,
+        "total_node_count": None,
+    }
+    failures = run_native_smoke.validation_failures(report, "xnnpack")
+    assert any("session creation" in f for f in failures)
+
+
 def test_benchmark_rejects_bare_model_without_shape(tmp_path: Path) -> None:
     """A bare --model without --expected-output-shape or --catalog must be
     rejected so output-shape validation is not bypassed."""
