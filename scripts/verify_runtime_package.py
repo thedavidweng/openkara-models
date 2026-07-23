@@ -28,6 +28,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
 PACKAGES_DIR = ROOT / "ort" / "packages"
+SOURCE_DIR = ROOT / "ort" / "source"
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import ort_api_version  # noqa: E402
+import archive_utils  # noqa: E402
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -40,27 +45,13 @@ def _load_lock() -> dict[str, Any]:
 
 
 def _extract_archive(archive: Path) -> dict[str, bytes]:
-    """Extract all files from a tar.gz or zip archive into memory."""
-    files: dict[str, bytes] = {}
-    if archive.suffix == ".gz" or archive.name.endswith(".tar.gz"):
-        with tarfile.open(archive, "r:gz") as tar:
-            for member in tar.getmembers():
-                if member.isfile():
-                    f = tar.extractfile(member)
-                    if f:
-                        # Strip leading ./ from tar member names
-                        name = member.name
-                        if name.startswith("./"):
-                            name = name[2:]
-                        files[name] = f.read()
-    elif archive.suffix == ".zip":
-        with zipfile.ZipFile(archive, "r") as zf:
-            for info in zf.infolist():
-                if not info.is_dir():
-                    files[info.filename] = zf.read(info)
-    else:
-        raise ValueError(f"unknown archive format: {archive.suffix}")
-    return files
+    """Extract all files from a tar.gz or zip archive into memory.
+
+    Uses archive_utils.safe_read_archive which rejects unsafe members
+    (absolute paths, traversal, symlinks/hardlinks that escape, duplicate
+    normalized paths, excessive member counts, excessive extracted size).
+    """
+    return archive_utils.safe_read_archive(archive)
 
 
 def _target_from_archive_name(name: str) -> tuple[str, bool]:
@@ -126,9 +117,51 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
             f"lock={lock['upstream']['tag']}"
         )
 
-    # Verify C API level.
-    if manifest.get("c_api_level", {}).get("ort_api_version") != lock["c_api_level"]["ort_api_version"]:
-        errors.append("C API level mismatch")
+    # Verify C API level: parse the pinned source header and compare it to
+    # the value recorded in the package build manifest. The source lock no
+    # longer carries a manually maintained ort_api_version; the header is the
+    # source of truth.
+    manifest_api = manifest.get("c_api_level", {}).get("ort_api_version")
+    tag = lock["upstream"]["tag"]
+    if SOURCE_DIR.is_dir():
+        try:
+            header_api = ort_api_version.parse_ort_api_version(SOURCE_DIR)
+        except (FileNotFoundError, ValueError) as e:
+            errors.append(f"failed to parse ORT_API_VERSION from pinned source header: {e}")
+            header_api = None
+        if header_api is not None:
+            try:
+                required = ort_api_version.required_api_version_for_tag(tag)
+            except ValueError as e:
+                errors.append(str(e))
+                required = None
+            if required is not None and header_api != required:
+                errors.append(
+                    f"pinned source ORT_API_VERSION={header_api} but required "
+                    f"{required} for {tag}"
+                )
+            if manifest_api is not None and manifest_api != header_api:
+                errors.append(
+                    f"C API level mismatch: manifest ort_api_version={manifest_api} "
+                    f"but pinned source header ORT_API_VERSION={header_api}"
+                )
+            if manifest_api is None:
+                errors.append("build manifest missing c_api_level.ort_api_version")
+    else:
+        # Source not checked out locally (e.g. CI verify step on a different
+        # runner). Fall back to the required value for the tag and require the
+        # manifest to match it.
+        try:
+            required = ort_api_version.required_api_version_for_tag(tag)
+        except ValueError as e:
+            errors.append(str(e))
+            required = None
+        if required is not None and manifest_api != required:
+            errors.append(
+                f"C API level mismatch: manifest ort_api_version={manifest_api} "
+                f"but required {required} for {tag} (pinned source not available "
+                f"to parse header)"
+            )
 
     # Verify all files in manifest have correct digests.
     for rel, expected in manifest.get("files", {}).items():

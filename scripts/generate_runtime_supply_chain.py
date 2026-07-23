@@ -46,6 +46,9 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
 PACKAGES_DIR = ROOT / "ort" / "packages"
 
+sys.path.insert(0, str(ROOT / "scripts"))
+import archive_utils  # noqa: E402
+
 SPDX_VERSION = "SPDX-2.3"
 SPDX_SCHEMA = "https://spdx.org/schema/spdx-schema.json"
 
@@ -70,25 +73,7 @@ def _load_lock() -> dict[str, Any]:
 
 
 def _read_archive(archive: Path) -> dict[str, bytes]:
-    files: dict[str, bytes] = {}
-    if archive.name.endswith(".tar.gz"):
-        with tarfile.open(archive, "r:gz") as tar:
-            for member in tar.getmembers():
-                if member.isfile():
-                    f = tar.extractfile(member)
-                    if f:
-                        name = member.name
-                        if name.startswith("./"):
-                            name = name[2:]
-                        files[name] = f.read()
-    elif archive.suffix == ".zip":
-        with zipfile.ZipFile(archive, "r") as zf:
-            for info in zf.infolist():
-                if not info.is_dir():
-                    files[info.filename] = zf.read(info)
-    else:
-        raise ValueError(f"unknown archive format: {archive.name}")
-    return files
+    return archive_utils.safe_read_archive(archive)
 
 
 def _write_tar(archive: Path, files: dict[str, bytes], fixed_timestamp: int = 315532800) -> None:
@@ -254,7 +239,7 @@ def _build_provenance(
             "reduced_build": build_meta.get("reduced_build", False),
             "ops_config_sha256": build_meta.get("ops_config_sha256"),
         },
-        "c_api_level": lock["c_api_level"]["ort_api_version"],
+        "c_api_level": build_manifest.get("c_api_level", {}).get("ort_api_version"),
         "subject": {
             "archive_name": archive.name,
             "archive_sha256": archive_sha,

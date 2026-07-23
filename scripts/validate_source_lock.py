@@ -88,10 +88,21 @@ def validate_lock(lock: dict[str, Any]) -> list[str]:
         if "cpu" not in eps:
             errors.append(f"{target_name}: execution_providers must include 'cpu'")
 
-    # Check C API level.
+    # Check C API level: the lock must NOT carry a manually maintained
+    # ort_api_version (it is derived from the pinned source header at build
+    # time) and must NOT carry rust_ort_crate_version (the app owns that).
     c_api = lock.get("c_api_level", {})
-    if "ort_api_version" not in c_api:
-        errors.append("c_api_level.ort_api_version missing")
+    if "ort_api_version" in c_api:
+        errors.append(
+            "c_api_level.ort_api_version must not be manually maintained in "
+            "the source lock; it is parsed from the pinned ORT header at build "
+            "time and recorded in build-manifest.json"
+        )
+    if "rust_ort_crate_version" in c_api:
+        errors.append(
+            "c_api_level.rust_ort_crate_version must not be in the "
+            "infrastructure source lock; the app owns its Rust binding version"
+        )
 
     # Check toolchain.
     toolchain = lock.get("toolchain", {})

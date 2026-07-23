@@ -48,9 +48,13 @@ def _make_build_manifest(target: str = "x86_64-unknown-linux-gnu") -> dict:
             "cmake_args": [],
             "build_os": "Linux 6.0",
             "build_arch": "x86_64",
+            "ort_api_version": 27,
         },
         "toolchain": lock["toolchain"],
-        "c_api_level": lock["c_api_level"],
+        "c_api_level": {
+            "ort_api_version": 27,
+            "ort_api_version_note": "Parsed at build time from ORT_API_VERSION.",
+        },
         "files": {
             "libonnxruntime.so": {"size": 100, "sha256": "a" * 64},
             "LICENSE.onnxruntime": {"size": 10, "sha256": "b" * 64},

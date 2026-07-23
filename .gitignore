@@ -2,6 +2,15 @@
 models/*.onnx
 models/*.sha256
 
+# ORT build artifacts (cloned source, build dirs, packages, smoke build)
+ort/source/
+ort/packages/
+ort/smoke/build/
+ort/model-cache/
+
+# ORT profiler output
+onnxruntime_profile__*.json
+
 # Python
 __pycache__/
 *.pyc

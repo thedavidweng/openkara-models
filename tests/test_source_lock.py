@@ -50,10 +50,16 @@ class SourceLockStructureTests(unittest.TestCase):
         lock = _load_lock()
         self.assertTrue(lock["upstream"]["tag"].startswith("v"))
 
-    def test_c_api_level_declared(self):
+    def test_c_api_level_not_manually_maintained(self):
+        """The lock must NOT carry a manually maintained ort_api_version; it
+        is derived from the pinned ORT header at build time."""
         lock = _load_lock()
-        self.assertIn("ort_api_version", lock["c_api_level"])
-        self.assertIsInstance(lock["c_api_level"]["ort_api_version"], int)
+        self.assertNotIn("ort_api_version", lock.get("c_api_level", {}),
+                         "ort_api_version must not be in the source lock; it is "
+                         "parsed from the pinned header at build time")
+        self.assertNotIn("rust_ort_crate_version", lock.get("c_api_level", {}),
+                         "rust_ort_crate_version must not be in the infrastructure "
+                         "source lock; the app owns its Rust binding version")
 
     def test_toolchain_versions_declared(self):
         lock = _load_lock()

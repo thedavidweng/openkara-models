@@ -99,25 +99,31 @@ class ReproducibilityTests(unittest.TestCase):
             "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
             "submodules": {},
             "targets": {"aarch64-apple-darwin": {"cmake_args": []}},
+            "toolchain": {"python_version": "3.11", "cmake_minimum_version": "3.28",
+                          "xcode_version": "16.0", "gcc_version": "13",
+                          "visual_studio_version": "2022"},
         }
         with mock.patch.object(br, "_run"):
-            with mock.patch.object(br, "_get_submodule_state", return_value={}):
-                with mock.patch.object(br.os, "cpu_count", return_value=4):
-                    platform_mock = mock.MagicMock()
-                    platform_mock.system = mock.Mock(return_value="Darwin")
-                    platform_mock.release = mock.Mock(return_value="24.0")
-                    platform_mock.machine = mock.Mock(return_value="arm64")
-                    with mock.patch.object(br, "platform", platform_mock):
-                        with tempfile.TemporaryDirectory() as td:
-                            source_dir = Path(td) / "source"
-                            source_dir.mkdir()
-                            build_dir = Path(td) / "build"
-                            meta = br._build_target(lock, "aarch64-apple-darwin",
-                                                    source_dir, build_dir)
+            with mock.patch.object(br, "_assert_toolchain"):
+                with mock.patch.object(br.ort_api_version, "assert_api_version", return_value=27):
+                    with mock.patch.object(br, "_get_submodule_state", return_value={}):
+                        with mock.patch.object(br.os, "cpu_count", return_value=4):
+                            platform_mock = mock.MagicMock()
+                            platform_mock.system = mock.Mock(return_value="Darwin")
+                            platform_mock.release = mock.Mock(return_value="24.0")
+                            platform_mock.machine = mock.Mock(return_value="arm64")
+                            with mock.patch.object(br, "platform", platform_mock):
+                                with tempfile.TemporaryDirectory() as td:
+                                    source_dir = Path(td) / "source"
+                                    source_dir.mkdir()
+                                    build_dir = Path(td) / "build"
+                                    meta = br._build_target(lock, "aarch64-apple-darwin",
+                                                            source_dir, build_dir)
         self.assertNotIn("build_host", meta,
                          "build_host must not be in build metadata (reproducibility)")
         self.assertIn("build_os", meta)
         self.assertIn("build_arch", meta)
+        self.assertEqual(meta["ort_api_version"], 27)
 
     def test_tar_archive_has_deterministic_timestamps(self):
         """_make_tar must produce archives with deterministic mtime for all entries."""

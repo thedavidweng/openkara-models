@@ -1,8 +1,6 @@
 {
   "c_api_level": {
-    "ort_api_version": 21,
-    "ort_api_version_note": "ORT C API version exported by the shared library. OpenKara's Rust `ort` crate must be compatible with this API level.",
-    "rust_ort_crate_version": ">=2.0,<3.0"
+    "ort_api_version_note": "The ORT C API version is no longer manually maintained here. It is parsed at build time from ORT_API_VERSION in include/onnxruntime/core/session/onnxruntime_c_api.h of the pinned source, required to be 27 for v1.27.1, and recorded in build-manifest.json and provenance.json. The app owns its Rust `ort` crate version (rust_ort_crate_version was removed from this lock)."
   },
   "lock_version": "openkara.ort-source-lock/v1",
   "note_on_submodules": "Git submodules pinned at the ORT upstream commit. The expected_sha values are the exact commit SHAs recorded in the ORT git tree at the pinned upstream commit_sha. The build script verifies these after checkout and records them in the build manifest.",
@@ -65,19 +63,19 @@
         "-Donnxruntime_USE_XNNPACK=OFF",
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
-      "deployment_target": "13.0",
+      "deployment_target": "15.0",
       "execution_providers": [
         "cpu",
         "coreml"
       ],
-      "runner": "macos-14",
-      "runner_note": "Apple Silicon native runner. Uses macos-14 which is M1."
+      "runner": "macos-15",
+      "runner_note": "Apple Silicon native runner. Uses macos-15 (M1) which ships Xcode 16.0+ to satisfy the toolchain xcode_version requirement."
     },
     "aarch64-unknown-linux-gnu": {
       "archive_format": "tar.gz",
@@ -164,8 +162,8 @@
         "cpu",
         "directml"
       ],
-      "runner": "windows-latest",
-      "runner_note": "Windows x64 native runner with MSVC. DirectML uses the Microsoft.AI.DirectML NuGet package (dynamic CRT, MultiThreadedDLL)."
+      "runner": "windows-2022",
+      "runner_note": "Windows x64 native runner with MSVC VS 2022 (pinned to windows-2022 to satisfy the toolchain visual_studio_version requirement; windows-latest may ship a newer VS)."
     },
     "x86_64-unknown-linux-gnu": {
       "archive_format": "tar.gz",

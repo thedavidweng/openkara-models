@@ -48,9 +48,7 @@ import os
 import resource
 import statistics
 import sys
-import tarfile
 import tempfile
-import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -58,6 +56,9 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_SCHEMA_PATH = ROOT / "ort" / "benchmark-report-v1.json"
 GENERATOR_VERSION = "openkara.runtime-benchmark/v1"
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import archive_utils  # noqa: E402
 
 
 def _sha256_file(path: Path) -> tuple[int, str]:
@@ -71,16 +72,13 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 
 def _extract_runtime(archive: Path, dest: Path) -> Path:
-    """Extract the runtime archive and return the directory containing the lib."""
-    dest.mkdir(parents=True, exist_ok=True)
-    if archive.name.endswith(".tar.gz"):
-        with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(dest)
-    elif archive.suffix == ".zip":
-        with zipfile.ZipFile(archive, "r") as zf:
-            zf.extractall(dest)
-    else:
-        raise ValueError(f"unknown archive format: {archive.name}")
+    """Extract the runtime archive and return the directory containing the lib.
+
+    Uses archive_utils.safe_extract which rejects unsafe members (absolute
+    paths, traversal, symlink/hardlink escapes, duplicate paths, excessive
+    counts/sizes).
+    """
+    archive_utils.safe_extract(archive, dest)
     # Find the shared library.
     for p in dest.rglob("*"):
         low = p.name.lower()
@@ -241,9 +239,17 @@ def main() -> int:
     parser.add_argument("--runtime", required=True, type=Path,
                         help="Runtime archive to benchmark.")
     parser.add_argument("--model", type=Path, default=None,
-                        help="Single ONNX model (skip catalog resolution).")
+                        help="Single ONNX model. Requires --expected-output-shape "
+                             "so output-shape validation is not bypassed.")
+    parser.add_argument("--expected-output-shape", type=str, default=None,
+                        help="Expected output shape as comma-separated dims, "
+                             "e.g. '1,4,2,343980'. Required when --model is used "
+                             "without --catalog so shape validation is enforced.")
     parser.add_argument("--catalog", type=Path, default=None,
                         help="Catalog manifest to resolve compatible models from.")
+    parser.add_argument("--model-artifact-id", type=str, default=None,
+                        help="When using --catalog, select only this artifact_id. "
+                             "If omitted, all compatible models are benchmarked.")
     parser.add_argument("--target", type=str, default=None,
                         help="Target triple for catalog compatibility filtering.")
     parser.add_argument("--frames", type=int, default=343980,
@@ -268,10 +274,36 @@ def main() -> int:
 
         # Resolve models.
         models: list[tuple[str, Path, dict[str, Any] | None]] = []
+        explicit_shape: list[int] | None = None
+        if args.expected_output_shape:
+            try:
+                explicit_shape = [int(x.strip()) for x in args.expected_output_shape.split(",")]
+            except ValueError:
+                parser.error(f"--expected-output-shape must be comma-separated ints, "
+                             f"got {args.expected_output_shape!r}")
         if args.model:
-            models.append((args.model.name, args.model, None))
+            # Reject a bare --model that bypasses expected-output-shape
+            # validation. Either --catalog (which supplies the shape from the
+            # model artifact's output_semantics) or --expected-output-shape
+            # must be provided.
+            if not args.catalog and explicit_shape is None:
+                parser.error(
+                    "--model requires --expected-output-shape (or --catalog) so "
+                    "output-shape validation is not bypassed"
+                )
+            art: dict[str, Any] | None = None
+            if explicit_shape is not None:
+                art = {"model": {"output_semantics": str(explicit_shape)},
+                       "artifact_id": args.model.name}
+            models.append((args.model.name, args.model, art))
         elif args.catalog:
             arts = _resolve_model_from_catalog(args.catalog, args.download_dir, args.target)
+            if args.model_artifact_id:
+                arts = [a for a in arts if a.get("artifact_id") == args.model_artifact_id]
+                if not arts:
+                    print(f"ERROR: --model-artifact-id {args.model_artifact_id!r} not "
+                          f"found in catalog {args.catalog}", file=sys.stderr)
+                    return 1
             for art in arts:
                 p = _download_model(art, args.download_dir)
                 models.append((art["artifact_id"], p, art))

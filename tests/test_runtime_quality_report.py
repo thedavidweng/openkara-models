@@ -106,10 +106,13 @@ def test_runtime_quality_suite_help() -> None:
 
 
 def test_safe_extract_tar_rejects_path_traversal(tmp_path: Path) -> None:
-    """Regression: tar member with .. must be rejected, not extracted."""
+    """Regression: tar member with .. must be rejected, not extracted.
+
+    Extraction now goes through archive_utils.safe_extract (the per-script
+    _safe_extract_tar helper was removed in favor of the shared module)."""
     import tarfile
     import io
-    import run_runtime_quality_suite as q
+    import archive_utils
     # Build a tar with a path-traversal member.
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
@@ -120,10 +123,8 @@ def test_safe_extract_tar_rejects_path_traversal(tmp_path: Path) -> None:
     archive = tmp_path / "evil.tar.gz"
     archive.write_bytes(buf.getvalue())
     dest = tmp_path / "dest"
-    dest.mkdir()
     with pytest.raises(ValueError, match="unsafe"):
-        with tarfile.open(archive, "r:gz") as tar:
-            q._safe_extract_tar(tar, dest)
+        archive_utils.safe_extract(archive, dest)
     # Confirm nothing escaped dest.
     assert not (tmp_path / "evil.txt").exists()
 
@@ -131,22 +132,20 @@ def test_safe_extract_tar_rejects_path_traversal(tmp_path: Path) -> None:
 def test_safe_extract_zip_rejects_path_traversal(tmp_path: Path) -> None:
     """Regression: zip member with .. must be rejected, not extracted."""
     import zipfile
-    import run_runtime_quality_suite as q
+    import archive_utils
     archive = tmp_path / "evil.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("../evil.txt", "evil")
     dest = tmp_path / "dest"
-    dest.mkdir()
     with pytest.raises(ValueError, match="unsafe"):
-        with zipfile.ZipFile(archive, "r") as zf:
-            q._safe_extract_zip(zf, dest)
+        archive_utils.safe_extract(archive, dest)
     assert not (tmp_path / "evil.txt").exists()
 
 
 def test_safe_extract_tar_allows_normal_members(tmp_path: Path) -> None:
     import tarfile
     import io
-    import run_runtime_quality_suite as q
+    import archive_utils
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         data = b"ok"
@@ -156,9 +155,7 @@ def test_safe_extract_tar_allows_normal_members(tmp_path: Path) -> None:
     archive = tmp_path / "ok.tar.gz"
     archive.write_bytes(buf.getvalue())
     dest = tmp_path / "dest"
-    dest.mkdir()
-    with tarfile.open(archive, "r:gz") as tar:
-        q._safe_extract_tar(tar, dest)
+    archive_utils.safe_extract(archive, dest)
     assert (dest / "lib" / "libonnxruntime.so").read_bytes() == b"ok"
 
 
