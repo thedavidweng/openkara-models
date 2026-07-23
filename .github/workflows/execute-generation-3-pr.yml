@@ -33,8 +33,21 @@ jobs:
           script = workflow['jobs']['correct']['steps'][-1]['run']
           script = script.replace(
               'rm .github/workflows/one-shot-generation-3.yml',
-              'rm .github/workflows/one-shot-generation-3.yml .github/workflows/execute-generation-3-pr.yml',
+              'rm .github/workflows/one-shot-generation-3.yml .github/workflows/execute-generation-3-pr.yml .github/generation3-failure.log',
           )
           Path('/tmp/generation-3.sh').write_text('set -euo pipefail\n' + script)
           PY
-          bash /tmp/generation-3.sh
+          set +e
+          bash /tmp/generation-3.sh > /tmp/generation3.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/generation3.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/generation3.log .github/generation3-failure.log
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add .github/generation3-failure.log
+            git commit -m 'chore: capture generation 3 failure'
+            git push origin HEAD:fix/catalog-generation-3-compatibility
+            exit "$status"
+          fi
