@@ -413,7 +413,6 @@ def validate_release_invariants(manifest: dict[str, Any]) -> list[ValidationErro
                     f"supported edge {mid!r} -> {rid!r} is not represented by both artifact declarations",
                     "compatibility",
                 ))
-    
 
     # 8. Deprecation replacement must point at an existing artifact in this release.
     for kind_list in ("models", "runtimes", "bundles"):

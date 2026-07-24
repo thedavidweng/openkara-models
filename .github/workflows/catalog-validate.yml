@@ -78,8 +78,10 @@ jobs:
 
       - name: Supply-chain records are fresh (regenerate + git diff)
         run: |
-          python scripts/generate_supply_chain.py --release 2026-07-20-001
-          python scripts/generate_supply_chain.py --release 2026-07-23-001
+          for spec in catalog/specs/*.spec.json; do
+            release_id="$(basename "$spec" .spec.json)"
+            python scripts/generate_supply_chain.py --release "$release_id"
+          done
           git diff --exit-code -- catalog/supply-chain catalog/specs
 
       - name: Generated catalog is fresh (regenerate + git diff)
@@ -92,7 +94,9 @@ jobs:
       - name: Publication dry-run (verifies asset URLs + SHA-256)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/publish_catalog_release.py --release 2026-07-23-003
+        run: |
+          release_id="$(python -c 'import json; print(json.load(open("catalog/channels/stable.json"))["release_id"])')"
+          python scripts/publish_catalog_release.py --release "$release_id"
 
       - name: Syntax check catalog scripts
         run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py scripts/generate_catalog_release.py scripts/generate_supply_chain.py scripts/verify_supply_chain.py scripts/publish_catalog_release.py
