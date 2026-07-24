@@ -358,7 +358,64 @@ def validate_release_invariants(manifest: dict[str, Any]) -> list[ValidationErro
                     )
                 )
 
-    # 7. Deprecation replacement must point at an existing artifact in this release.
+    # 7. Model/runtime declarations and compatibility edges must be reciprocal.
+    if manifest.get("generation", 0) >= 3:
+        edge_pairs = {
+            (edge.get("model_artifact_id"), edge.get("runtime_artifact_id"))
+            for edge in manifest.get("compatibility", [])
+            if edge.get("status") == "supported"
+        }
+        for mid, model in ref.models.items():
+            declared = set(model.get("model", {}).get("compatible_runtime_ids", []))
+            supporting = {
+                rid for rid, runtime in ref.runtimes.items()
+                if mid in set(runtime.get("runtime", {}).get("supported_model_artifact_ids", []))
+            }
+            if supporting and not declared:
+                errors.append(ValidationError(
+                    "empty_runtime_compatibility",
+                    f"model {mid!r} has supporting runtimes but compatible_runtime_ids is empty",
+                    f"artifacts.models[{mid}].model.compatible_runtime_ids",
+                ))
+            for rid in declared & set(ref.runtimes):
+                supported_models = set(
+                    ref.runtimes[rid].get("runtime", {}).get("supported_model_artifact_ids", [])
+                )
+                if mid not in supported_models:
+                    errors.append(ValidationError(
+                        "asymmetric_runtime_support",
+                        f"model {mid!r} declares runtime {rid!r}, but the runtime does not declare the model",
+                        f"artifacts.models[{mid}].model.compatible_runtime_ids",
+                    ))
+                if (mid, rid) not in edge_pairs:
+                    errors.append(ValidationError(
+                        "missing_compatibility_edge",
+                        f"model {mid!r} and runtime {rid!r} are reciprocal but have no supported compatibility edge",
+                        "compatibility",
+                    ))
+            for rid in supporting:
+                if rid not in declared:
+                    errors.append(ValidationError(
+                        "asymmetric_model_support",
+                        f"runtime {rid!r} declares model {mid!r}, but the model does not declare the runtime",
+                        f"artifacts.runtimes[{rid}].runtime.supported_model_artifact_ids",
+                    ))
+        for mid, rid in edge_pairs:
+            model = ref.models.get(mid)
+            runtime = ref.runtimes.get(rid)
+            if model is None or runtime is None:
+                continue
+            model_runtimes = set(model.get("model", {}).get("compatible_runtime_ids", []))
+            runtime_models = set(runtime.get("runtime", {}).get("supported_model_artifact_ids", []))
+            if rid not in model_runtimes or mid not in runtime_models:
+                errors.append(ValidationError(
+                    "asymmetric_compatibility_edge",
+                    f"supported edge {mid!r} -> {rid!r} is not represented by both artifact declarations",
+                    "compatibility",
+                ))
+    
+
+    # 8. Deprecation replacement must point at an existing artifact in this release.
     for kind_list in ("models", "runtimes", "bundles"):
         for art in manifest.get("artifacts", {}).get(kind_list, []):
             dep = art.get("deprecation") or {}
@@ -374,7 +431,7 @@ def validate_release_invariants(manifest: dict[str, Any]) -> list[ValidationErro
                         )
                     )
 
-    # 8. arch/os must be consistent with target_triple when both are present.
+    # 9. arch/os must be consistent with target_triple when both are present.
     for kind_list in ("models", "runtimes", "bundles"):
         for art in manifest.get("artifacts", {}).get(kind_list, []):
             t = art.get("target_triple")
