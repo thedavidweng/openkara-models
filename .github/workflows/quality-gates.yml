@@ -5,6 +5,7 @@ on:
     paths:
       - "quality/**"
       - "scripts/synthetic_fixtures.py"
+      - "scripts/separation_metrics.py"
       - "scripts/validate_corpus_manifest.py"
       - "scripts/run_quality_suite.py"
       - "scripts/validate_quality_report.py"
@@ -14,6 +15,7 @@ on:
       - "scripts/generate_trend_report.py"
       - "quality/baselines.json"
       - "quality/budgets.json"
+      - "tests/test_separation_metrics.py"
       - "tests/test_corpus_manifest.py"
       - "tests/test_quality_report.py"
       - "tests/test_runtime_quality_report.py"
@@ -25,6 +27,7 @@ on:
     paths:
       - "quality/**"
       - "scripts/synthetic_fixtures.py"
+      - "scripts/separation_metrics.py"
       - "scripts/validate_corpus_manifest.py"
       - "scripts/run_quality_suite.py"
       - "scripts/validate_quality_report.py"
@@ -48,7 +51,9 @@ jobs:
         run: pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
       - name: Validate corpus manifest
         run: python scripts/validate_corpus_manifest.py
+      - name: Separation metrics self-check
+        run: python scripts/separation_metrics.py --self-check
       - name: Corpus + quality + runtime quality + gate + trend tests
-        run: python -m pytest tests/test_corpus_manifest.py tests/test_quality_report.py tests/test_runtime_quality_report.py tests/test_quality_gates.py tests/test_trend_report.py -q
+        run: python -m pytest tests/test_separation_metrics.py tests/test_corpus_manifest.py tests/test_quality_report.py tests/test_runtime_quality_report.py tests/test_quality_gates.py tests/test_trend_report.py -q
       - name: Syntax check
-        run: python -m compileall -q scripts/synthetic_fixtures.py scripts/validate_corpus_manifest.py scripts/run_quality_suite.py scripts/validate_quality_report.py scripts/run_runtime_quality_suite.py scripts/validate_runtime_quality_report.py scripts/enforce_quality_gates.py scripts/generate_trend_report.py
+        run: python -m compileall -q scripts/separation_metrics.py scripts/synthetic_fixtures.py scripts/validate_corpus_manifest.py scripts/run_quality_suite.py scripts/validate_quality_report.py scripts/run_runtime_quality_suite.py scripts/validate_runtime_quality_report.py scripts/enforce_quality_gates.py scripts/generate_trend_report.py
