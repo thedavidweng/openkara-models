@@ -226,7 +226,11 @@ def _compiler_name(target: str, lock: dict[str, Any]) -> str:
 def _download_url(artifact_id: str, filename: str, release_id: str | None,
                   lock: dict[str, Any]) -> str:
     if release_id:
-        return f"https://github.com/thedavidweng/openkara-models/releases/download/infra-{release_id}/{filename}"
+        # Tag-triggered ort-publish runs pass the tag itself (ort-vX.Y.Z),
+        # whose release is NOT infra-prefixed; only catalog release IDs
+        # (date-based) live under infra-<id> releases.
+        tag = release_id if release_id.startswith("ort-") else f"infra-{release_id}"
+        return f"https://github.com/thedavidweng/openkara-models/releases/download/{tag}/{filename}"
     return f"https://github.com/thedavidweng/openkara-models/releases/download/ort-{lock['upstream']['tag']}/{filename}"
 
 
