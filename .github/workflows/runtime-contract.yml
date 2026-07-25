@@ -31,5 +31,11 @@ jobs:
       - name: Behavior tests (contract + ensemble graph)
         run: python tests/test_conversion_pipeline.py
 
+      - name: Behavior tests (spectral-core graph gate + ensemble)
+        run: python tests/test_spectral_core_graph.py
+
+      - name: Behavior tests (spectral-core trace patch; skipped without torch)
+        run: python tests/test_spectral_core_patch.py
+
       - name: Syntax check scripts
         run: python -m compileall -q scripts

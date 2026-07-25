@@ -174,12 +174,15 @@ class RealValuedSpectrogramPatchTests(unittest.TestCase):
         from onnx_stft import RealValuedSpectrogramPatch
 
         model = self._make_fake_model()
+        originals = {
+            name: getattr(model, name).__func__
+            for name in ("_spec", "_ispec", "_magnitude", "_mask")
+        }
         patch = RealValuedSpectrogramPatch.from_model(model)
         patch.apply()
 
-        self.assertNotEqual(model._spec("x"), "original_spec")
-        self.assertNotEqual(model._magnitude("z"), "original_magnitude")
-        self.assertNotEqual(model._mask("z", "m"), "original_mask")
+        for name, original in originals.items():
+            self.assertIsNot(getattr(model, name).__func__, original)
 
         patch.restore()
 
@@ -187,18 +190,16 @@ class RealValuedSpectrogramPatchTests(unittest.TestCase):
         from onnx_stft import RealValuedSpectrogramPatch
 
         model = self._make_fake_model()
-        original_spec = model._spec
-        original_ispec = model._ispec
-        original_magnitude = model._magnitude
-        original_mask = model._mask
+        originals = {
+            name: getattr(model, name).__func__
+            for name in ("_spec", "_ispec", "_magnitude", "_mask")
+        }
 
         with RealValuedSpectrogramPatch.from_model(model):
             pass
 
-        self.assertIs(model._spec, original_spec)
-        self.assertIs(model._ispec, original_ispec)
-        self.assertIs(model._magnitude, original_magnitude)
-        self.assertIs(model._mask, original_mask)
+        for name, original in originals.items():
+            self.assertIs(getattr(model, name).__func__, original)
 
     def test_apply_restore_is_idempotent(self):
         from onnx_stft import RealValuedSpectrogramPatch

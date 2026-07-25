@@ -2,7 +2,11 @@ name: Convert and Release
 
 on:
   push:
-    tags: ["model-v*", "model-ft-v*"]
+    tags:
+      - "model-v*"
+      - "model-ft-v*"
+      - "model-spectral-v*"
+      - "model-ft-spectral-v*"
   workflow_dispatch:
     inputs:
       model:
@@ -10,12 +14,17 @@ on:
         type: choice
         options: [htdemucs, htdemucs_ft]
         default: htdemucs
+      interface:
+        description: "Tensor interface to export"
+        type: choice
+        options: [waveform, spectral-core]
+        default: waveform
 
 permissions:
   contents: write
 
 concurrency:
-  group: convert-${{ github.ref }}-${{ github.event.inputs.model || 'auto' }}
+  group: convert-${{ github.ref }}-${{ github.event.inputs.model || 'auto' }}-${{ github.event.inputs.interface || 'auto' }}
   cancel-in-progress: true
 
 jobs:
@@ -25,23 +34,40 @@ jobs:
     outputs:
       model: ${{ steps.model.outputs.model }}
       is_ensemble: ${{ steps.model.outputs.is_ensemble }}
+      interface: ${{ steps.model.outputs.interface }}
+      artifact: ${{ steps.model.outputs.artifact }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Determine model from tag or input
+      - name: Determine model and interface from tag or input
         id: model
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             MODEL="${{ github.event.inputs.model }}"
-          elif [[ "${GITHUB_REF#refs/tags/}" == model-ft-* ]]; then
-            MODEL="htdemucs_ft"
+            INTERFACE="${{ github.event.inputs.interface }}"
           else
-            MODEL="htdemucs"
+            TAG="${GITHUB_REF#refs/tags/}"
+            if [[ "$TAG" == model-ft-* ]]; then
+              MODEL="htdemucs_ft"
+            else
+              MODEL="htdemucs"
+            fi
+            if [[ "$TAG" == model-spectral-* || "$TAG" == model-ft-spectral-* ]]; then
+              INTERFACE="spectral-core"
+            else
+              INTERFACE="waveform"
+            fi
           fi
           echo "model=$MODEL" >> "$GITHUB_OUTPUT"
+          echo "interface=$INTERFACE" >> "$GITHUB_OUTPUT"
           if [ "$MODEL" = "htdemucs_ft" ]; then
             echo "is_ensemble=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_ensemble=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$INTERFACE" = "spectral-core" ]; then
+            echo "artifact=${MODEL}.spectral.onnx" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact=${MODEL}.onnx" >> "$GITHUB_OUTPUT"
           fi
 
   # Parallel sub-model export for htdemucs_ft (4 jobs, ~6min wall time
@@ -76,9 +102,18 @@ jobs:
           path: ~/.cache/huggingface/hub
           key: demucs-weights-htdemucs_ft-${{ hashFiles('requirements.txt') }}
 
-      - name: Export sub-model ${{ matrix.index }}
+      - name: Export sub-model ${{ matrix.index }} (waveform)
+        if: needs.detect-model.outputs.interface == 'waveform'
         run: |
           python scripts/convert_htdemucs_to_onnx.py \
+            --model htdemucs_ft \
+            --sub-model-index ${{ matrix.index }} \
+            --output sub_${{ matrix.index }}.onnx
+
+      - name: Export sub-model ${{ matrix.index }} (spectral-core)
+        if: needs.detect-model.outputs.interface == 'spectral-core'
+        run: |
+          python scripts/export_spectral_core.py \
             --model htdemucs_ft \
             --sub-model-index ${{ matrix.index }} \
             --output sub_${{ matrix.index }}.onnx
@@ -97,6 +132,8 @@ jobs:
     if: needs.detect-model.outputs.is_ensemble == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      ARTIFACT: ${{ needs.detect-model.outputs.artifact }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -118,37 +155,102 @@ jobs:
           path: ~/.cache/huggingface/hub
           key: demucs-weights-htdemucs-${{ hashFiles('requirements.txt') }}
 
-      - name: Convert model to ONNX
+      - name: Convert model to ONNX (waveform)
+        if: needs.detect-model.outputs.interface == 'waveform'
+        run: python scripts/convert_htdemucs_to_onnx.py --model ${{ needs.detect-model.outputs.model }}
+
+      - name: Export spectral-core model
+        if: needs.detect-model.outputs.interface == 'spectral-core'
+        run: python scripts/export_spectral_core.py --model ${{ needs.detect-model.outputs.model }}
+
+      - name: Record model size
         id: convert
         run: |
-          python scripts/convert_htdemucs_to_onnx.py --model ${{ needs.detect-model.outputs.model }}
-          SIZE_MB=$(stat -c%s models/${{ needs.detect-model.outputs.model }}.onnx | awk '{printf "%.1f", $1/1048576}')
+          SIZE_MB=$(stat -c%s "models/$ARTIFACT" | awk '{printf "%.1f", $1/1048576}')
           echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
 
-      - name: Validate ONNX model
+      - name: Validate ONNX model (waveform)
+        if: needs.detect-model.outputs.interface == 'waveform'
         id: validate
         run: |
           python scripts/validate_onnx.py --model ${{ needs.detect-model.outputs.model }} 2>&1 | tee validate.log
           MSE=$(grep 'MSE:' validate.log | head -1 | awk '{print $2}')
           echo "mse=$MSE" >> "$GITHUB_OUTPUT"
 
+      - name: Validate spectral contract (torch reference)
+        if: needs.detect-model.outputs.interface == 'spectral-core'
+        id: validate-spectral
+        run: |
+          python scripts/validate_spectral_contract.py "models/$ARTIFACT" \
+            --torch-reference --model ${{ needs.detect-model.outputs.model }} 2>&1 | tee validate.log
+          MSE=$(grep 'composed:' validate.log | head -1 | awk '{print $3}')
+          echo "mse=$MSE" >> "$GITHUB_OUTPUT"
+
       - name: Runtime contract (protobuf + ORT CPU session)
-        run: python scripts/onnx_runtime_contract.py --model models/${{ needs.detect-model.outputs.model }}.onnx --ort-session
+        run: python scripts/onnx_runtime_contract.py --model "models/$ARTIFACT" --ort-session
 
       - name: Generate checksum
         run: |
           cd models
-          sha256sum ${{ needs.detect-model.outputs.model }}.onnx > ${{ needs.detect-model.outputs.model }}.onnx.sha256
+          sha256sum "$ARTIFACT" > "$ARTIFACT.sha256"
           echo "Checksum:"
-          cat ${{ needs.detect-model.outputs.model }}.onnx.sha256
+          cat "$ARTIFACT.sha256"
+
+      - name: Compose release notes
+        run: |
+          MODEL="${{ needs.detect-model.outputs.model }}"
+          MSE="${{ steps.validate.outputs.mse || steps.validate-spectral.outputs.mse }}"
+          SIZE="${{ steps.convert.outputs.size_mb }}"
+          if [ "${{ needs.detect-model.outputs.interface }}" = "spectral-core" ]; then
+            cat > release-body.md <<EOF
+          ## $MODEL spectral-core ONNX model
+
+          Demucs neural-network core exported at the \`openkara.spectral-contract/v1\` boundary
+          (see \`docs/spectral-core-contract.md\`): the waveform<->spectral transforms run in the
+          application, so the graph carries no STFT/ISTFT nodes and no dense DFT filter-bank
+          constants.
+
+          **Model spec:**
+          - Inputs: \`spectral [1,2,2,2048,336]\` (contract spec of the mix), \`mix [1,2,343980]\`
+          - Outputs: \`spectral_out [1,4,2,2,2048,336]\` (pre-ISTFT, drums/bass/other/vocals), \`time_out [1,4,2,343980]\`
+          - Composition: \`stems[s] = ispec(spectral_out[:,s], 343980) + time_out[:,s]\`
+          - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
+
+          **Build metrics:**
+          - Model size: $SIZE MB
+          - Composed-waveform validation MSE vs PyTorch: $MSE
+
+          **Verification:** SHA-256 checksum included in \`$ARTIFACT.sha256\`.
+          Validated stage-level and end-to-end against the PyTorch reference (MSE < 1e-4),
+          spectral-core contract gate (interface, transform ops, DFT signatures, metadata) passed.
+          EOF
+          else
+            cat > release-body.md <<EOF
+          ## $MODEL ONNX Model
+
+          Converted from the pretrained [Demucs $MODEL](https://github.com/adefossez/demucs) PyTorch model.
+
+          **Model spec:**
+          - Input: \`[1, 2, frame_count]\` (stereo audio at 44.1 kHz)
+          - Output: \`[1, 4, 2, frame_count]\` (drums, bass, other, vocals)
+          - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
+
+          **Build metrics:**
+          - Model size: $SIZE MB
+          - Validation MSE: $MSE
+
+          **Verification:** SHA-256 checksum included in \`$ARTIFACT.sha256\`.
+          Validated against PyTorch reference output (MSE < 1e-4) and checked for OpenKara runtime metadata.
+          EOF
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ needs.detect-model.outputs.model }}-onnx
+          name: ${{ needs.detect-model.outputs.model }}-${{ needs.detect-model.outputs.interface }}-onnx
           path: |
-            models/${{ needs.detect-model.outputs.model }}.onnx
-            models/${{ needs.detect-model.outputs.model }}.onnx.sha256
+            models/${{ needs.detect-model.outputs.artifact }}
+            models/${{ needs.detect-model.outputs.artifact }}.sha256
           retention-days: 7
 
       - name: Create Release
@@ -156,24 +258,9 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: |
-            models/${{ needs.detect-model.outputs.model }}.onnx
-            models/${{ needs.detect-model.outputs.model }}.onnx.sha256
-          body: |
-            ## ${{ needs.detect-model.outputs.model }} ONNX Model
-
-            Converted from the pretrained [Demucs ${{ needs.detect-model.outputs.model }}](https://github.com/adefossez/demucs) PyTorch model.
-
-            **Model spec:**
-            - Input: `[1, 2, frame_count]` (stereo audio at 44.1 kHz)
-            - Output: `[1, 4, 2, frame_count]` (drums, bass, other, vocals)
-            - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
-
-            **Build metrics:**
-            - Model size: ${{ steps.convert.outputs.size_mb }} MB
-            - Validation MSE: ${{ steps.validate.outputs.mse }}
-
-            **Verification:** SHA-256 checksum included in `${{ needs.detect-model.outputs.model }}.onnx.sha256`.
-            Validated against PyTorch reference output (MSE < 1e-4) and checked for OpenKara runtime metadata.
+            models/${{ needs.detect-model.outputs.artifact }}
+            models/${{ needs.detect-model.outputs.artifact }}.sha256
+          body_path: release-body.md
           generate_release_notes: true
 
   # Ensemble merge + finalize path for htdemucs_ft: merges 4 sub-model
@@ -183,6 +270,8 @@ jobs:
     if: needs.detect-model.outputs.is_ensemble == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      ARTIFACT: ${{ needs.detect-model.outputs.artifact }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -211,39 +300,107 @@ jobs:
           path: sub-models
           merge-multiple: true
 
-      - name: Merge + optimize + annotate
-        id: convert
+      - name: Merge + optimize + annotate (waveform)
+        if: needs.detect-model.outputs.interface == 'waveform'
         run: |
           python scripts/convert_htdemucs_to_onnx.py \
             --model htdemucs_ft \
             --merge-from sub-models
-          SIZE_MB=$(stat -c%s models/htdemucs_ft.onnx | awk '{printf "%.1f", $1/1048576}')
+
+      - name: Merge + optimize + annotate (spectral-core)
+        if: needs.detect-model.outputs.interface == 'spectral-core'
+        run: |
+          python scripts/export_spectral_core.py \
+            --model htdemucs_ft \
+            --merge-from sub-models
+
+      - name: Record model size
+        id: convert
+        run: |
+          SIZE_MB=$(stat -c%s "models/$ARTIFACT" | awk '{printf "%.1f", $1/1048576}')
           echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
 
-      - name: Validate ONNX model
+      - name: Validate ONNX model (waveform)
+        if: needs.detect-model.outputs.interface == 'waveform'
         id: validate
         run: |
           python scripts/validate_onnx.py --model htdemucs_ft 2>&1 | tee validate.log
           MSE=$(grep 'MSE:' validate.log | head -1 | awk '{print $2}')
           echo "mse=$MSE" >> "$GITHUB_OUTPUT"
 
+      - name: Validate spectral contract (torch reference)
+        if: needs.detect-model.outputs.interface == 'spectral-core'
+        id: validate-spectral
+        run: |
+          python scripts/validate_spectral_contract.py "models/$ARTIFACT" \
+            --torch-reference --model htdemucs_ft 2>&1 | tee validate.log
+          MSE=$(grep 'composed:' validate.log | head -1 | awk '{print $3}')
+          echo "mse=$MSE" >> "$GITHUB_OUTPUT"
+
       - name: Runtime contract (protobuf + ORT CPU session)
-        run: python scripts/onnx_runtime_contract.py --model models/htdemucs_ft.onnx --ort-session
+        run: python scripts/onnx_runtime_contract.py --model "models/$ARTIFACT" --ort-session
 
       - name: Generate checksum
         run: |
           cd models
-          sha256sum htdemucs_ft.onnx > htdemucs_ft.onnx.sha256
+          sha256sum "$ARTIFACT" > "$ARTIFACT.sha256"
           echo "Checksum:"
-          cat htdemucs_ft.onnx.sha256
+          cat "$ARTIFACT.sha256"
+
+      - name: Compose release notes
+        run: |
+          MSE="${{ steps.validate.outputs.mse || steps.validate-spectral.outputs.mse }}"
+          SIZE="${{ steps.convert.outputs.size_mb }}"
+          if [ "${{ needs.detect-model.outputs.interface }}" = "spectral-core" ]; then
+            cat > release-body.md <<EOF
+          ## htdemucs_ft spectral-core ONNX model
+
+          Demucs fine-tuned 4-model ensemble exported at the \`openkara.spectral-contract/v1\`
+          boundary (see \`docs/spectral-core-contract.md\`) and averaged in the spectral domain
+          (exactly equivalent to the waveform average by linearity of the ISTFT). The graph
+          carries no STFT/ISTFT nodes and no dense DFT filter-bank constants.
+
+          **Model spec:**
+          - Inputs: \`spectral [1,2,2,2048,336]\` (contract spec of the mix), \`mix [1,2,343980]\`
+          - Outputs: \`spectral_out [1,4,2,2,2048,336]\` (pre-ISTFT, drums/bass/other/vocals), \`time_out [1,4,2,343980]\`
+          - Composition: \`stems[s] = ispec(spectral_out[:,s], 343980) + time_out[:,s]\`
+          - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
+
+          **Build metrics:**
+          - Model size: $SIZE MB
+          - Composed-waveform validation MSE vs PyTorch: $MSE
+
+          **Verification:** SHA-256 checksum included in \`$ARTIFACT.sha256\`.
+          Validated stage-level and end-to-end against the PyTorch ensemble reference (MSE < 1e-4),
+          spectral-core contract gate (interface, transform ops, DFT signatures, metadata) passed.
+          EOF
+          else
+            cat > release-body.md <<EOF
+          ## htdemucs_ft ONNX Model
+
+          Converted from the pretrained [Demucs htdemucs_ft](https://github.com/adefossez/demucs) PyTorch model (4-model ensemble, averaged into a single ONNX graph with deduplicated STFT/ISTFT filter banks).
+
+          **Model spec:**
+          - Input: \`[1, 2, frame_count]\` (stereo audio at 44.1 kHz)
+          - Output: \`[1, 4, 2, frame_count]\` (drums, bass, other, vocals)
+          - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
+
+          **Build metrics:**
+          - Model size: $SIZE MB
+          - Validation MSE: $MSE
+
+          **Verification:** SHA-256 checksum included in \`$ARTIFACT.sha256\`.
+          Validated against PyTorch reference output (MSE < 1e-4) and checked for OpenKara runtime metadata.
+          EOF
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: htdemucs_ft-onnx
+          name: htdemucs_ft-${{ needs.detect-model.outputs.interface }}-onnx
           path: |
-            models/htdemucs_ft.onnx
-            models/htdemucs_ft.onnx.sha256
+            models/${{ needs.detect-model.outputs.artifact }}
+            models/${{ needs.detect-model.outputs.artifact }}.sha256
           retention-days: 7
 
       - name: Create Release
@@ -251,22 +408,7 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           files: |
-            models/htdemucs_ft.onnx
-            models/htdemucs_ft.onnx.sha256
-          body: |
-            ## htdemucs_ft ONNX Model
-
-            Converted from the pretrained [Demucs htdemucs_ft](https://github.com/adefossez/demucs) PyTorch model (4-model ensemble, averaged into a single ONNX graph with deduplicated STFT/ISTFT filter banks).
-
-            **Model spec:**
-            - Input: `[1, 2, frame_count]` (stereo audio at 44.1 kHz)
-            - Output: `[1, 4, 2, frame_count]` (drums, bass, other, vocals)
-            - Format: ONNX opset 17, optimized by ONNX Runtime offline graph optimization
-
-            **Build metrics:**
-            - Model size: ${{ steps.convert.outputs.size_mb }} MB
-            - Validation MSE: ${{ steps.validate.outputs.mse }}
-
-            **Verification:** SHA-256 checksum included in `htdemucs_ft.onnx.sha256`.
-            Validated against PyTorch reference output (MSE < 1e-4) and checked for OpenKara runtime metadata.
+            models/${{ needs.detect-model.outputs.artifact }}
+            models/${{ needs.detect-model.outputs.artifact }}.sha256
+          body_path: release-body.md
           generate_release_notes: true

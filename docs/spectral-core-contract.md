@@ -69,6 +69,12 @@ Input `z` `[B, S, 2, 2, 2048, T]`, target `length`.
 
 ## Spectral-core model boundary (issue #23 PR 2)
 
+Exporter: `scripts/export_spectral_core.py` (trace patch in
+`scripts/spectral_core_patch.py`). Structural gate + ensemble merge:
+`scripts/spectral_core_graph.py`. Artifact validation (structural, and
+numeric against the PyTorch reference in the conversion workflow):
+`scripts/validate_spectral_contract.py`.
+
 The exported core has **two inputs and two outputs** (HTDemucs is hybrid):
 
 | Tensor | Shape | Producer |
@@ -118,6 +124,8 @@ the authoritative published bundles. The `.npz` bundles are release assets
 
 This contract is `openkara.spectral-contract/v1`. Spectral-core model
 artifacts (issue #23 PR 2+) must carry the contract version in model
-metadata (`openkara.spectral_contract`) and in their catalog entries. Any
-semantic change (constants, layouts, padding, normalization ownership,
-tolerances) requires `/v2` and new golden vectors.
+metadata (`openkara.spectral_contract`, enforced by the exporter and by
+`scripts/validate_spectral_contract.py`) and in their catalog entries
+(`model.tensor_interface = "spectral-core"`). Any semantic change
+(constants, layouts, padding, normalization ownership, tolerances)
+requires `/v2` and new golden vectors.
