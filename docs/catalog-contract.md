@@ -96,12 +96,22 @@ Ties one model artifact to one runtime artifact for a specific
 target must match its runtime's target; its provider must be in the runtime's
 providers. Only Pareto-optimal bundles are published (issue #22).
 
-## Stable-channel pointer
+## Channel pointers
 
 `catalog/channels/stable.json` references exactly one immutable release
 manifest by URL, SHA-256, and size. It advances in one atomic step after every
 referenced asset and gate passes. `generation` is monotonically non-decreasing
 and must equal the referenced manifest's generation.
+
+`catalog/channels/candidate.json` (same schema, `channel: "candidate"`) is the
+pre-promotion channel introduced with the spectral-core generation (issue #23
+PR 3): a release whose artifacts must be validated by the paired OpenKara
+work across all targets before the stable switch is published here first
+(`publish_catalog_release.py --channel candidate`). Candidate publication
+never touches `stable.json`; promoting a verified candidate is a separate
+`--channel stable` run against the same, already-published release (assets
+are re-verified; only the pointer moves). Production consumers follow only
+the stable pointer.
 
 ## Update detection (consumer contract)
 

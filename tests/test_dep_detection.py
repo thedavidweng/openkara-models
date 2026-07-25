@@ -179,6 +179,24 @@ def test_validate_model_lock_rejects_bad_sha() -> None:
     assert any("commit_sha" in e for e in errors)
 
 
+def test_validate_model_lock_requires_spectral_core_authority() -> None:
+    import validate_model_source_lock as v
+    lock = _load_model_lock()
+    del lock["models"]["htdemucs"]["spectral_core"]
+    errors = v.validate_model_lock(lock)
+    assert any("spectral_core missing" in e for e in errors)
+
+
+def test_validate_model_lock_pins_spectral_contract_version() -> None:
+    import validate_model_source_lock as v
+    lock = _load_model_lock()
+    lock["models"]["htdemucs"]["spectral_core"]["contract"] = (
+        "openkara.spectral-contract/v2"
+    )
+    errors = v.validate_model_lock(lock)
+    assert any("spectral_core.contract" in e for e in errors)
+
+
 def test_detector_resolves_per_model_lock_entry() -> None:
     """The detector must compare against the per-model entry of the v1 lock."""
     import detect_model_weight_revision  # noqa: F401 — importability

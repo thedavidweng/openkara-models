@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Atomic stable-channel publication for the OpenKara catalog.
+"""Atomic channel publication for the OpenKara catalog.
 
 Publishes a catalog release as an immutable GitHub release with the manifest,
 supply-chain records, and model assets attached, then atomically advances the
-stable-channel pointer.
+selected channel pointer (``--channel stable`` by default, or ``candidate``
+for pre-promotion releases per issue #23 PR 3: candidate artifacts are
+validated cross-target by the paired OpenKara work before the stable switch).
 
 Atomicity contract:
   1. Pre-publication verification: manifest validates, supply-chain records
@@ -13,12 +15,16 @@ Atomicity contract:
   2. Create a GitHub release tagged ``infra-<release-id>`` (draft).
   3. Upload the manifest and supply-chain files as release assets.
   4. Verify every uploaded asset's SHA-256 and size match the manifest.
-  5. Update ``catalog/channels/stable.json`` to point at the new release
+  5. Update ``catalog/channels/<channel>.json`` to point at the new release
      (only after every asset is verified).
   6. Publish the release (undraft).
 
-If any step fails, the release is deleted and the stable pointer is not moved.
-The stable pointer only advances after every referenced asset is verified.
+If any step fails, the release is deleted and the channel pointer is not
+moved. The pointer only advances after every referenced asset is verified.
+Publishing to ``candidate`` never touches ``stable.json``; promoting a
+verified candidate to stable is a separate ``--channel stable`` run against
+the same (already published) release, which skips re-creating the GitHub
+release if the tag already exists and only advances the pointer.
 
 This script is a dry-run by default. Use ``--execute`` to actually create the
 GitHub release. In dry-run mode, it performs every pre-publication check that
@@ -29,6 +35,8 @@ Usage::
 
     python scripts/publish_catalog_release.py --release 2026-07-20-001
     python scripts/publish_catalog_release.py --release 2026-07-20-001 --execute
+    python scripts/publish_catalog_release.py --release 2026-07-25-005 \\
+        --channel candidate --execute
 """
 
 from __future__ import annotations
@@ -229,8 +237,10 @@ def _check_monotonicity(new_manifest: dict[str, Any]) -> list[str]:
     return []
 
 
-def _advance_stable_pointer(manifest: dict[str, Any], manifest_path: Path) -> list[str]:
-    """Rewrite catalog/channels/stable.json to point at the verified manifest.
+def _advance_channel_pointer(
+    manifest: dict[str, Any], manifest_path: Path, channel: str
+) -> list[str]:
+    """Rewrite catalog/channels/<channel>.json to point at the verified manifest.
 
     The pointer's release_manifest_url points at the GitHub release asset URL
     (infra-<release-id>/release-manifest.json), and the digest/size match the
@@ -247,7 +257,7 @@ def _advance_stable_pointer(manifest: dict[str, Any], manifest_path: Path) -> li
     )
     pointer = {
         "schema_version": "openkara.catalog/channel-v1",
-        "channel": "stable",
+        "channel": channel,
         "generation": manifest["generation"],
         "release_id": release_id,
         "release_manifest_url": publish_url,
@@ -256,8 +266,12 @@ def _advance_stable_pointer(manifest: dict[str, Any], manifest_path: Path) -> li
         "updated_at": manifest["created_at"],
         "previous_release_id": None,
     }
-    # Preserve previous_release_id from the existing pointer if present.
-    existing_pointer = CHANNELS_DIR / "stable.json"
+    # Preserve previous_release_id from the existing pointer of the SAME
+    # channel if present (a first-ever candidate pointer starts from the
+    # stable pointer's release so the lineage stays connected).
+    existing_pointer = CHANNELS_DIR / f"{channel}.json"
+    if not existing_pointer.is_file() and channel == "candidate":
+        existing_pointer = CHANNELS_DIR / "stable.json"
     if existing_pointer.is_file():
         try:
             old = _load(existing_pointer)
@@ -277,7 +291,8 @@ def _advance_stable_pointer(manifest: dict[str, Any], manifest_path: Path) -> li
         return errs
 
     CHANNELS_DIR.mkdir(parents=True, exist_ok=True)
-    with existing_pointer.open("w", encoding="utf-8") as fh:
+    target_pointer = CHANNELS_DIR / f"{channel}.json"
+    with target_pointer.open("w", encoding="utf-8") as fh:
         json.dump(pointer, fh, indent=2, sort_keys=True, ensure_ascii=False)
         fh.write("\n")
     return []
@@ -287,8 +302,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Publish a catalog release atomically.")
     parser.add_argument("--release", required=True, help="release_id to publish.")
     parser.add_argument(
+        "--channel", choices=("stable", "candidate"), default="stable",
+        help="Channel pointer to advance (default: stable). Candidate "
+             "publication never touches the stable pointer.",
+    )
+    parser.add_argument(
         "--execute", action="store_true",
-        help="Actually create the GitHub release and advance the stable pointer (default: dry-run).",
+        help="Actually create the GitHub release and advance the channel pointer (default: dry-run).",
     )
     args = parser.parse_args()
 
@@ -315,73 +335,86 @@ def main() -> int:
         return 1
 
     if not args.execute:
-        print(f"DRY-RUN: release {args.release} is ready to publish.")
+        print(f"DRY-RUN: release {args.release} is ready to publish to {args.channel}.")
         print(f"  manifest: {manifest_path}")
         print(f"  supply-chain files: {SC_DIR / args.release}")
         n_artifacts = sum(len(manifest['artifacts'].get(k, [])) for k in ('models', 'runtimes', 'bundles'))
         print(f"  artifacts: {n_artifacts} (all asset URLs verified, SHA-256 matches)")
-        print(f"  Run with --execute to create the GitHub release and advance the stable pointer.")
+        print(f"  Run with --execute to create the GitHub release and advance the {args.channel} pointer.")
         return 0
 
     # Execute mode: create the GitHub release, upload, verify, advance pointer.
     tag = f"infra-{args.release}"
     repo = manifest["producer"]["repo"]
-    print(f"Publishing release {args.release} as {tag}...")
 
-    # Create draft release.
-    r = _gh([
-        "release", "create", tag, "--repo", repo,
-        "--title", f"Infrastructure release {args.release}",
-        "--notes", f"Catalog release {args.release} (generation {manifest['generation']}). "
-                   f"See catalog/releases/{args.release}.json.",
-        "--draft",
-    ], check=False)
-    if r.returncode != 0:
-        print(f"ERROR: failed to create release {tag}: {r.stderr}", file=sys.stderr)
-        return 1
+    # Promotion path: when the release tag already exists (a candidate being
+    # promoted to stable), skip creation and uploads — the assets are already
+    # published and immutable — and only verify + advance the pointer. A
+    # pre-existing release is NEVER deleted on failure.
+    existing = _release_assets(repo, tag)
+    created_here = existing is None
+    if created_here:
+        print(f"Publishing release {args.release} as {tag}...")
+    else:
+        print(f"Release {tag} already exists; promoting it to the {args.channel} channel...")
 
     def _cleanup_release() -> None:
-        _gh(["release", "delete", tag, "--repo", repo, "--yes"], check=False)
+        if created_here:
+            _gh(["release", "delete", tag, "--repo", repo, "--yes"], check=False)
 
-    # Upload manifest.
-    r = _gh(["release", "upload", tag, "--repo", repo, str(manifest_path), "--clobber"], check=False)
-    if r.returncode != 0:
-        print(f"ERROR: failed to upload manifest: {r.stderr}", file=sys.stderr)
-        _cleanup_release()
-        return 1
-
-    # The stable pointer references the manifest as `release-manifest.json`
-    # (see _advance_stable_pointer). Upload the identical bytes under that
-    # name too — generations 3 and 6 shipped without it, 404ing every
-    # pointer-following consumer until it was added by hand (issue #51).
-    import shutil
-    import tempfile
-    with tempfile.TemporaryDirectory() as pointer_asset_dir:
-        pointer_asset = Path(pointer_asset_dir) / "release-manifest.json"
-        shutil.copyfile(manifest_path, pointer_asset)
-        r = _gh(
-            ["release", "upload", tag, "--repo", repo, str(pointer_asset), "--clobber"],
-            check=False,
-        )
+    if created_here:
+        # Create draft release.
+        r = _gh([
+            "release", "create", tag, "--repo", repo,
+            "--title", f"Infrastructure release {args.release}",
+            "--notes", f"Catalog release {args.release} (generation {manifest['generation']}). "
+                       f"See catalog/releases/{args.release}.json.",
+            "--draft",
+        ], check=False)
         if r.returncode != 0:
-            print(
-                f"ERROR: failed to upload release-manifest.json: {r.stderr}",
-                file=sys.stderr,
-            )
+            print(f"ERROR: failed to create release {tag}: {r.stderr}", file=sys.stderr)
+            return 1
+
+        # Upload manifest.
+        r = _gh(["release", "upload", tag, "--repo", repo, str(manifest_path), "--clobber"], check=False)
+        if r.returncode != 0:
+            print(f"ERROR: failed to upload manifest: {r.stderr}", file=sys.stderr)
             _cleanup_release()
             return 1
 
-    # Upload supply-chain files.
-    sc_dir = SC_DIR / args.release
-    if sc_dir.is_dir():
-        for f in sorted(sc_dir.iterdir()):
-            if not f.is_file():
-                continue
-            r = _gh(["release", "upload", tag, "--repo", repo, str(f), "--clobber"], check=False)
+        # The channel pointer references the manifest as
+        # `release-manifest.json` (see _advance_channel_pointer). Upload the
+        # identical bytes under that name too — generations 3 and 6 shipped
+        # without it, 404ing every pointer-following consumer until it was
+        # added by hand (issue #51).
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as pointer_asset_dir:
+            pointer_asset = Path(pointer_asset_dir) / "release-manifest.json"
+            shutil.copyfile(manifest_path, pointer_asset)
+            r = _gh(
+                ["release", "upload", tag, "--repo", repo, str(pointer_asset), "--clobber"],
+                check=False,
+            )
             if r.returncode != 0:
-                print(f"ERROR: failed to upload {f.name}: {r.stderr}", file=sys.stderr)
+                print(
+                    f"ERROR: failed to upload release-manifest.json: {r.stderr}",
+                    file=sys.stderr,
+                )
                 _cleanup_release()
                 return 1
+
+        # Upload supply-chain files.
+        sc_dir = SC_DIR / args.release
+        if sc_dir.is_dir():
+            for f in sorted(sc_dir.iterdir()):
+                if not f.is_file():
+                    continue
+                r = _gh(["release", "upload", tag, "--repo", repo, str(f), "--clobber"], check=False)
+                if r.returncode != 0:
+                    print(f"ERROR: failed to upload {f.name}: {r.stderr}", file=sys.stderr)
+                    _cleanup_release()
+                    return 1
 
     # Verify uploaded manifest + supply-chain assets match local digests.
     assets = _release_assets(repo, tag)
@@ -438,16 +471,16 @@ def main() -> int:
             _cleanup_release()
             return 1
 
-    # All uploaded assets verified. Now advance the stable pointer.
-    errors = _advance_stable_pointer(manifest, manifest_path)
+    # All uploaded assets verified. Now advance the channel pointer.
+    errors = _advance_channel_pointer(manifest, manifest_path, args.channel)
     if errors:
-        print("ERROR: failed to advance stable pointer:", file=sys.stderr)
+        print(f"ERROR: failed to advance {args.channel} pointer:", file=sys.stderr)
         for e in errors:
             print(f"  {e}", file=sys.stderr)
         _cleanup_release()
         return 1
 
-    # Publish (undraft) the release.
+    # Publish (undraft) the release (no-op when promoting an existing one).
     r = _gh(["release", "edit", tag, "--repo", repo, "--draft=false"], check=False)
     if r.returncode != 0:
         print(f"ERROR: failed to publish release: {r.stderr}", file=sys.stderr)
@@ -455,14 +488,14 @@ def main() -> int:
         # The release is verified and the pointer is correct; the only failure
         # is undrafting, which can be retried manually.
         print(
-            "  The stable pointer has already advanced. Manually undraft the "
-            f"release with: gh release edit {tag} --repo {repo} --draft=false",
+            f"  The {args.channel} pointer has already advanced. Manually undraft "
+            f"the release with: gh release edit {tag} --repo {repo} --draft=false",
             file=sys.stderr,
         )
         return 1
 
     print(f"OK: release {args.release} published as {tag}")
-    print(f"  Stable pointer advanced: {CHANNELS_DIR / 'stable.json'}")
+    print(f"  {args.channel} pointer advanced: {CHANNELS_DIR / f'{args.channel}.json'}")
     return 0
 
 

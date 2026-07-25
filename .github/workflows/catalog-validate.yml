@@ -58,12 +58,14 @@ jobs:
       - name: Validate all fixtures
         run: python scripts/validate_catalog.py --all-fixtures
 
-      - name: Validate committed release manifests + pointer
+      - name: Validate committed release manifests + pointers
         run: |
           for manifest in catalog/releases/*.json; do
             python scripts/validate_catalog.py "$manifest"
           done
-          python scripts/validate_catalog.py --schema channel catalog/channels/stable.json
+          for pointer in catalog/channels/*.json; do
+            python scripts/validate_catalog.py --schema channel "$pointer"
+          done
 
       - name: Verify supply-chain records
         run: python scripts/verify_supply_chain.py --all
