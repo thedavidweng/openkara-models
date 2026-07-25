@@ -33,6 +33,25 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
+MODEL_LOCK_PATH = ROOT / "models" / "source-lock.json"
+
+
+def update_model_lock(model: str, commit_sha: str) -> dict[str, Any]:
+    """Update the model source lock with a new weights revision commit SHA."""
+    lock = json.loads(MODEL_LOCK_PATH.read_text(encoding="utf-8"))
+    entry = lock.get("models", {}).get(model)
+    if entry is None:
+        raise SystemExit(f"ERROR: model {model!r} not in {MODEL_LOCK_PATH}")
+    old_commit = entry["weights"]["commit_sha"]
+    entry["weights"]["commit_sha"] = commit_sha
+    MODEL_LOCK_PATH.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "type": "model",
+        "model": model,
+        "old_commit": old_commit,
+        "new_commit": commit_sha,
+        "lock_path": str(MODEL_LOCK_PATH),
+    }
 
 
 def update_ort_lock(tag: str, commit_sha: str) -> dict[str, Any]:
@@ -127,12 +146,7 @@ def main() -> int:
     elif args.model:
         if not args.model_commit:
             parser.error("--model-commit is required with --model")
-        changes = {
-            "type": "model",
-            "model": args.model,
-            "old_commit": None,  # PR 3 does not define model lock format yet
-            "new_commit": args.model_commit,
-        }
+        changes = update_model_lock(args.model, args.model_commit)
     else:
         parser.error("provide --ort-tag or --model")
 

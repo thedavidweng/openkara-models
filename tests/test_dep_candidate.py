@@ -70,3 +70,41 @@ def test_cli_help() -> None:
     assert r.returncode == 0
     assert "--ort-tag" in r.stdout
     assert "--model" in r.stdout
+
+
+def test_update_model_lock_roundtrip(tmp_path) -> None:
+    """update_model_lock records old/new commits and rewrites the lock."""
+    import generate_dep_candidate as g
+    src = ROOT / "models" / "source-lock.json"
+    work = tmp_path / "source-lock.json"
+    work.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    original = g.MODEL_LOCK_PATH
+    g.MODEL_LOCK_PATH = work
+    try:
+        changes = g.update_model_lock("htdemucs", "a" * 40)
+        assert changes["type"] == "model"
+        assert changes["new_commit"] == "a" * 40
+        assert changes["old_commit"] and changes["old_commit"] != changes["new_commit"]
+        updated = json.loads(work.read_text(encoding="utf-8"))
+        assert updated["models"]["htdemucs"]["weights"]["commit_sha"] == "a" * 40
+        # The other model entry is untouched.
+        orig = json.loads(src.read_text(encoding="utf-8"))
+        assert (updated["models"]["htdemucs_ft"]["weights"]["commit_sha"]
+                == orig["models"]["htdemucs_ft"]["weights"]["commit_sha"])
+    finally:
+        g.MODEL_LOCK_PATH = original
+
+
+def test_update_model_lock_unknown_model(tmp_path) -> None:
+    import generate_dep_candidate as g
+    src = ROOT / "models" / "source-lock.json"
+    work = tmp_path / "source-lock.json"
+    work.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    original = g.MODEL_LOCK_PATH
+    g.MODEL_LOCK_PATH = work
+    try:
+        import pytest
+        with pytest.raises(SystemExit):
+            g.update_model_lock("nonexistent", "a" * 40)
+    finally:
+        g.MODEL_LOCK_PATH = original

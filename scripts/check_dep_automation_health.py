@@ -71,6 +71,35 @@ def check_ort_lock_stale(token: str | None = None) -> dict[str, Any]:
     }
 
 
+def check_model_lock_stale(token: str | None = None) -> dict[str, Any]:
+    """Check if any model weights lock entry is stale (behind the latest
+    HuggingFace revision)."""
+    import detect_model_weight_revision
+
+    lock_path = ROOT / "models" / "source-lock.json"
+    if not lock_path.is_file():
+        return {"status": "api_error", "error": f"model lock missing: {lock_path}"}
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+
+    hf_token = os.environ.get("HF_TOKEN")
+    per_model: dict[str, Any] = {}
+    stale = False
+    for name, entry in lock.get("models", {}).items():
+        try:
+            latest = detect_model_weight_revision.detect_latest_revision(name, hf_token)
+        except (RuntimeError, ValueError) as e:
+            return {"status": "api_error", "error": f"{name}: {e}"}
+        lock_sha = entry.get("weights", {}).get("commit_sha")
+        update_available = lock_sha != latest["commit_sha"]
+        stale = stale or update_available
+        per_model[name] = {
+            "lock_commit": lock_sha,
+            "latest_commit": latest["commit_sha"],
+            "update_available": update_available,
+        }
+    return {"status": "stale" if stale else "current", "models": per_model}
+
+
 def check_workflow_recency(token: str | None = None, max_days: int = 14) -> dict[str, Any]:
     """Check if the dep-detection workflow has run recently."""
     if not token:
@@ -135,11 +164,13 @@ def main() -> int:
     token = os.environ.get("GITHUB_TOKEN")
 
     ort_check = check_ort_lock_stale(token)
+    model_check = check_model_lock_stale(token)
     workflow_check = check_workflow_recency(token, args.max_stale_days)
     duplicate_check = check_duplicate_candidates(token)
 
     results = {
         "ort_lock": ort_check,
+        "model_lock": model_check,
         "workflow_recency": workflow_check,
         "duplicate_candidates": duplicate_check,
     }
@@ -148,6 +179,7 @@ def main() -> int:
         print(json.dumps(results, indent=2))
     else:
         print(f"ORT lock: {ort_check['status']} (lock={ort_check.get('lock_tag')}, latest={ort_check.get('latest_tag')})")
+        print(f"Model lock: {model_check['status']}")
         print(f"Workflow recency: {workflow_check['status']} (age={workflow_check.get('age_days')}d)")
         print(f"Duplicate candidates: {duplicate_check['status']}")
 
@@ -159,6 +191,10 @@ def main() -> int:
     if ort_check["status"] == "stale":
         if not args.json:
             print("STALE: ORT lock is behind latest stable release", file=sys.stderr)
+        return 1
+    if model_check["status"] == "stale":
+        if not args.json:
+            print("STALE: model lock is behind the latest HuggingFace revision", file=sys.stderr)
         return 1
     if workflow_check["status"] == "stale":
         if not args.json:

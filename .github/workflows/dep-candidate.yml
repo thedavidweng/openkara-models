@@ -80,6 +80,9 @@ jobs:
       - name: Validate updated lock
         if: inputs.ort_tag != ''
         run: python scripts/validate_source_lock.py
+      - name: Validate updated model lock
+        if: inputs.model != ''
+        run: python scripts/validate_model_source_lock.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: candidate-summary
@@ -87,6 +90,7 @@ jobs:
             candidate-summary.json
             candidate-summary.md
             ort/source-lock.json
+            models/source-lock.json
 
   # Build all 5 runtime targets (only for ORT updates).
   build-runtimes:
@@ -396,12 +400,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Create or switch to the candidate branch.
           git checkout -b "$BRANCH_NAME" 2>/dev/null || git checkout "$BRANCH_NAME"
-          # Stage only the lock file for ORT updates; model-weight updates have
-          # no lock changes yet (the conversion workflow handles those).
+          # Stage only the relevant lock file: ort/source-lock.json for ORT
+          # updates, models/source-lock.json for model-weight updates.
           # NEVER stage catalog/channels/stable.json — the stable pointer is
           # not advanced by candidate workflows.
           if [ "$IS_ORT_UPDATE" = "true" ]; then
             git add ort/source-lock.json
+          else
+            git add models/source-lock.json
           fi
           # Explicitly verify the stable pointer is not staged.
           if git diff --cached --name-only | grep -q "^catalog/channels/stable.json$"; then

@@ -4,6 +4,16 @@ on:
   schedule:
     - cron: "0 9 * * 1"  # Every Monday at 09:00 UTC
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "models/source-lock.json"
+      - "scripts/detect_model_weight_revision.py"
+      - "scripts/detect_ort_release.py"
+      - "scripts/validate_model_source_lock.py"
+      - "scripts/generate_dep_candidate.py"
+      - "tests/test_dep_detection.py"
+      - "tests/test_dep_candidate.py"
+      - ".github/workflows/dep-detection.yml"
 
 permissions:
   contents: write
@@ -11,7 +21,31 @@ permissions:
   issues: write
 
 jobs:
+  # PR-time validation of the model source lock and detection/candidate
+  # scripts. Detection jobs poll upstream APIs and only run on schedule
+  # or manual dispatch.
+  validate-locks:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Validate model source lock
+        run: python scripts/validate_model_source_lock.py
+      - name: Detection + candidate tests
+        run: |
+          pip install "pytest>=8.0"
+          python -m pytest tests/test_dep_detection.py tests/test_dep_candidate.py -q
+      - name: Syntax check detection scripts
+        run: python -m compileall -q scripts/detect_model_weight_revision.py scripts/detect_ort_release.py scripts/validate_model_source_lock.py scripts/generate_dep_candidate.py
+
   detect-ort:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -46,6 +80,7 @@ jobs:
           python -m pytest tests/test_dep_detection.py -q
 
   detect-model-weights:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -57,5 +92,18 @@ jobs:
         with:
           python-version: "3.11"
       - name: Detect ${{ matrix.model }} weight revision
+        id: detect
         run: |
-          python scripts/detect_model_weight_revision.py --model ${{ matrix.model }} --json || true
+          set +e
+          python scripts/detect_model_weight_revision.py --model ${{ matrix.model }} --lock models/source-lock.json --json > /tmp/model-detection.json
+          EXIT_CODE=$?
+          cat /tmp/model-detection.json
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "update_available=true" >> "$GITHUB_OUTPUT"
+            echo "latest_commit=$(python3 -c "import json; print(json.load(open('/tmp/model-detection.json'))['latest']['commit_sha'])")" >> "$GITHUB_OUTPUT"
+          elif [ $EXIT_CODE -eq 1 ]; then
+            echo "update_available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "API failure or missing lock (exit $EXIT_CODE)"
+            exit 1
+          fi
