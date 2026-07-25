@@ -55,25 +55,37 @@ class GeneratedCatalogTests(unittest.TestCase):
             self.assertIsInstance(entry["size"], int)
             self.assertEqual(len(entry["sha256"]), 64)
 
-    def test_latest_json_uses_authoritative_v2_1_0_digests(self):
-        """The catalog must carry the actual v2.1.0 asset digests from the
-        release sha256 sidecars, not the stale README pins."""
+    @staticmethod
+    def _stable_four_stem_models() -> dict[str, dict]:
+        """variant -> the stable manifest's selectable four-stem artifact
+        (the same rule _build_latest_adapter applies: four-stem stem profile,
+        not deprecated)."""
+        pointer = _load(POINTER)
+        manifest = _load(ROOT_DIR / "catalog" / "releases" / f"{pointer['release_id']}.json")
+        selected: dict[str, dict] = {}
+        for model in manifest["artifacts"]["models"]:
+            if model.get("model", {}).get("stem_profile") != "four-stem":
+                continue
+            if (model.get("deprecation") or {}).get("deprecated"):
+                continue
+            selected[model["variant"]] = model
+        return selected
+
+    def test_latest_json_uses_stable_four_stem_digests(self):
+        """latest.json must carry the digests of the stable generation's
+        selectable four-stem artifacts (never a karaoke projection, never a
+        deprecated artifact shadowing its replacement)."""
         adapter = _load(LATEST)
-        self.assertEqual(
-            adapter["htdemucs"]["sha256"],
-            "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9",
-        )
-        self.assertEqual(
-            adapter["htdemucs_ft"]["sha256"],
-            "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b",
-        )
+        selected = self._stable_four_stem_models()
+        self.assertEqual(set(adapter), set(selected))
+        for variant, model in selected.items():
+            self.assertEqual(adapter[variant]["sha256"], model["archive_digest"])
 
     def test_manifest_and_latest_digests_agree(self):
-        manifest = _load(RELEASE)
         adapter = _load(LATEST)
-        for model in manifest["artifacts"]["models"]:
-            self.assertEqual(adapter[model["variant"]]["sha256"], model["archive_digest"])
-            self.assertEqual(adapter[model["variant"]]["size"], model["byte_size"])
+        for variant, model in self._stable_four_stem_models().items():
+            self.assertEqual(adapter[variant]["sha256"], model["archive_digest"])
+            self.assertEqual(adapter[variant]["size"], model["byte_size"])
 
     def test_pointer_references_manifest_digest(self):
         import hashlib
@@ -227,7 +239,20 @@ class FreshnessTests(unittest.TestCase):
                 (tdp / "cat" / "releases" / "2026-07-20-001.json").read_bytes(),
                 RELEASE.read_bytes(),
             )
-            self.assertEqual((tdp / "latest.json").read_bytes(), LATEST.read_bytes())
+            # The adapter regenerated from THIS spec must be self-consistent
+            # with THIS spec's manifest. (The committed latest.json tracks the
+            # newest generation — CI's regenerate-all-specs loop covers its
+            # freshness — so it is not compared against this older spec.)
+            tmp_manifest = _load(tdp / "cat" / "releases" / "2026-07-20-001.json")
+            tmp_adapter = _load(tdp / "latest.json")
+            for model in tmp_manifest["artifacts"]["models"]:
+                if model.get("model", {}).get("stem_profile") != "four-stem":
+                    continue
+                if (model.get("deprecation") or {}).get("deprecated"):
+                    continue
+                self.assertEqual(
+                    tmp_adapter[model["variant"]]["sha256"], model["archive_digest"]
+                )
 
     def test_generator_does_not_advance_stable_pointer(self):
         """The generator must NOT write catalog/channels/stable.json. The stable
