@@ -92,6 +92,44 @@ class LockedFlagTests(unittest.TestCase):
         mock_verify.assert_not_called()
 
 
+class ReducedBuildArgTests(unittest.TestCase):
+    """The reduced-operator publish pipeline (ort-publish.yml) builds every
+    target with --reduced, so the argument assembly for that flag must select
+    a dedicated <target>-reduced build dir and propagate reduced=True into
+    _build_target (which records ops_config_sha256 + names the -reduced
+    archive)."""
+
+    def test_reduced_flag_uses_reduced_build_dir_and_propagates(self):
+        captured: dict[str, object] = {}
+
+        def fake_build_target(lock, target, source_dir, build_dir, *, reduced=False):
+            captured["build_dir"] = str(build_dir)
+            captured["reduced"] = reduced
+            return {"reduced_build": reduced}
+
+        with mock.patch.object(sys, "argv", [
+            "build_runtime.py", "--target", "x86_64-unknown-linux-gnu",
+            "--reduced", "--skip-clone",
+        ]):
+            with mock.patch.object(br, "_load_lock", return_value={
+                "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
+                "submodules": {}, "targets": {"x86_64-unknown-linux-gnu": {}},
+                "reduced_build": {"config_path": "ort/required-operators.config"},
+            }):
+                with mock.patch.object(Path, "exists", return_value=True):
+                    with mock.patch.object(br, "_build_target", side_effect=fake_build_target):
+                        with mock.patch.object(br, "_package_target", return_value=Path("/tmp/x-reduced.tar.gz")):
+                            with mock.patch.object(br, "_sha256_file", return_value=(0, "0" * 64)):
+                                with redirect_stdout(io.StringIO()):
+                                    code = br.main()
+        self.assertEqual(code, 0)
+        self.assertIs(captured["reduced"], True)
+        self.assertTrue(
+            str(captured["build_dir"]).endswith("x86_64-unknown-linux-gnu-reduced"),
+            captured["build_dir"],
+        )
+
+
 class ReproducibilityTests(unittest.TestCase):
     def test_build_metadata_has_no_build_host(self):
         """_build_target must not include build_host in the returned metadata."""
