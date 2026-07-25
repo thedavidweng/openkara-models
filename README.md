@@ -17,9 +17,8 @@ catalog, not in hardcoded constants:
 
 - `catalog/releases/<release-id>.json` — immutable release manifest.
 - `catalog/channels/stable.json` — stable-channel pointer.
-- `latest.json` — temporary migration adapter for OpenKara PR #165, generated
-  from the stable pointer. Deleted in issue #18 PR 4 after OpenKara #167
-  switches to the versioned schema.
+- `catalog/channels/candidate.json` — pre-promotion channel pointer
+  (validated cross-target before the stable switch).
 
 See **[docs/catalog-contract.md](docs/catalog-contract.md)** for the contract
 and `scripts/validate_catalog.py` / `scripts/generate_catalog_release.py` for

@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - "catalog/**"
-      - "latest.json"
       - "scripts/catalog_model.py"
       - "scripts/validate_catalog.py"
       - "scripts/generate_catalog_fixtures.py"
@@ -23,7 +22,6 @@ on:
     branches: [main]
     paths:
       - "catalog/**"
-      - "latest.json"
       - "scripts/catalog_model.py"
       - "scripts/validate_catalog.py"
       - "scripts/generate_catalog_fixtures.py"
@@ -91,7 +89,7 @@ jobs:
           for spec in catalog/specs/*.spec.json; do
             python scripts/generate_catalog_release.py --spec "$spec"
           done
-          git diff --exit-code -- catalog/releases latest.json
+          git diff --exit-code -- catalog/releases
 
       - name: Publication dry-run (verifies asset URLs + SHA-256)
         env:

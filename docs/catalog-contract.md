@@ -166,38 +166,13 @@ half-precision, so half the weight bytes are zero mantissas.)
 | `model-derived-v*` | deterministic derived model assets (dedup, projections) |
 | `ort-v*` | ONNX Runtime archives for the five targets |
 
-## `latest.json` migration adapter
+## `latest.json` migration adapter (deleted)
 
-OpenKara PR #165 currently fetches an ad hoc `latest.json` of the form:
-
-```json
-{
-  "htdemucs":     { "tag": "...", "url": "...", "sha256": "...", "size": 123 },
-  "htdemucs_ft":  { "tag": "...", "url": "...", "sha256": "...", "size": 123 }
-}
-```
-
-Issue #18 PR 2 generates this file from the stable pointer as a **migration
-alias only**. It is deleted once OpenKara #167 switches to the versioned
-schema. It must not grow new fields or become a second contract.
-
-**Deletion procedure (blocked on OpenKara #167):**
-1. OpenKara #167 merges — the app fetches `catalog/channels/stable.json` and
-   `catalog/releases/<release-id>.json` instead of `latest.json`.
-2. Remove `latest.json` from the repo root.
-3. Remove `_build_latest_adapter` and the `--latest-json-path` option from
-   `scripts/generate_catalog_release.py`.
-4. Remove the `latest.json` freshness guard from
-   `.github/workflows/catalog-validate.yml`.
-
-Step 5 of the original procedure (remove the stale README pin table and Rust
-`ModelDescriptor` constant block) is **already complete** — it was done in
-PR 4 commit `42fe5a3` ahead of the OpenKara #167 switch, since the catalog is
-the single authority and the duplicated constants were incorrect (the HTDEMUCS
-pin carried the v2.0.1 digest while claiming v2.1.0).
-
-Until OpenKara #167 merges, `latest.json` remains generated from the stable
-pointer and verified by CI on every PR.
+The temporary `latest.json` alias for OpenKara PR #165 was deleted after
+OpenKara #167/#179 switched every consumer to the stable pointer + immutable
+manifest (the documented deletion procedure in this section's earlier
+revision). No ad hoc distribution files remain: channel pointers and release
+manifests are the only contract surfaces.
 
 ## Atomic publication
 

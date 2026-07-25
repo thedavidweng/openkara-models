@@ -8,7 +8,6 @@ and writes three artifacts:
 1. ``catalog/releases/<release-id>.json`` — the immutable manifest.
 2. ``catalog/channels/stable.json`` — the stable-channel pointer, advanced only
    after the manifest validates.
-3. ``latest.json`` — a temporary migration adapter (issue #18 PR 4 deletes it)
    carrying ``{ "<variant>": {tag, url, sha256, size} }`` for OpenKara PR #165.
 
 Generation is deterministic: ``created_at`` comes from the spec (never wall
@@ -30,7 +29,7 @@ Usage::
 CI freshness guard::
 
     python scripts/generate_catalog_release.py --spec catalog/specs/<id>.spec.json
-    git diff --exit-code -- catalog/releases catalog/channels latest.json
+    git diff --exit-code -- catalog/releases catalog/channels
 """
 
 from __future__ import annotations
@@ -55,7 +54,6 @@ from validate_catalog import validate_document  # noqa: E402
 CATALOG_DIR = ROOT / "catalog"
 RELEASES_DIR = CATALOG_DIR / "releases"
 CHANNELS_DIR = CATALOG_DIR / "channels"
-LATEST_JSON_PATH = ROOT / "latest.json"
 
 _GH_RELEASE_TAG_RE = re.compile(r"/releases/download/([A-Za-z0-9_.-]+)/")
 
@@ -185,38 +183,6 @@ def _build_pointer(
     }
 
 
-def _build_latest_adapter(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """{ "<variant>": {tag, url, sha256, size} } for every model artifact.
-
-    Matches the shape OpenKara PR #165 fetches from ``latest.json``. Deleted in
-    issue #18 PR 4 after OpenKara #167 switches to the versioned schema.
-    """
-    adapter: dict[str, dict[str, Any]] = {}
-    for model in manifest.get("artifacts", {}).get("models", []):
-        variant = model.get("variant")
-        if not variant:
-            continue
-        # The adapter serves OpenKara PR #165's four-stem waveform consumers:
-        # projections (karaoke_2stem) are never selectable here, a deprecated
-        # artifact must not shadow its replacement, and spectral-core
-        # artifacts (issue #23) predate none of its consumers — a legacy
-        # client cannot run them.
-        if model.get("model", {}).get("stem_profile") != "four-stem":
-            continue
-        if model.get("model", {}).get("tensor_interface") != "waveform":
-            continue
-        if (model.get("deprecation") or {}).get("deprecated"):
-            continue
-        url = model.get("download_url", "")
-        adapter[variant] = {
-            "tag": _release_tag_from_url(url),
-            "url": url,
-            "sha256": model.get("archive_digest"),
-            "size": model.get("byte_size"),
-        }
-    return adapter
-
-
 # --------------------------------------------------------------------------- #
 # Existing-release guards
 # --------------------------------------------------------------------------- #
@@ -306,7 +272,7 @@ def _guard_against_contradictory_releases(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate an immutable catalog release manifest + stable pointer + latest.json."
+        description="Generate an immutable catalog release manifest + channel pointer shape."
     )
     parser.add_argument("--spec", type=Path, required=True, help="Release spec JSON path.")
     parser.add_argument(
@@ -328,12 +294,6 @@ def main() -> int:
         type=Path,
         default=CATALOG_DIR,
         help="Catalog root (default: repo catalog/). Tests point this at a temp dir.",
-    )
-    parser.add_argument(
-        "--latest-json-path",
-        type=Path,
-        default=LATEST_JSON_PATH,
-        help="latest.json adapter path (default: repo root latest.json).",
     )
     args = parser.parse_args()
 
@@ -409,14 +369,9 @@ def main() -> int:
         release_path.unlink(missing_ok=True)
         return 1
 
-    # latest.json migration adapter.
-    adapter = _build_latest_adapter(manifest)
-    _dump_json(args.latest_json_path, adapter)
-
     print(f"OK: release {release_id} (generation {manifest['generation']})")
     print(f"  manifest:  {release_path} ({manifest_size} bytes, sha256 {manifest_sha[:12]}...)")
     print(f"  pointer:   NOT advanced (use scripts/publish_catalog_release.py --execute)")
-    print(f"  adapter:   {args.latest_json_path} ({len(adapter)} variants)")
     return 0
 
 
