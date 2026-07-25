@@ -194,3 +194,70 @@ def test_cli_end_to_end(tmp_path: Path) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# ---------------------------------------------------------------------------
+# dual-output derivation (--keep-four-stem)
+# ---------------------------------------------------------------------------
+
+def test_dual_output_preserves_four_stem_and_adds_projection() -> None:
+    import onnxruntime as ort
+    src = _tiny_four_stem_model()
+    src_out = _run(src, AUDIO)
+    dual = k2s.derive_karaoke_2stem(_tiny_four_stem_model(), "f" * 64, keep_four_stem=True)
+    onnx.checker.check_model(dual)
+    sess = ort.InferenceSession(dual.SerializeToString(), providers=["CPUExecutionProvider"])
+    outs = sess.run(None, {"audio": AUDIO})
+    assert len(outs) == 2
+    np.testing.assert_array_equal(outs[0], src_out)  # four-stem bit-exact
+    np.testing.assert_array_equal(outs[1][:, 0], src_out[:, 3])  # vocals bit-exact
+    acc = src_out[:, 0] + src_out[:, 1] + src_out[:, 2]
+    np.testing.assert_allclose(outs[1][:, 1], acc, atol=1e-6)
+
+
+def test_dual_output_four_stem_stays_first_output() -> None:
+    """Existing consumers fetch output[0]; the four-stem tensor must stay
+    first so a dual artifact is a drop-in replacement."""
+    dual = k2s.derive_karaoke_2stem(_tiny_four_stem_model(), "f" * 64, keep_four_stem=True)
+    assert dual.graph.output[0].name == "stems"
+    assert dual.graph.output[1].name == f"{k2s.PREFIX}stems"
+
+
+def test_dual_output_four_stem_fetch_skips_projection_nodes() -> None:
+    """Requesting only the four-stem output must not execute the projection
+    (ORT runs only ancestors of the requested fetches)."""
+    import onnxruntime as ort
+    dual = k2s.derive_karaoke_2stem(_tiny_four_stem_model(), "f" * 64, keep_four_stem=True)
+    sess = ort.InferenceSession(dual.SerializeToString(), providers=["CPUExecutionProvider"])
+    out = sess.run(["stems"], {"audio": AUDIO})
+    assert len(out) == 1 and out[0].shape == (1, 4, 2, FRAMES)
+
+
+def test_dual_output_metadata() -> None:
+    dual = k2s.derive_karaoke_2stem(_tiny_four_stem_model(), "b" * 64, keep_four_stem=True)
+    meta = {p.key: p.value for p in dual.metadata_props}
+    assert meta["openkara.model_cache_key"] == "tiny-test-dual"
+    assert meta["openkara.stem_profile"] == "dual-output"
+    assert "outputs[0]=" in meta["openkara.output_semantics"]
+    assert "vocals/accompaniment" in meta["openkara.output_semantics"]
+
+
+def test_dual_output_is_deterministic() -> None:
+    a = k2s.derive_karaoke_2stem(_tiny_four_stem_model(), "b" * 64, keep_four_stem=True)
+    b = k2s.derive_karaoke_2stem(_tiny_four_stem_model(), "b" * 64, keep_four_stem=True)
+    assert a.SerializeToString() == b.SerializeToString()
+
+
+def test_dual_output_file_size_overhead_is_negligible(tmp_path: Path) -> None:
+    """The dual artifact must cost no more than a few KB over the source —
+    one file serving both modes is the point."""
+    src_path = tmp_path / "src.onnx"
+    dual_path = tmp_path / "dual.onnx"
+    onnx.save(_tiny_four_stem_model(), str(src_path))
+    r = subprocess.run(
+        [sys.executable, str(SCRIPTS / "derive_karaoke_2stem.py"),
+         "--input", str(src_path), "--output", str(dual_path), "--keep-four-stem"],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert dual_path.stat().st_size - src_path.stat().st_size < 4096
