@@ -121,7 +121,7 @@ def write_ort_config(
         vers = sorted(union_opsets.get(domain, set()))
         opset_str = ",".join(str(v) for v in vers) if vers else ""
         lines.append(f"{domain};{opset_str};{','.join(ops)}")
-    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def _sha256_file(path: Path) -> tuple[int, str]:
@@ -235,6 +235,7 @@ def generate(model_paths: list[Path], output_stem: Path) -> dict[str, Any]:
     sidecar_path.write_text(
         json.dumps(sidecar, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     print(f"  config:  {config_path} ({len(union_serializable)} domain(s))")
     print(f"  sidecar: {sidecar_path}")

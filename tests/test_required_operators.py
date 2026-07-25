@@ -160,3 +160,17 @@ def test_verify_runtime_package_parses_reduced_name() -> None:
     )
     assert target2 == "x86_64-unknown-linux-gnu"
     assert is_reduced2 is False
+
+
+def test_write_ort_config_produces_lf_only_bytes(tmp_path: Path) -> None:
+    """The reduced-operator config is hashed (ops_config_sha256) on every
+    platform and re-verified against a Linux-regenerated copy at publish
+    time, so its bytes must be platform-independent: LF only."""
+    sys.path.insert(0, str(SCRIPTS))
+    import generate_required_operators as gen
+
+    config_path = tmp_path / "required-operators.config"
+    gen.write_ort_config({"ai.onnx": {"Add", "Mul"}}, {"ai.onnx": {17}}, config_path)
+    raw = config_path.read_bytes()
+    assert b"\r" not in raw, "config must be LF-only on every platform"
+    assert raw.endswith(b"\n")
