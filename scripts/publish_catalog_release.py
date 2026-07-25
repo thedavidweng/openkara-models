@@ -350,6 +350,27 @@ def main() -> int:
         _cleanup_release()
         return 1
 
+    # The stable pointer references the manifest as `release-manifest.json`
+    # (see _advance_stable_pointer). Upload the identical bytes under that
+    # name too — generations 3 and 6 shipped without it, 404ing every
+    # pointer-following consumer until it was added by hand (issue #51).
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as pointer_asset_dir:
+        pointer_asset = Path(pointer_asset_dir) / "release-manifest.json"
+        shutil.copyfile(manifest_path, pointer_asset)
+        r = _gh(
+            ["release", "upload", tag, "--repo", repo, str(pointer_asset), "--clobber"],
+            check=False,
+        )
+        if r.returncode != 0:
+            print(
+                f"ERROR: failed to upload release-manifest.json: {r.stderr}",
+                file=sys.stderr,
+            )
+            _cleanup_release()
+            return 1
+
     # Upload supply-chain files.
     sc_dir = SC_DIR / args.release
     if sc_dir.is_dir():
@@ -370,9 +391,16 @@ def main() -> int:
         return 1
 
     expected_uploads: list[tuple[str, str, int]] = []  # (name, sha256, size)
+    manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     expected_uploads.append((
         manifest_path.name,
-        hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        manifest_sha256,
+        manifest_path.stat().st_size,
+    ))
+    # The pointer-referenced asset name must carry identical bytes.
+    expected_uploads.append((
+        "release-manifest.json",
+        manifest_sha256,
         manifest_path.stat().st_size,
     ))
     sc = manifest.get("supply_chain", {})
