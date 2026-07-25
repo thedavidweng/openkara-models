@@ -197,9 +197,13 @@ def _build_latest_adapter(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]
         if not variant:
             continue
         # The adapter serves OpenKara PR #165's four-stem waveform consumers:
-        # projections (karaoke_2stem) are never selectable here, and a
-        # deprecated artifact must not shadow its replacement.
+        # projections (karaoke_2stem) are never selectable here, a deprecated
+        # artifact must not shadow its replacement, and spectral-core
+        # artifacts (issue #23) predate none of its consumers — a legacy
+        # client cannot run them.
         if model.get("model", {}).get("stem_profile") != "four-stem":
+            continue
+        if model.get("model", {}).get("tensor_interface") != "waveform":
             continue
         if (model.get("deprecation") or {}).get("deprecated"):
             continue

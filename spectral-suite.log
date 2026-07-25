@@ -1,0 +1,40 @@
+Running 9 pr-tier fixture(s) through htdemucs + htdemucs.spectral.published.onnx...
+  synth-silence-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=0.0
+  synth-noise-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=3.4690287448012215e-11
+  synth-sine-sweep-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=2.6276203806594686e-08
+  synth-multitone-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=4.816860538928445e-13
+  synth-impulse-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=0.00010302034206710075
+  synth-chunk-boundary-687960: (2, 687960) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=5.902691425324354e-12
+  synth-clipping-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=6.447519778738864e-10
+  synth-low-level-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=3.4497564005691127e-13
+  synth-channel-imbalance-343980: (2, 343980) ... Unwrapped BagOfModels → HTDemucs
+Loaded htdemucs model: 41,984,456 parameters
+Model segment: 39/5s = 343980 frames
+mse=3.127890059226485e-11
+
+report: /tmp/okm/spectral-quality-report.json
+OK

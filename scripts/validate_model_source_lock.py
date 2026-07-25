@@ -41,6 +41,14 @@ OUTPUT_CONTRACT_REQUIRED_FIELDS = {
     "stems", "precision", "tensor_interface",
 }
 
+# The spectral-core export path (issue #23) is a second conversion authority
+# per model: same pinned weights and demucs package, different exporter and
+# tensor boundary. It must declare the contract version it implements.
+SPECTRAL_CORE_REQUIRED_FIELDS = CONVERSION_REQUIRED_FIELDS | {
+    "contract", "artifact_id", "output_contract",
+}
+SPECTRAL_CONTRACT_VERSION = "openkara.spectral-contract/v1"
+
 # Catalog-owned artifact identity fields that must NOT be duplicated in the
 # model lock (one dependency, one authority — issue #20).
 FORBIDDEN_CATALOG_FIELDS = {"download_url", "url", "sha256", "byte_size", "size"}
@@ -107,6 +115,33 @@ def validate_model_lock(lock: dict[str, Any]) -> list[str]:
         missing_contract = OUTPUT_CONTRACT_REQUIRED_FIELDS - set(contract.keys())
         if missing_contract:
             errors.append(f"{prefix}.output_contract: missing fields: {sorted(missing_contract)}")
+
+        spectral = entry.get("spectral_core", {})
+        if not spectral:
+            errors.append(f"{prefix}.spectral_core missing (issue #23 export authority)")
+        else:
+            missing_spectral = SPECTRAL_CORE_REQUIRED_FIELDS - set(spectral.keys())
+            if missing_spectral:
+                errors.append(
+                    f"{prefix}.spectral_core: missing fields: {sorted(missing_spectral)}"
+                )
+            if spectral.get("contract") != SPECTRAL_CONTRACT_VERSION:
+                errors.append(
+                    f"{prefix}.spectral_core.contract must be "
+                    f"{SPECTRAL_CONTRACT_VERSION}, got {spectral.get('contract')!r}"
+                )
+            sc_contract = spectral.get("output_contract", {})
+            missing_sc = OUTPUT_CONTRACT_REQUIRED_FIELDS - set(sc_contract.keys())
+            if missing_sc:
+                errors.append(
+                    f"{prefix}.spectral_core.output_contract: missing fields: "
+                    f"{sorted(missing_sc)}"
+                )
+            if sc_contract.get("tensor_interface") != "spectral-core":
+                errors.append(
+                    f"{prefix}.spectral_core.output_contract.tensor_interface "
+                    "must be 'spectral-core'"
+                )
 
         def _reject_catalog_fields(obj: Any, path: str) -> None:
             if isinstance(obj, dict):

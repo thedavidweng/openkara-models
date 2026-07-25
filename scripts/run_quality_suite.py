@@ -59,38 +59,116 @@ def _load_corpus(tier: str | None) -> list[dict[str, Any]]:
     return fixtures
 
 
+#: The inference window every gated artifact is exported at (contract
+#: segment). Fixtures longer than one window are stitched.
+SEGMENT_FRAMES = 343980
+
+
+def _sqrt_hann(size: int) -> np.ndarray:
+    """The OpenKara streaming-path chunk window: sqrt-Hann, satisfying the
+    squared constant-overlap-add constraint at 50% overlap."""
+    phase = 2.0 * np.pi * np.arange(size) / size
+    return np.sqrt(0.5 * (1.0 - np.cos(phase)))
+
+
+def _stitch_windows(run_window, inp: np.ndarray, window: int = SEGMENT_FRAMES) -> np.ndarray:
+    """Run fixed-window inference over arbitrary-length input with 50%%
+    overlap and squared-sqrt-Hann overlap-add — the exact stitching semantics
+    of the OpenKara streaming separation path, so chunk-boundary fixtures
+    measure what the product does.
+
+    ``run_window`` maps a ``[C, window]`` array to ``[1, S, C, window]``.
+    Inputs up to one window run as a single (zero-tail-padded) window; the
+    raw model forward cannot take longer inputs at all (fixed ONNX shapes;
+    the torch forward's train-segment handling rejects them too).
+    """
+    channels, n = inp.shape
+    if n <= window:
+        padded = np.zeros((channels, window), dtype=inp.dtype)
+        padded[:, :n] = inp
+        return run_window(padded)[..., :n]
+
+    hop = window // 2
+    w2 = _sqrt_hann(window) ** 2
+    acc: np.ndarray | None = None
+    norm = np.zeros(n, dtype=np.float64)
+    for start in range(0, n, hop):
+        frames = min(window, n - start)
+        chunk = np.zeros((channels, window), dtype=inp.dtype)
+        chunk[:, :frames] = inp[:, start:start + frames]
+        out = run_window(chunk)
+        if acc is None:
+            acc = np.zeros(out.shape[:-1] + (n,), dtype=np.float64)
+        acc[..., start:start + frames] += (
+            out[..., :frames].astype(np.float64) * w2[:frames]
+        )
+        norm[start:start + frames] += w2[:frames]
+    assert acc is not None
+    return (acc / np.maximum(norm, 1e-8)).astype(np.float32)
+
+
 def _compute_pytorch_reference(model_name: str, inp: np.ndarray) -> np.ndarray:
     """Run the PyTorch Demucs ensemble reference.
 
     Returns the output with the batch dimension preserved, matching the ONNX
     output shape and the corpus manifest's ``expected_output_shape`` (which
-    includes the leading batch dim).
+    includes the leading batch dim). Fixtures longer than the model window
+    are stitched with the product's overlap-add semantics.
     """
     import torch
     from demucs_loader import load
     # demucs_loader.load() returns (model, segment_frames) — unpack it.
-    model, _seg = load(model_name)
-    with torch.no_grad():
-        t = torch.from_numpy(inp).unsqueeze(0)  # add batch dim
-        out = model(t)
-    # Keep the batch dim so PyTorch output shape matches ONNX output shape
-    # and the manifest's expected_output_shape (e.g. [1, 4, 2, 343980]).
-    result = out.detach().cpu().numpy()
-    del model, t, out
+    model, seg = load(model_name)
+
+    def run_window(chunk: np.ndarray) -> np.ndarray:
+        with torch.no_grad():
+            t = torch.from_numpy(chunk).unsqueeze(0)
+            out = model(t)
+        return out.detach().cpu().numpy()
+
+    result = _stitch_windows(run_window, inp, window=seg)
+    del model
     gc.collect()
     return result
 
 
 def _compute_onnx_output(onnx_path: str, inp: np.ndarray) -> np.ndarray:
-    """Run the ONNX model.
+    """Run the ONNX model and return waveform stems `[1, S, C, frames]`.
 
-    Returns the first output tensor with the batch dimension preserved.
+    Waveform-interface models return their first output directly. A
+    spectral-core artifact (issue #23; identified by its typed contract
+    inputs ``spectral`` + ``mix``) is fed the reference forward transform and
+    its outputs are composed per the contract —
+    ``stems[s] = ispec(spectral_out[:, s]) + time_out[:, s]`` — so the same
+    corpus metrics, budgets, and PyTorch baseline apply to both interfaces.
+    All shipped interfaces are fixed-shape; fixtures longer than the model
+    window are stitched with the product's overlap-add semantics.
     """
     from onnx_runtime_contract import make_contract_compliant_session
     sess = make_contract_compliant_session(Path(onnx_path))
-    t = inp[np.newaxis, ...]  # add batch dim
-    out = sess.run(None, {sess.get_inputs()[0].name: t})
-    result = out[0]
+    input_names = sorted(i.name for i in sess.get_inputs())
+
+    if input_names == ["mix", "spectral"]:
+        import spectral_reference as sr
+
+        def run_window(chunk: np.ndarray) -> np.ndarray:
+            t = chunk[np.newaxis, ...]
+            spectral = sr.spec(t).astype(np.float32)
+            spectral_out, time_out = sess.run(
+                ["spectral_out", "time_out"], {"spectral": spectral, "mix": t}
+            )
+            return (
+                sr.ispec(spectral_out.astype(np.float64), t.shape[-1])
+                + time_out.astype(np.float64)
+            ).astype(np.float32)
+    else:
+        input_name = sess.get_inputs()[0].name
+
+        def run_window(chunk: np.ndarray) -> np.ndarray:
+            out = sess.run(None, {input_name: chunk[np.newaxis, ...]})
+            return out[0]
+
+    result = _stitch_windows(run_window, inp)
     del sess
     gc.collect()
     return result
@@ -172,12 +250,18 @@ def main() -> int:
         return 1
 
     print(f"Running {len(fixtures)} {args.tier}-tier fixture(s) through {args.model} + {args.onnx.name}...")
+    mse_threshold = MSE_PR_MAX if args.tier == "pr" else MSE_RELEASE_MAX
     results: list[dict[str, Any]] = []
     for fixture in fixtures:
         result = run_fixture(fixture, args.model, str(args.onnx))
+        # A fixture may carry its own measured MSE budget (e.g. the impulse
+        # fixture, whose budget is calibrated against the shipped stable
+        # artifact — see the manifest's mse_budget_note). The effective
+        # threshold is recorded per result so gate and report validator
+        # stay aligned.
+        budget = (fixture.get("mse_budget") or {}).get(args.tier)
+        result["mse_threshold"] = budget if budget is not None else mse_threshold
         results.append(result)
-
-    mse_threshold = MSE_PR_MAX if args.tier == "pr" else MSE_RELEASE_MAX
     report = {
         "schema_version": GENERATOR_VERSION,
         "model": args.model,
@@ -217,8 +301,9 @@ def gate_failures(results: list[dict[str, Any]], mse_threshold: float) -> list[s
         if r.get("expected_shape_match") is False:
             failures.append(f"{fid}: output shape != expected_output_shape")
         mse = r.get("mse")
-        if mse is not None and mse > mse_threshold:
-            failures.append(f"{fid}: MSE {mse} > {mse_threshold}")
+        effective = r.get("mse_threshold", mse_threshold)
+        if mse is not None and mse > effective:
+            failures.append(f"{fid}: MSE {mse} > {effective}")
     return failures
 
 

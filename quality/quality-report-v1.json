@@ -1,46 +1,140 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openkara.dev/quality/schema-quality-report-v1.json",
-  "title": "OpenKara quality report (v1)",
-  "description": "Schema for the model correctness + quality report produced by scripts/run_quality_suite.py.",
-  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "required": ["schema_version", "model", "onnx_path", "tier", "mse_threshold", "results"],
+  "description": "Schema for the model correctness + quality report produced by scripts/run_quality_suite.py.",
   "properties": {
-    "schema_version": {"type": "string", "const": "openkara.quality-report/v1"},
-    "model": {"type": "string"},
-    "onnx_path": {"type": "string"},
-    "tier": {"type": "string", "enum": ["pr", "release"]},
-    "mse_threshold": {"type": "number", "minimum": 0},
+    "model": {
+      "type": "string"
+    },
+    "mse_threshold": {
+      "minimum": 0,
+      "type": "number"
+    },
+    "onnx_path": {
+      "type": "string"
+    },
     "results": {
-      "type": "array",
       "items": {
-        "type": "object",
         "additionalProperties": false,
-        "required": ["fixture_id", "category", "tier", "onnx_shape", "pytorch_shape",
-                      "shape_match", "onnx_has_nan", "onnx_has_inf",
-                      "pytorch_has_nan", "pytorch_has_inf",
-                      "onnx_output_digest", "pytorch_output_digest"],
         "properties": {
-          "fixture_id": {"type": "string"},
-          "category": {"type": "string"},
-          "tier": {"type": "string"},
-          "onnx_shape": {"type": "array", "items": {"type": "integer"}},
-          "pytorch_shape": {"type": "array", "items": {"type": "integer"}},
-          "shape_match": {"type": "boolean"},
-          "expected_shape": {"type": "array", "items": {"type": "integer"}},
-          "expected_shape_match": {"type": "boolean"},
-          "onnx_has_nan": {"type": "boolean"},
-          "onnx_has_inf": {"type": "boolean"},
-          "pytorch_has_nan": {"type": "boolean"},
-          "pytorch_has_inf": {"type": "boolean"},
-          "mse": {"type": ["number", "null"], "minimum": 0},
-          "mae": {"type": ["number", "null"], "minimum": 0},
-          "max_abs_error": {"type": ["number", "null"], "minimum": 0},
-          "onnx_output_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "pytorch_output_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-        }
-      }
+          "category": {
+            "type": "string"
+          },
+          "expected_shape": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "expected_shape_match": {
+            "type": "boolean"
+          },
+          "fixture_id": {
+            "type": "string"
+          },
+          "mae": {
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "max_abs_error": {
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "mse": {
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "mse_threshold": {
+            "description": "Effective MSE gate for this fixture: the per-fixture mse_budget from the corpus manifest when declared, else the tier threshold.",
+            "type": "number"
+          },
+          "onnx_has_inf": {
+            "type": "boolean"
+          },
+          "onnx_has_nan": {
+            "type": "boolean"
+          },
+          "onnx_output_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "onnx_shape": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "pytorch_has_inf": {
+            "type": "boolean"
+          },
+          "pytorch_has_nan": {
+            "type": "boolean"
+          },
+          "pytorch_output_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "pytorch_shape": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "shape_match": {
+            "type": "boolean"
+          },
+          "tier": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fixture_id",
+          "category",
+          "tier",
+          "onnx_shape",
+          "pytorch_shape",
+          "shape_match",
+          "onnx_has_nan",
+          "onnx_has_inf",
+          "pytorch_has_nan",
+          "pytorch_has_inf",
+          "onnx_output_digest",
+          "pytorch_output_digest"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "openkara.quality-report/v1",
+      "type": "string"
+    },
+    "tier": {
+      "enum": [
+        "pr",
+        "release"
+      ],
+      "type": "string"
     }
-  }
+  },
+  "required": [
+    "schema_version",
+    "model",
+    "onnx_path",
+    "tier",
+    "mse_threshold",
+    "results"
+  ],
+  "title": "OpenKara quality report (v1)",
+  "type": "object"
 }

@@ -251,6 +251,109 @@ class MonotonicityGuardTests(unittest.TestCase):
                         code = pub.main()
         self.assertEqual(code, 0, err.getvalue())
 
+    def test_dry_run_accepts_candidate_channel(self):
+        manifest = _load_manifest()
+        assets = _asset_response_for_manifest(manifest)
+        shas = _download_shas_for_manifest(manifest)
+
+        def fake_download_sha256(repo, tag, asset_name):
+            return shas.get((repo, tag, asset_name))
+
+        argv = ["publish_catalog_release.py", "--release", RELEASE_ID,
+                "--channel", "candidate"]
+        with mock.patch.object(sys, "argv", argv):
+            with mock.patch.object(pub, "_gh", _make_gh(assets, shas)):
+                with mock.patch.object(pub, "_download_asset_sha256", fake_download_sha256):
+                    out = io.StringIO()
+                    err = io.StringIO()
+                    with redirect_stdout(out), redirect_stderr(err):
+                        code = pub.main()
+        self.assertEqual(code, 0, err.getvalue())
+        self.assertIn("candidate", out.getvalue())
+
+
+class ChannelPointerTests(unittest.TestCase):
+    """_advance_channel_pointer writes the selected channel file only."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.channels = Path(self._tmp.name)
+        self._patcher = mock.patch.object(pub, "CHANNELS_DIR", self.channels)
+        self._patcher.start()
+        self.addCleanup(self._patcher.stop)
+        self.addCleanup(self._tmp.cleanup)
+
+        self.manifest = _load_manifest()
+        self.manifest_path = MANIFEST
+
+    def _stable_pointer(self, release_id: str) -> None:
+        (self.channels / "stable.json").write_text(json.dumps({
+            "schema_version": "openkara.catalog/channel-v1",
+            "channel": "stable",
+            "generation": 1,
+            "release_id": release_id,
+            "release_manifest_url": "https://example.com/releases/download/infra-x/release-manifest.json",
+            "release_manifest_sha256": "0" * 64,
+            "release_manifest_size": 1,
+            "updated_at": "2026-07-20T00:00:00Z",
+            "previous_release_id": None,
+        }))
+
+    def test_candidate_pointer_never_touches_stable(self):
+        self._stable_pointer("2026-01-01-001")
+        stable_before = (self.channels / "stable.json").read_bytes()
+
+        errors = pub._advance_channel_pointer(
+            self.manifest, self.manifest_path, "candidate"
+        )
+        self.assertEqual(errors, [])
+
+        candidate = json.loads((self.channels / "candidate.json").read_text())
+        self.assertEqual(candidate["channel"], "candidate")
+        self.assertEqual(candidate["release_id"], self.manifest["release_id"])
+        # First candidate pointer inherits its lineage from stable.
+        self.assertEqual(candidate["previous_release_id"], "2026-01-01-001")
+        self.assertEqual(
+            (self.channels / "stable.json").read_bytes(),
+            stable_before,
+            "candidate publication must not modify the stable pointer",
+        )
+
+    def test_stable_pointer_still_written_to_stable_file(self):
+        self._stable_pointer("2026-01-01-001")
+        errors = pub._advance_channel_pointer(
+            self.manifest, self.manifest_path, "stable"
+        )
+        self.assertEqual(errors, [])
+        stable = json.loads((self.channels / "stable.json").read_text())
+        self.assertEqual(stable["channel"], "stable")
+        self.assertEqual(stable["release_id"], self.manifest["release_id"])
+        self.assertEqual(stable["previous_release_id"], "2026-01-01-001")
+        self.assertFalse((self.channels / "candidate.json").exists())
+
+    def test_candidate_pointer_tracks_previous_candidate(self):
+        self._stable_pointer("2026-01-01-001")
+        errors = pub._advance_channel_pointer(
+            self.manifest, self.manifest_path, "candidate"
+        )
+        self.assertEqual(errors, [])
+        # Re-advance: previous_release_id now comes from the candidate file.
+        # (Same release id keeps previous unchanged; a differing id would
+        # replace it — emulate by rewriting the candidate's release_id.)
+        candidate_path = self.channels / "candidate.json"
+        first = json.loads(candidate_path.read_text())
+        first["release_id"] = "2026-01-02-001"
+        candidate_path.write_text(json.dumps(first))
+
+        errors = pub._advance_channel_pointer(
+            self.manifest, self.manifest_path, "candidate"
+        )
+        self.assertEqual(errors, [])
+        second = json.loads(candidate_path.read_text())
+        self.assertEqual(second["previous_release_id"], "2026-01-02-001")
+
 
 if __name__ == "__main__":
     unittest.main()

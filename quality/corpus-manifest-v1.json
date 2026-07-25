@@ -1,65 +1,177 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openkara.dev/quality/schema-corpus-manifest-v1.json",
-  "title": "OpenKara quality corpus manifest (v1)",
-  "description": "Manifest of audio fixtures used by the quality and performance gates. Synthetic fixtures are generated deterministically and committed; real-audio fixtures are fetched from licensed sources with immutable digests.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema_version", "fixtures"],
-  "properties": {
-    "schema_version": {
-      "type": "string",
-      "const": "openkara.corpus-manifest/v1"
-    },
-    "fixtures": {
-      "type": "array",
-      "items": {"$ref": "#/$defs/fixture"},
-      "minItems": 1
-    }
-  },
   "$defs": {
     "fixture": {
-      "type": "object",
       "additionalProperties": false,
-      "required": ["fixture_id", "kind", "tier", "category", "channels", "sample_rate", "frames", "generator", "license"],
+      "dependentRequired": {
+        "mse_budget": [
+          "mse_budget_note"
+        ]
+      },
       "properties": {
-        "fixture_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-        "kind": {"type": "string", "enum": ["synthetic", "real-audio"]},
-        "tier": {"type": "string", "enum": ["pr", "release"]},
         "category": {
-          "type": "string",
           "enum": [
-            "male-vocals", "female-vocals", "harmony", "choir", "rap", "spoken",
-            "dense-guitar", "synthesizer", "drum-transients", "bass-heavy",
-            "reverb", "delay", "live-recording", "clipping", "silence",
-            "low-level", "channel-imbalance", "impulse", "sine-sweep",
-            "multitone", "noise", "chunk-boundary", "full-song"
-          ]
+            "male-vocals",
+            "female-vocals",
+            "harmony",
+            "choir",
+            "rap",
+            "spoken",
+            "dense-guitar",
+            "synthesizer",
+            "drum-transients",
+            "bass-heavy",
+            "reverb",
+            "delay",
+            "live-recording",
+            "clipping",
+            "silence",
+            "low-level",
+            "channel-imbalance",
+            "impulse",
+            "sine-sweep",
+            "multitone",
+            "noise",
+            "chunk-boundary",
+            "full-song"
+          ],
+          "type": "string"
         },
-        "channels": {"type": "integer", "enum": [1, 2]},
-        "sample_rate": {"type": "integer", "minimum": 1},
-        "frames": {"type": "integer", "minimum": 1},
-        "generator": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["type"],
-          "properties": {
-            "type": {"type": "string", "enum": ["deterministic", "fetch"]},
-            "module": {"type": "string"},
-            "function": {"type": "string"},
-            "params": {"type": "object"},
-            "url": {"type": "string"},
-            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "license": {"type": "string"}
-          }
+        "channels": {
+          "enum": [
+            1,
+            2
+          ],
+          "type": "integer"
         },
-        "license": {"type": "string"},
         "expected_output_shape": {
-          "type": "array",
-          "items": {"type": "integer"}
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
         },
-        "notes": {"type": "string"}
-      }
+        "fixture_id": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "type": "string"
+        },
+        "frames": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "generator": {
+          "additionalProperties": false,
+          "properties": {
+            "function": {
+              "type": "string"
+            },
+            "license": {
+              "type": "string"
+            },
+            "module": {
+              "type": "string"
+            },
+            "params": {
+              "type": "object"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "deterministic",
+                "fetch"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        "kind": {
+          "enum": [
+            "synthetic",
+            "real-audio"
+          ],
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "mse_budget": {
+          "additionalProperties": false,
+          "description": "Per-fixture MSE gate overrides by tier, calibrated against the shipped stable artifact (see mse_budget_note). Takes precedence over the tier default in run_quality_suite.",
+          "properties": {
+            "pr": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            "release": {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "mse_budget_note": {
+          "description": "Required rationale for an mse_budget: what was measured, on which artifact, and why the tier default is not achievable.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "sample_rate": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "tier": {
+          "enum": [
+            "pr",
+            "release"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "fixture_id",
+        "kind",
+        "tier",
+        "category",
+        "channels",
+        "sample_rate",
+        "frames",
+        "generator",
+        "license"
+      ],
+      "type": "object"
     }
-  }
+  },
+  "$id": "https://openkara.dev/quality/schema-corpus-manifest-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Manifest of audio fixtures used by the quality and performance gates. Synthetic fixtures are generated deterministically and committed; real-audio fixtures are fetched from licensed sources with immutable digests.",
+  "properties": {
+    "fixtures": {
+      "items": {
+        "$ref": "#/$defs/fixture"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "openkara.corpus-manifest/v1",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "fixtures"
+  ],
+  "title": "OpenKara quality corpus manifest (v1)",
+  "type": "object"
 }

@@ -174,3 +174,54 @@ def test_cli_help() -> None:
     )
     assert r.returncode == 0
     assert "--artifact-id" in r.stdout
+
+
+def test_gate_respects_per_fixture_mse_budget() -> None:
+    """A result carrying its own mse_threshold (from the corpus manifest's
+    mse_budget) is gated against that budget, not the tier default — and the
+    report validator agrees (gate/validator alignment)."""
+    import run_quality_suite as q
+    import validate_quality_report as v
+
+    base = {
+        "category": "impulse", "tier": "pr",
+        "onnx_shape": [1, 4, 2, 8], "pytorch_shape": [1, 4, 2, 8],
+        "shape_match": True, "onnx_has_nan": False, "onnx_has_inf": False,
+        "pytorch_has_nan": False, "pytorch_has_inf": False,
+        "onnx_output_digest": "0" * 64, "pytorch_output_digest": "0" * 64,
+    }
+    over_default_within_budget = {
+        **base, "fixture_id": "budgeted", "mse": 1.5e-4, "mse_threshold": 2.0e-4,
+    }
+    over_budget = {
+        **base, "fixture_id": "over-budget", "mse": 3.0e-4, "mse_threshold": 2.0e-4,
+    }
+    no_budget_over_default = {**base, "fixture_id": "default", "mse": 1.5e-4}
+
+    failures = q.gate_failures(
+        [over_default_within_budget, over_budget, no_budget_over_default],
+        q.MSE_PR_MAX,
+    )
+    assert not any("budgeted" in f for f in failures)
+    assert any(f.startswith("over-budget") for f in failures)
+    assert any(f.startswith("default") for f in failures)
+
+    report = {
+        "schema_version": "openkara.quality-report/v1",
+        "model": "htdemucs", "onnx_path": "x.onnx", "tier": "pr",
+        "mse_threshold": q.MSE_PR_MAX,
+        "results": [over_default_within_budget],
+    }
+    assert v.validate_report(report) == []
+    report["results"] = [over_budget]
+    assert any("over-budget" in e for e in v.validate_report(report))
+
+
+def test_corpus_impulse_budget_is_declared_with_rationale() -> None:
+    manifest = json.loads((ROOT / "quality" / "corpus-manifest.json").read_text())
+    impulse = next(
+        f for f in manifest["fixtures"]
+        if f["fixture_id"] == "synth-impulse-343980"
+    )
+    assert impulse["mse_budget"]["pr"] > 1e-4
+    assert "stable" in impulse["mse_budget_note"]

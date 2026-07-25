@@ -59,17 +59,54 @@ class GeneratedCatalogTests(unittest.TestCase):
     def _stable_four_stem_models() -> dict[str, dict]:
         """variant -> the stable manifest's selectable four-stem artifact
         (the same rule _build_latest_adapter applies: four-stem stem profile,
-        not deprecated)."""
+        waveform tensor interface, not deprecated)."""
         pointer = _load(POINTER)
         manifest = _load(ROOT_DIR / "catalog" / "releases" / f"{pointer['release_id']}.json")
         selected: dict[str, dict] = {}
         for model in manifest["artifacts"]["models"]:
             if model.get("model", {}).get("stem_profile") != "four-stem":
                 continue
+            if model.get("model", {}).get("tensor_interface") != "waveform":
+                continue
             if (model.get("deprecation") or {}).get("deprecated"):
                 continue
             selected[model["variant"]] = model
         return selected
+
+    def test_latest_adapter_never_selects_spectral_core_artifacts(self):
+        """A legacy latest.json consumer cannot run a spectral-core graph;
+        the adapter must skip them even when they are the smallest artifact
+        of a variant (regression: generation 8)."""
+        import generate_catalog_release as gen
+
+        manifest = {
+            "artifacts": {
+                "models": [
+                    {
+                        "variant": "htdemucs",
+                        "artifact_id": "waveform",
+                        "download_url": "https://example.com/releases/download/model-v1/htdemucs.onnx",
+                        "archive_digest": "a" * 64,
+                        "byte_size": 300,
+                        "deprecation": {"deprecated": False},
+                        "model": {"stem_profile": "four-stem",
+                                  "tensor_interface": "waveform"},
+                    },
+                    {
+                        "variant": "htdemucs",
+                        "artifact_id": "spectral",
+                        "download_url": "https://example.com/releases/download/model-spectral-v1/htdemucs.spectral.onnx",
+                        "archive_digest": "b" * 64,
+                        "byte_size": 200,
+                        "deprecation": {"deprecated": False},
+                        "model": {"stem_profile": "four-stem",
+                                  "tensor_interface": "spectral-core"},
+                    },
+                ]
+            }
+        }
+        adapter = gen._build_latest_adapter(manifest)
+        self.assertEqual(adapter["htdemucs"]["sha256"], "a" * 64)
 
     def test_latest_json_uses_stable_four_stem_digests(self):
         """latest.json must carry the digests of the stable generation's

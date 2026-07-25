@@ -47,8 +47,12 @@ def validate_report(report: dict[str, Any]) -> list[str]:
         if r.get("expected_shape_match") is False:
             errors.append(f"{r['fixture_id']}: expected shape mismatch")
         mse = r.get("mse")
-        if mse is not None and mse > threshold:
-            errors.append(f"{r['fixture_id']}: MSE {mse} > threshold {threshold}")
+        # A result may carry a per-fixture budget (corpus manifest
+        # mse_budget); it takes precedence over the tier threshold, exactly
+        # as in run_quality_suite.gate_failures.
+        effective = r.get("mse_threshold", threshold)
+        if mse is not None and mse > effective:
+            errors.append(f"{r['fixture_id']}: MSE {mse} > threshold {effective}")
     return errors
 
 

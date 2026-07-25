@@ -1,0 +1,324 @@
+{
+  "model": "htdemucs",
+  "mse_threshold": 0.0001,
+  "onnx_path": "/Users/david/Development/OpenKara/src-tauri/models/htdemucs.dual.fp32.onnx",
+  "results": [
+    {
+      "category": "silence",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-silence-343980",
+      "mae": 0.0,
+      "max_abs_error": 0.0,
+      "mse": 0.0,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "a999206a068d229167e9d24600b770c37d0483b8e03e84875960dd217cc5a8e4",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "a999206a068d229167e9d24600b770c37d0483b8e03e84875960dd217cc5a8e4",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "noise",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-noise-343980",
+      "mae": 4.594998501068001e-06,
+      "max_abs_error": 6.121117621660233e-05,
+      "mse": 5.4285947775751744e-11,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "53d98d1982b25990a59e5921402075fcccec5741985e6feb18f0adbb34ef5c5b",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "3818761a0995923df3d4fdef0667cc01a87d8af3a146e830c3b7784e520d3fc1",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "sine-sweep",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-sine-sweep-343980",
+      "mae": 0.00033219018927350925,
+      "max_abs_error": 0.048243433237075806,
+      "mse": 2.2077068297795568e-06,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "1a9b5249cac0dbffe2b1db58f93e13c14bcb6f400bab7827db1dcbfba33b5c2f",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "37fb388338fbfef201e4300042a5c61bbf01c23eb22edd7bf6c31493ffd30562",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "multitone",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-multitone-343980",
+      "mae": 2.226524041999591e-06,
+      "max_abs_error": 0.00022719427943229675,
+      "mse": 1.5496457303807737e-11,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "ce38ae8a10b75e3ec24660ec640d8a1814fcaf233e0c2515ee581f6ad36d1ec9",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "2edbbfb48d88839c12e23a8761abd737e8c8bc1a5bd16ceea4d893e687cb7b50",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "impulse",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-impulse-343980",
+      "mae": 0.00013979389603209497,
+      "max_abs_error": 2.8781225830316544,
+      "mse": 0.00010301999637573607,
+      "mse_threshold": 0.0002,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "632a67ddad799b3e5f9b197f5dc126cc2cd8c632cd02ad21d15b404edbfd0879",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "dbb260819e55126442aefe16829224f6b2d3e5c8b32bfbd51f47d93e24ac0575",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "chunk-boundary",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        687960
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-chunk-boundary-687960",
+      "mae": 3.0459922804585393e-06,
+      "max_abs_error": 0.0001513659954071045,
+      "mse": 4.7147627973443244e-11,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "e76a352a24fa78b656b391e7108416586bf8727964a3bc84e49552ec95143784",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        687960
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "35154feeac5b8eabfa79cd6d5edf66cf4f45bc68e05c387956d991b5614af601",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        687960
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "clipping",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-clipping-343980",
+      "mae": 1.9392518896961156e-05,
+      "max_abs_error": 0.0002721846103668213,
+      "mse": 9.759310137210857e-10,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "c8c89387e2d82e620aeeaf1ac25ad071919601337eb839e8dbdce40c82f79596",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "c127df39a21997c62d3a1072482f4c889bb9c843587704bc88581c37aed1ca3a",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "low-level",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-low-level-343980",
+      "mae": 4.5841624336925806e-07,
+      "max_abs_error": 6.1228638514876366e-06,
+      "mse": 5.396884191155845e-13,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "653c52c792e82f7be71e6e2b641a28552d8bfd085d1dfa1ffd6152cedf079349",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "7ae526fb1c57265b94f1ca1fa306d7166192c1a3301edcff92071e41f5eae191",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    },
+    {
+      "category": "channel-imbalance",
+      "expected_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "expected_shape_match": true,
+      "fixture_id": "synth-channel-imbalance-343980",
+      "mae": 5.395828382759919e-06,
+      "max_abs_error": 8.921325206756592e-05,
+      "mse": 7.779283945335539e-11,
+      "mse_threshold": 0.0001,
+      "onnx_has_inf": false,
+      "onnx_has_nan": false,
+      "onnx_output_digest": "66e19b7d7dd9cff26619e36b0e73a7c05a12646059522b6d4f2b5f4ef8c03eca",
+      "onnx_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "pytorch_has_inf": false,
+      "pytorch_has_nan": false,
+      "pytorch_output_digest": "754ccde5822d72067688a4412e224b5d4f41475ec524e5c441fe7b770d53da8e",
+      "pytorch_shape": [
+        1,
+        4,
+        2,
+        343980
+      ],
+      "shape_match": true,
+      "tier": "pr"
+    }
+  ],
+  "schema_version": "openkara.quality-report/v1",
+  "tier": "pr"
+}
