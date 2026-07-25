@@ -92,7 +92,8 @@
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
-        "-DCMAKE_SKIP_INSTALL_RULES=ON"
+        "-DCMAKE_SKIP_INSTALL_RULES=ON",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
@@ -102,7 +103,7 @@
         "xnnpack"
       ],
       "runner": "ubuntu-24.04-arm",
-      "runner_note": "Linux ARM64 native runner (GitHub-hosted ARM available since 2025)."
+      "runner_note": "Linux arm64 native runner. GitHub offers no ubuntu-22.04-arm hosted runner, so the glibc floor is 24.04's; libstdc++ is linked statically to at least avoid a GLIBCXX floor. Revisit when an older arm image or container build is available."
     },
     "x86_64-apple-darwin": {
       "archive_format": "tar.gz",
@@ -180,7 +181,8 @@
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
-        "-DCMAKE_SKIP_INSTALL_RULES=ON"
+        "-DCMAKE_SKIP_INSTALL_RULES=ON",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
@@ -189,8 +191,8 @@
         "cpu",
         "xnnpack"
       ],
-      "runner": "ubuntu-latest",
-      "runner_note": "Linux x64 native runner."
+      "runner": "ubuntu-latest (manylinux_2_28 container)",
+      "runner_note": "Linux x64 builds inside quay.io/pypa/manylinux_2_28_x86_64 with gcc-toolset-13: glibc symbol floor 2.28 (below OpenKara's ubuntu-22.04 release baseline at 2.35) with the gcc 13 + binutils 2.40 toolchain ORT's mlas kernels require. libstdc++/libgcc are linked statically so no GLIBCXX floor leaks from the toolset. The ABI-floor CI gate (scripts/check_linux_abi_floor.py) enforces this on every build."
     }
   },
   "toolchain": {
