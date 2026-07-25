@@ -8,8 +8,19 @@ output contract) and appends deterministic graph nodes:
     vocals        = stems[:, 3:4]
     accompaniment = stems[:, 0:1] + stems[:, 1:2] + stems[:, 2:3]
 
-The projected graph exposes exactly ``[1, 2, 2, F]`` — vocals then
-accompaniment. The shared neural-network computation is unchanged; the
+Two shapes:
+
+- default: the projection replaces the four-stem output — the graph
+  exposes exactly ``[1, 2, 2, F]`` vocals/accompaniment.
+- ``--keep-four-stem``: the original ``stems`` output is preserved as the
+  FIRST output and the projection is added as a second output
+  (``openkara_k2s_stems``). One file serves four-stem and karaoke
+  consumers: ONNX Runtime executes only the ancestors of the outputs a
+  session run requests, so a four-stem fetch never pays for the
+  projection nodes, and a dual-mode application needs a single model
+  download instead of two near-identical files.
+
+The shared neural-network computation is unchanged in both shapes; the
 projection reduces host-visible outputs and application-side mixing work.
 It does NOT eliminate the four-source network computation.
 
@@ -22,6 +33,7 @@ Deterministic: repeated derivation from the same source is byte-identical.
 Usage::
 
     python scripts/derive_karaoke_2stem.py --input htdemucs.onnx --output htdemucs.karaoke2stem.onnx
+    python scripts/derive_karaoke_2stem.py --input htdemucs.onnx --output htdemucs.dual.onnx --keep-four-stem
 """
 
 from __future__ import annotations
@@ -49,8 +61,13 @@ def _int64_init(name: str, values: list[int]) -> onnx.TensorProto:
     return onnx.numpy_helper.from_array(np.asarray(values, dtype=np.int64), name=name)
 
 
-def derive_karaoke_2stem(model: onnx.ModelProto, source_sha256: str) -> onnx.ModelProto:
-    """Append the projection to a four-output model in-place and return it."""
+def derive_karaoke_2stem(model: onnx.ModelProto, source_sha256: str,
+                         keep_four_stem: bool = False) -> onnx.ModelProto:
+    """Append the projection to a four-output model in-place and return it.
+
+    With ``keep_four_stem`` the original output stays as the first graph
+    output and the projection becomes a second output.
+    """
     graph = model.graph
 
     if len(graph.output) != 1:
@@ -109,22 +126,35 @@ def derive_karaoke_2stem(model: onnx.ModelProto, source_sha256: str) -> onnx.Mod
         ),
     ])
 
-    # The old output becomes an internal tensor; the projection is the only output.
-    del graph.output[:]
-    graph.output.append(
-        helper.make_tensor_value_info(
-            f"{PREFIX}stems", TensorProto.FLOAT, [dims[0], 2, dims[2], frames]
-        )
+    projection_output = helper.make_tensor_value_info(
+        f"{PREFIX}stems", TensorProto.FLOAT, [dims[0], 2, dims[2], frames]
     )
+    if keep_four_stem:
+        # Original four-stem output stays FIRST (existing consumers fetch
+        # output[0]); the projection is an additional second output.
+        graph.output.append(projection_output)
+    else:
+        # The old output becomes an internal tensor; the projection is the
+        # only output.
+        del graph.output[:]
+        graph.output.append(projection_output)
 
     # Metadata: derivation identity for the catalog and the app cache key.
     meta = {p.key: p.value for p in model.metadata_props}
     source_cache_key = meta.get(MODEL_CACHE_KEY_METADATA, "")
     new_meta = dict(meta)
+    suffix = "dual" if keep_four_stem else "karaoke2stem"
     if source_cache_key:
-        new_meta[MODEL_CACHE_KEY_METADATA] = f"{source_cache_key}-karaoke2stem"
-    new_meta["openkara.stem_profile"] = "karaoke-2stem"
-    new_meta["openkara.output_semantics"] = f"[1,2,2,{frames}] vocals/accompaniment"
+        new_meta[MODEL_CACHE_KEY_METADATA] = f"{source_cache_key}-{suffix}"
+    if keep_four_stem:
+        new_meta["openkara.stem_profile"] = "dual-output"
+        new_meta["openkara.output_semantics"] = (
+            f"outputs[0]=[1,4,2,{frames}] drums/bass/other/vocals; "
+            f"outputs[1]=[1,2,2,{frames}] vocals/accompaniment"
+        )
+    else:
+        new_meta["openkara.stem_profile"] = "karaoke-2stem"
+        new_meta["openkara.output_semantics"] = f"[1,2,2,{frames}] vocals/accompaniment"
     new_meta["openkara.projection"] = PROJECTION_SPEC
     new_meta["openkara.derived_from_sha256"] = source_sha256
     del model.metadata_props[:]
@@ -146,6 +176,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--keep-four-stem", action="store_true",
+                        help="Keep the four-stem output as output[0] and add the "
+                             "projection as a second output (one dual-purpose file).")
     args = parser.parse_args()
 
     if not args.input.is_file():
@@ -154,13 +187,14 @@ def main() -> int:
 
     source_sha = _sha256(args.input)
     model = onnx.load(str(args.input), load_external_data=True)
-    model = derive_karaoke_2stem(model, source_sha)
+    model = derive_karaoke_2stem(model, source_sha, keep_four_stem=args.keep_four_stem)
     onnx.save(model, str(args.output))
 
-    out_dims = [d.dim_value for d in model.graph.output[0].type.tensor_type.shape.dim]
     print(f"OK: {args.input.name} -> {args.output.name}")
     print(f"  projection: {PROJECTION_SPEC}")
-    print(f"  output: {model.graph.output[0].name} {out_dims}")
+    for out in model.graph.output:
+        out_dims = [d.dim_value for d in out.type.tensor_type.shape.dim]
+        print(f"  output: {out.name} {out_dims}")
     print(f"  derived_from_sha256: {source_sha}")
     return 0
 

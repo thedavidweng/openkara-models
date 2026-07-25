@@ -71,10 +71,10 @@ jobs:
         run: |
           python scripts/dedupe_onnx_initializers.py \
             --input work/htdemucs_ft.onnx --output work/htdemucs_ft.dedup.fp32.onnx
-          python scripts/derive_karaoke_2stem.py \
-            --input work/htdemucs.onnx --output work/htdemucs.karaoke2stem.fp32.onnx
-          python scripts/derive_karaoke_2stem.py \
-            --input work/htdemucs_ft.dedup.fp32.onnx --output work/htdemucs_ft.karaoke2stem.fp32.onnx
+          python scripts/derive_karaoke_2stem.py --keep-four-stem \
+            --input work/htdemucs.onnx --output work/htdemucs.dual.fp32.onnx
+          python scripts/derive_karaoke_2stem.py --keep-four-stem \
+            --input work/htdemucs_ft.dedup.fp32.onnx --output work/htdemucs_ft.dual.fp32.onnx
 
       - name: Verify derived artifacts (numeric equivalence)
         run: |
@@ -84,24 +84,24 @@ jobs:
             --report work/verify-ft-dedup.json
           rm -f work/htdemucs_ft.onnx
           python scripts/verify_derived_model.py \
-            --source work/htdemucs.onnx --derived work/htdemucs.karaoke2stem.fp32.onnx \
-            --mode karaoke2stem --fixtures white_noise multitone \
-            --report work/verify-h-k2s.json
+            --source work/htdemucs.onnx --derived work/htdemucs.dual.fp32.onnx \
+            --mode dual --fixtures white_noise multitone \
+            --report work/verify-h-dual.json
           python scripts/verify_derived_model.py \
-            --source work/htdemucs_ft.dedup.fp32.onnx --derived work/htdemucs_ft.karaoke2stem.fp32.onnx \
-            --mode karaoke2stem --fixtures white_noise multitone \
-            --report work/verify-ft-k2s.json
+            --source work/htdemucs_ft.dedup.fp32.onnx --derived work/htdemucs_ft.dual.fp32.onnx \
+            --mode dual --fixtures white_noise multitone \
+            --report work/verify-ft-dual.json
 
       - name: Runtime contract check (forbidden domains + reduced-op set)
         run: |
-          for f in work/htdemucs_ft.dedup.fp32.onnx work/htdemucs.karaoke2stem.fp32.onnx work/htdemucs_ft.karaoke2stem.fp32.onnx; do
+          for f in work/htdemucs_ft.dedup.fp32.onnx work/htdemucs.dual.fp32.onnx work/htdemucs_ft.dual.fp32.onnx; do
             python scripts/onnx_runtime_contract.py --model "$f" --ort-session
           done
 
       - name: Checksums
         run: |
           cd work
-          shasum -a 256 htdemucs_ft.dedup.fp32.onnx htdemucs.karaoke2stem.fp32.onnx htdemucs_ft.karaoke2stem.fp32.onnx > derived-models.sha256
+          shasum -a 256 htdemucs_ft.dedup.fp32.onnx htdemucs.dual.fp32.onnx htdemucs_ft.dual.fp32.onnx > derived-models.sha256
           cat derived-models.sha256
 
       - name: Upload verification reports
@@ -119,9 +119,9 @@ jobs:
         run: |
           gh release create "${{ inputs.release_tag }}" \
             --title "Derived model artifacts ${{ inputs.release_tag }}" \
-            --notes "Deterministic derivations of the stable catalog models (issue #22): initializer-deduplicated htdemucs_ft and karaoke_2stem projections. Verified numerically against their sources in this workflow run (run_id ${{ github.run_id }}). See derived-models.sha256 for digests." \
+            --notes "Deterministic derivations of the stable catalog models (issue #22): initializer-deduplicated htdemucs_ft and dual-output (four-stem + karaoke projection) models — one file serves both application modes. Verified numerically against their sources in this workflow run (run_id ${{ github.run_id }}). See derived-models.sha256 for digests." \
             work/htdemucs_ft.dedup.fp32.onnx \
-            work/htdemucs.karaoke2stem.fp32.onnx \
-            work/htdemucs_ft.karaoke2stem.fp32.onnx \
+            work/htdemucs.dual.fp32.onnx \
+            work/htdemucs_ft.dual.fp32.onnx \
             work/derived-models.sha256 \
-            work/verify-ft-dedup.json work/verify-h-k2s.json work/verify-ft-k2s.json
+            work/verify-ft-dedup.json work/verify-h-dual.json work/verify-ft-dual.json
