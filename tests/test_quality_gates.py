@@ -225,3 +225,27 @@ def test_corpus_impulse_budget_is_declared_with_rationale() -> None:
     )
     assert impulse["mse_budget"]["pr"] > 1e-4
     assert "stable" in impulse["mse_budget_note"]
+
+
+def test_aggregate_excludes_budgeted_fixtures_and_enforces_their_budgets() -> None:
+    """A fixture with a per-fixture mse_budget is excluded from the flat MSE
+    aggregate (its calibrated budget may exceed the tier budget) and gated
+    against its own threshold instead."""
+    import enforce_quality_gates as g
+
+    report = {
+        "mse_threshold": 1e-4,
+        "results": [
+            {"fixture_id": "plain", "mse": 3e-11, "mse_threshold": 1e-4,
+             "shape_match": True, "onnx_has_nan": False, "onnx_has_inf": False},
+            {"fixture_id": "impulse", "mse": 1.03e-4, "mse_threshold": 2e-4,
+             "shape_match": True, "onnx_has_nan": False, "onnx_has_inf": False},
+        ],
+    }
+    agg = g._aggregate_quality(report)
+    assert agg["mse"] == 3e-11, "budgeted fixture must not dominate the flat aggregate"
+    assert g._per_fixture_budget_violations(report) == []
+
+    report["results"][1]["mse"] = 3e-4  # over its own budget
+    violations = g._per_fixture_budget_violations(report)
+    assert violations and "impulse" in violations[0]

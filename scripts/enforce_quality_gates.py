@@ -45,8 +45,20 @@ def _aggregate_quality(report: dict[str, Any]) -> dict[str, Any]:
     results = report.get("results", [])
     if not results:
         return {}
-    # Use the worst-case (max) across fixtures for error metrics.
-    mse_values = [r["mse"] for r in results if r.get("mse") is not None]
+    # Use the worst-case (max) across fixtures for error metrics. Fixtures
+    # carrying a per-fixture MSE budget (corpus manifest mse_budget, recorded
+    # per result as mse_threshold by run_quality_suite) are gated against
+    # their OWN budget in _per_fixture_budget_violations and excluded from
+    # the flat-budget aggregate — otherwise a fixture whose calibrated budget
+    # exceeds the tier budget (the impulse fixture measures 1.03e-4 on the
+    # shipped stable artifact) would fail every healthy candidate.
+    tier_default = report.get("mse_threshold")
+    mse_values = [
+        r["mse"]
+        for r in results
+        if r.get("mse") is not None
+        and r.get("mse_threshold", tier_default) == tier_default
+    ]
     mae_values = [r["mae"] for r in results if r.get("mae") is not None]
     max_abs_values = [r["max_abs_error"] for r in results if r.get("max_abs_error") is not None]
     return {
@@ -57,6 +69,23 @@ def _aggregate_quality(report: dict[str, Any]) -> dict[str, Any]:
         "onnx_has_nan": any(r.get("onnx_has_nan", False) for r in results),
         "onnx_has_inf": any(r.get("onnx_has_inf", False) for r in results),
     }
+
+
+def _per_fixture_budget_violations(report: dict[str, Any]) -> list[str]:
+    """Enforce per-fixture MSE budgets, aligned with run_quality_suite's gate."""
+    errors: list[str] = []
+    tier_default = report.get("mse_threshold")
+    for r in report.get("results", []):
+        mse = r.get("mse")
+        threshold = r.get("mse_threshold", tier_default)
+        if mse is None or threshold is None:
+            continue
+        if r.get("mse_threshold", tier_default) != tier_default and mse > threshold:
+            errors.append(
+                f"{r.get('fixture_id', '?')}: mse {mse} exceeds its "
+                f"per-fixture budget {threshold}"
+            )
+    return errors
 
 
 def _aggregate_runtime(report: dict[str, Any]) -> dict[str, Any]:
@@ -197,6 +226,7 @@ def enforce_gates(
     candidate: dict[str, Any] = {}
     if quality_report:
         candidate.update(_aggregate_quality(quality_report))
+        errors.extend(_per_fixture_budget_violations(quality_report))
     if runtime_report:
         candidate.update(_aggregate_runtime(runtime_report))
 

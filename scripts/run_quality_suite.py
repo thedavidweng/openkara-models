@@ -148,8 +148,21 @@ def _compute_onnx_output(onnx_path: str, inp: np.ndarray) -> np.ndarray:
     sess = make_contract_compliant_session(Path(onnx_path))
     input_names = sorted(i.name for i in sess.get_inputs())
 
+    # The stitch window comes from the session's fixed waveform-input length
+    # (the `mix` input for spectral cores, the audio input otherwise) so the
+    # ONNX path can never drift from the artifact's actual window.
+    def _fixed_frames(input_name_filter) -> int:
+        for i in sess.get_inputs():
+            if input_name_filter(i.name):
+                last = i.shape[-1]
+                if isinstance(last, int) and last > 0:
+                    return last
+        return SEGMENT_FRAMES
+
     if input_names == ["mix", "spectral"]:
         import spectral_reference as sr
+
+        window = _fixed_frames(lambda name: name == "mix")
 
         def run_window(chunk: np.ndarray) -> np.ndarray:
             t = chunk[np.newaxis, ...]
@@ -163,12 +176,13 @@ def _compute_onnx_output(onnx_path: str, inp: np.ndarray) -> np.ndarray:
             ).astype(np.float32)
     else:
         input_name = sess.get_inputs()[0].name
+        window = _fixed_frames(lambda name: name == input_name)
 
         def run_window(chunk: np.ndarray) -> np.ndarray:
             out = sess.run(None, {input_name: chunk[np.newaxis, ...]})
             return out[0]
 
-    result = _stitch_windows(run_window, inp)
+    result = _stitch_windows(run_window, inp, window=window)
     del sess
     gc.collect()
     return result

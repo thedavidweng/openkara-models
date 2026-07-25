@@ -272,6 +272,135 @@ class MonotonicityGuardTests(unittest.TestCase):
         self.assertIn("candidate", out.getvalue())
 
 
+class _ExecuteGh:
+    """Stateful gh mock for --execute paths: tracks the infra release's
+    assets across create/upload calls and records every invocation."""
+
+    def __init__(self, artifact_assets, infra_assets=None):
+        self.calls: list[list[str]] = []
+        self.artifact_assets = artifact_assets
+        self.infra_assets = infra_assets  # None => infra release does not exist
+
+    def __call__(self, args, *, check=True, capture=True):
+        import os
+
+        self.calls.append(list(args))
+        if args[:2] == ["release", "view"]:
+            tag = args[2]
+            repo = args[args.index("--repo") + 1]
+            if tag.startswith("infra-"):
+                if self.infra_assets is None:
+                    return subprocess.CompletedProcess(args, 1, "", "release not found")
+                return subprocess.CompletedProcess(
+                    args, 0, json.dumps({"assets": self.infra_assets}), ""
+                )
+            assets = self.artifact_assets.get((repo, tag))
+            if assets is None:
+                return subprocess.CompletedProcess(args, 1, "", "release not found")
+            return subprocess.CompletedProcess(args, 0, json.dumps({"assets": assets}), "")
+        if args[:2] == ["release", "create"]:
+            self.infra_assets = []
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:2] == ["release", "upload"]:
+            path = args[5]
+            name = Path(path).name
+            self.infra_assets = [a for a in (self.infra_assets or []) if a["name"] != name]
+            self.infra_assets.append({"name": name, "size": os.path.getsize(path)})
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def commands(self, *prefix):
+        return [c for c in self.calls if c[: len(prefix)] == list(prefix)]
+
+
+class ExecutePathTests(unittest.TestCase):
+    """--execute create and promote flows against the mocked gh."""
+
+    def setUp(self):
+        import hashlib
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self._patcher = mock.patch.object(pub, "CHANNELS_DIR", Path(self._tmp.name))
+        self._patcher.start()
+        self.addCleanup(self._patcher.stop)
+        self.addCleanup(self._tmp.cleanup)
+
+        self.manifest = _load_manifest()
+        self.artifact_assets = _asset_response_for_manifest(self.manifest)
+        self.artifact_shas = _download_shas_for_manifest(self.manifest)
+
+        # SHA-256 of local files backs the uploaded-asset verification.
+        def local_sha(path: Path) -> str:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+
+        manifest_path = MANIFEST
+        sc_dir = ROOT_DIR / "catalog" / "supply-chain" / RELEASE_ID
+
+        def fake_download_sha(repo, tag, asset_name):
+            if tag.startswith("infra-"):
+                if asset_name in (manifest_path.name, "release-manifest.json"):
+                    return local_sha(manifest_path)
+                local = sc_dir / asset_name
+                if local.is_file():
+                    return local_sha(local)
+                return None
+            return self.artifact_shas.get((repo, tag, asset_name))
+
+        self.fake_download_sha = fake_download_sha
+        self.infra_assets_complete = [
+            {"name": manifest_path.name, "size": manifest_path.stat().st_size},
+            {"name": "release-manifest.json", "size": manifest_path.stat().st_size},
+        ] + [
+            {"name": f.name, "size": f.stat().st_size}
+            for f in sorted(sc_dir.iterdir())
+            if f.is_file()
+        ]
+
+    def _run(self, gh, extra_argv):
+        argv = ["publish_catalog_release.py", "--release", RELEASE_ID, *extra_argv]
+        with mock.patch.object(sys, "argv", argv):
+            with mock.patch.object(pub, "_gh", gh):
+                with mock.patch.object(pub, "_download_asset_sha256", self.fake_download_sha):
+                    out = io.StringIO()
+                    err = io.StringIO()
+                    with redirect_stdout(out), redirect_stderr(err):
+                        code = pub.main()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_execute_creates_release_and_advances_candidate_pointer(self):
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=None)
+        code, out, err = self._run(gh, ["--channel", "candidate", "--execute"])
+        self.assertEqual(code, 0, err)
+        self.assertTrue(gh.commands("release", "create"), "must create the release")
+        self.assertTrue(gh.commands("release", "edit"), "must undraft the release")
+        self.assertFalse(gh.commands("release", "delete"))
+        candidate = json.loads((pub.CHANNELS_DIR / "candidate.json").read_text())
+        self.assertEqual(candidate["channel"], "candidate")
+        self.assertFalse((pub.CHANNELS_DIR / "stable.json").exists())
+
+    def test_execute_promotes_existing_release_without_reuploading(self):
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=list(self.infra_assets_complete))
+        code, out, err = self._run(gh, ["--channel", "stable", "--execute"])
+        self.assertEqual(code, 0, err)
+        self.assertFalse(gh.commands("release", "create"), "promotion must not re-create")
+        self.assertFalse(gh.commands("release", "upload"), "promotion must not re-upload")
+        stable = json.loads((pub.CHANNELS_DIR / "stable.json").read_text())
+        self.assertEqual(stable["release_id"], RELEASE_ID)
+
+    def test_promotion_verification_failure_never_deletes_the_release(self):
+        # Existing release is missing the pointer-referenced manifest asset:
+        # verification must fail WITHOUT deleting the pre-existing release.
+        broken = [a for a in self.infra_assets_complete if a["name"] != "release-manifest.json"]
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=broken)
+        code, out, err = self._run(gh, ["--channel", "stable", "--execute"])
+        self.assertNotEqual(code, 0)
+        self.assertFalse(gh.commands("release", "delete"),
+                         "a pre-existing release must never be deleted")
+        self.assertFalse((pub.CHANNELS_DIR / "stable.json").exists(),
+                         "pointer must not advance on verification failure")
+
+
 class ChannelPointerTests(unittest.TestCase):
     """_advance_channel_pointer writes the selected channel file only."""
 
