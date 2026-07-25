@@ -17,6 +17,7 @@ on:
       - "scripts/ort_api_version.py"
       - "scripts/run_native_smoke.py"
       - "scripts/download_stable_model.py"
+      - "scripts/runtime_inputs.py"
       - "tests/test_source_lock.py"
       - "tests/test_required_operators.py"
       - "tests/test_compare_runtime_builds.py"
@@ -45,6 +46,7 @@ on:
       - "scripts/ort_api_version.py"
       - "scripts/run_native_smoke.py"
       - "scripts/download_stable_model.py"
+      - "scripts/runtime_inputs.py"
 
 jobs:
   validate-source-lock:
@@ -63,7 +65,7 @@ jobs:
         run: |
           python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py tests/test_runtime_supply_chain.py tests/test_benchmark_report.py tests/test_runtime_catalog_entries.py tests/test_archive_utils.py tests/test_ort_api_version.py tests/test_native_smoke.py tests/test_profile_parser.py -q
       - name: Syntax check build scripts
-        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/run_runtime_quality_suite.py scripts/download_stable_model.py
+        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/run_runtime_quality_suite.py scripts/download_stable_model.py scripts/runtime_inputs.py
 
   build-aarch64-apple-darwin:
     needs: validate-source-lock
@@ -83,18 +85,19 @@ jobs:
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
-          --catalog catalog/releases/2026-07-20-001.json
-          --artifact htdemucs.balanced.fp32.onnx
-          --dest models/htdemucs.onnx
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
       - name: Run native smoke harness (CPU + CoreML)
         run: |
           RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-apple-darwin.tar.gz | grep -v reduced)
           for PROV in cpu coreml; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
-              --model models/htdemucs.onnx \
+              --model models/htdemucs.spectral.onnx \
               --target aarch64-apple-darwin \
               --provider "$PROV" \
+              --interface spectral \
               --ort-source ort/source \
               --report "smoke-aarch64-apple-darwin-${PROV}.json"
           done
@@ -124,18 +127,19 @@ jobs:
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
-          --catalog catalog/releases/2026-07-20-001.json
-          --artifact htdemucs.balanced.fp32.onnx
-          --dest models/htdemucs.onnx
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
       - name: Run native smoke harness (CPU + XNNPACK)
         run: |
           RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-apple-darwin.tar.gz | grep -v reduced)
           for PROV in cpu xnnpack; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
-              --model models/htdemucs.onnx \
+              --model models/htdemucs.spectral.onnx \
               --target x86_64-apple-darwin \
               --provider "$PROV" \
+              --interface spectral \
               --ort-source ort/source \
               --report "smoke-x86_64-apple-darwin-${PROV}.json"
           done
@@ -192,18 +196,19 @@ jobs:
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
-          --catalog catalog/releases/2026-07-20-001.json
-          --artifact htdemucs.balanced.fp32.onnx
-          --dest models/htdemucs.onnx
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
       - name: Run native smoke harness (CPU + XNNPACK)
         run: |
           RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
           for PROV in cpu xnnpack; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
-              --model models/htdemucs.onnx \
+              --model models/htdemucs.spectral.onnx \
               --target x86_64-unknown-linux-gnu \
               --provider "$PROV" \
+              --interface spectral \
               --ort-source ort/source \
               --report "smoke-x86_64-unknown-linux-gnu-${PROV}.json"
           done
@@ -237,18 +242,19 @@ jobs:
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
-          --catalog catalog/releases/2026-07-20-001.json
-          --artifact htdemucs.balanced.fp32.onnx
-          --dest models/htdemucs.onnx
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
       - name: Run native smoke harness (CPU + XNNPACK)
         run: |
           RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu.tar.gz | grep -v reduced)
           for PROV in cpu xnnpack; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
-              --model models/htdemucs.onnx \
+              --model models/htdemucs.spectral.onnx \
               --target aarch64-unknown-linux-gnu \
               --provider "$PROV" \
+              --interface spectral \
               --ort-source ort/source \
               --report "smoke-aarch64-unknown-linux-gnu-${PROV}.json"
           done
@@ -278,9 +284,9 @@ jobs:
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
-          --catalog catalog/releases/2026-07-20-001.json
-          --artifact htdemucs.balanced.fp32.onnx
-          --dest models/htdemucs.onnx
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
       - name: Run native smoke harness (CPU + DirectML)
         shell: bash
         run: |
@@ -288,9 +294,10 @@ jobs:
           # CPU always runs with the full strict gate.
           python scripts/run_native_smoke.py \
             --runtime "$RUNTIME" \
-            --model models/htdemucs.onnx \
+            --model models/htdemucs.spectral.onnx \
             --target x86_64-pc-windows-msvc \
             --provider cpu \
+            --interface spectral \
             --ort-source ort/source \
             --report "smoke-x86_64-pc-windows-msvc-cpu.json"
           # DirectML requires a GPU. GitHub-hosted Windows runners do not have
@@ -299,9 +306,10 @@ jobs:
           # On a GPU-enabled runner the full strict gate still applies.
           python scripts/run_native_smoke.py \
             --runtime "$RUNTIME" \
-            --model models/htdemucs.onnx \
+            --model models/htdemucs.spectral.onnx \
             --target x86_64-pc-windows-msvc \
             --provider directml \
+            --interface spectral \
             --ort-source ort/source \
             --report "smoke-x86_64-pc-windows-msvc-directml.json" \
             --allow-skip-no-gpu
@@ -346,12 +354,12 @@ jobs:
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
-          --catalog catalog/releases/2026-07-20-001.json
-          --artifact htdemucs.balanced.fp32.onnx
-          --dest models/htdemucs.onnx
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
 
       - name: Generate required-operator config
-        run: python scripts/generate_required_operators.py --models models/htdemucs.onnx
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
 
       - name: Build reduced runtime
         run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu --reduced
@@ -368,7 +376,7 @@ jobs:
           REDUCED=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
           python scripts/compare_runtime_builds.py \
             --full "$FULL" --reduced "$REDUCED" \
-            --model models/htdemucs.onnx --frames 343980 \
+            --model models/htdemucs.spectral.onnx --frames 343980 \
             --warmup 1 --iters 3 --tolerance 0.0 \
             --report runtime-comparison-report.json
 
@@ -411,8 +419,8 @@ jobs:
           RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
           python scripts/run_runtime_benchmarks.py \
             --runtime "$RUNTIME" \
-            --catalog catalog/releases/2026-07-20-001.json \
-            --model-artifact-id htdemucs.balanced.fp32.onnx \
+            --catalog catalog/releases/2026-07-25-005.json \
+            --model-artifact-id htdemucs.spectral.fp32.onnx \
             --target x86_64-unknown-linux-gnu \
             --frames 343980 --warmup 1 --iters 3 \
             --report benchmark-x86_64-unknown-linux-gnu.json

@@ -46,12 +46,68 @@ def _valid_report() -> dict:
     }
 
 
+def _valid_spectral_report() -> dict:
+    """A benchmark report for the two-input spectral-core interface: two
+    outputs of different rank (spectral_out 6-D, time_out 4-D) and the
+    optional interface tag."""
+    return {
+        "schema_version": "openkara.runtime-benchmark/v1",
+        "runtime_archive": {
+            "name": "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz",
+            "sha256": "b" * 64,
+            "size": 1000000,
+        },
+        "target": "x86_64-unknown-linux-gnu",
+        "frames": 343980,
+        "warmup": 1,
+        "iters": 3,
+        "results": [
+            {
+                "model": "htdemucs.spectral.onnx",
+                "model_artifact_id": "htdemucs.spectral.fp32.onnx",
+                "cold_load_s": 2.0,
+                "first_window_s": 3.0,
+                "warm_median_s": 1.4,
+                "warm_p95_s": 1.6,
+                "warm_iters": 3,
+                "peak_rss_kb": 900000,
+                "rss_delta_kb": 200000,
+                "providers": ["CPUExecutionProvider"],
+                "fallback_node_count": 0,
+                "output_shape": [[1, 4, 2, 2, 2048, 336], [1, 4, 2, 343980]],
+                "shape_errors": [],
+                "frames": 343980,
+                "interface": "spectral",
+            }
+        ],
+    }
+
+
 def test_validate_valid_report(tmp_path: Path) -> None:
     sys.path.insert(0, str(SCRIPTS))
     import validate_benchmark_report as v
     report = _valid_report()
     assert v.validate_report(report, tier="pr") == []
     assert v.validate_report(report, tier="release") == []
+
+
+def test_validate_spectral_report(tmp_path: Path) -> None:
+    """The report schema accepts the two-output spectral-core interface
+    (outputs of differing rank + the optional interface tag)."""
+    sys.path.insert(0, str(SCRIPTS))
+    import validate_benchmark_report as v
+    report = _valid_spectral_report()
+    assert v.validate_report(report, tier="pr") == []
+    assert v.validate_report(report, tier="release") == []
+
+
+def test_validate_rejects_bad_interface(tmp_path: Path) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    import validate_benchmark_report as v
+    report = _valid_spectral_report()
+    report["results"][0]["interface"] = "bogus"
+    errors = v.validate_report(report)
+    assert any("schema" in e for e in errors)
 
 
 def test_validate_rejects_shape_errors(tmp_path: Path) -> None:

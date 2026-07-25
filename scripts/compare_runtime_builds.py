@@ -52,6 +52,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import archive_utils  # noqa: E402
+import runtime_inputs  # noqa: E402
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -146,12 +147,15 @@ def inference_comparison(
 
     report: dict[str, Any] = {}
 
-    # Load full runtime.
+    # Load full runtime. The input feed adapts to the model interface
+    # (single waveform input vs. two-input spectral core), detected from the
+    # session's input names; both runtimes are fed the same deterministic
+    # tensors so the numerical comparison is meaningful.
     t0 = time.perf_counter()
     full_sess = _load_session_with_lib(full_files[full_lib], Path(full_lib).suffix, str(model_path))
     full_cold_load = time.perf_counter() - t0
-    full_input = np.zeros((1, 2, frames), dtype=np.float32)
-    full_sess.run(None, {full_sess.get_inputs()[0].name: full_input})
+    feed, _interface = runtime_inputs.build_feed(full_sess, frames)
+    full_sess.run(None, feed)
 
     # Load reduced runtime.
     t0 = time.perf_counter()
@@ -165,15 +169,14 @@ def inference_comparison(
 
     # Warm up + measure.
     def _bench(sess) -> dict[str, Any]:
-        inp = np.zeros((1, 2, frames), dtype=np.float32)
-        name = sess.get_inputs()[0].name
+        bench_feed, _iface = runtime_inputs.build_feed(sess, frames)
         for _ in range(warmup):
-            sess.run(None, {name: inp})
+            sess.run(None, bench_feed)
         import resource
         latencies: list[float] = []
         for _ in range(iters):
             t = time.perf_counter()
-            sess.run(None, {name: inp})
+            sess.run(None, bench_feed)
             latencies.append(time.perf_counter() - t)
         peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         return {
@@ -189,10 +192,9 @@ def inference_comparison(
     full_metrics["cold_load_s"] = full_cold_load
     red_metrics["cold_load_s"] = red_cold_load
 
-    # Output equivalence.
-    inp = np.zeros((1, 2, frames), dtype=np.float32)
-    full_out = full_sess.run(None, {full_sess.get_inputs()[0].name: inp})
-    red_out = red_sess.run(None, {red_sess.get_inputs()[0].name: inp})
+    # Output equivalence. Both runtimes are fed the same deterministic input.
+    full_out = full_sess.run(None, feed)
+    red_out = red_sess.run(None, feed)
     max_abs = 0.0
     mse = 0.0
     n = 0

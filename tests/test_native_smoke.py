@@ -86,6 +86,40 @@ def test_strict_smoke_gate_rejects_wrong_shape() -> None:
     assert any("output_shape" in failure for failure in failures)
 
 
+SPECTRAL_SHAPE = "[1,4,2,2,2048,336];[1,4,2,343980]"
+
+
+def test_strict_smoke_gate_accepts_spectral_output_shape() -> None:
+    """The spectral interface passes when the report carries the two-output
+    spectral shape string and the caller asserts against it."""
+    report = _valid_smoke_report("cpu")
+    report["output_shape"] = SPECTRAL_SHAPE
+    assert run_native_smoke.validation_failures(
+        report, "cpu", SPECTRAL_SHAPE
+    ) == []
+
+
+def test_strict_smoke_gate_rejects_spectral_shape_under_waveform_expectation() -> None:
+    """A spectral output shape must fail the default waveform expectation."""
+    report = _valid_smoke_report("cpu")
+    report["output_shape"] = SPECTRAL_SHAPE
+    failures = run_native_smoke.validation_failures(report, "cpu")
+    assert any("output_shape" in failure for failure in failures)
+
+
+def test_strict_smoke_gate_rejects_waveform_shape_under_spectral_expectation() -> None:
+    """A waveform output shape must fail when the spectral interface is
+    expected (interface-aware shape gate)."""
+    report = _valid_smoke_report("cpu")  # output_shape = "[1,4,2,343980]"
+    failures = run_native_smoke.validation_failures(report, "cpu", SPECTRAL_SHAPE)
+    assert any("output_shape" in failure for failure in failures)
+
+
+def test_interface_output_shapes_mapping() -> None:
+    assert run_native_smoke.INTERFACE_OUTPUT_SHAPES["waveform"] == "[1,4,2,343980]"
+    assert run_native_smoke.INTERFACE_OUTPUT_SHAPES["spectral"] == SPECTRAL_SHAPE
+
+
 def test_strict_smoke_gate_rejects_zero_provider_nodes() -> None:
     report = _valid_smoke_report("coreml")
     report["provider_node_count"] = 0

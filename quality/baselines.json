@@ -54,6 +54,24 @@
       "generation_time": null,
       "benchmark_environment": null,
       "note": "NOT FROZEN. No real model quality report, runtime quality report, or native target runtime benchmark has been produced yet. Release gates are NOT landed. To freeze: run run_quality_suite.py --tier release on the stable artifact, run run_runtime_quality_suite.py --tier release on all 5 native targets, compute the model digest and artifact size, and fill in all required fields with the measured values."
+    },
+    {
+      "artifact_id": "htdemucs.spectral.fp32.onnx",
+      "model": "htdemucs",
+      "model_digest": null,
+      "runtime_id": null,
+      "target": null,
+      "provider": null,
+      "baseline_quality_report_id": null,
+      "baseline_quality_report_digest": null,
+      "baseline_runtime_report_id": null,
+      "baseline_runtime_report_digest": null,
+      "baseline_metrics": {},
+      "artifact_size_bytes": null,
+      "frozen_at": null,
+      "generation_time": null,
+      "benchmark_environment": null,
+      "note": "NOT FROZEN. Generation-8 spectral-core stable artifact (spectral=[1,2,2,2048,336]+mix=[1,2,343980] -> spectral_out=[1,4,2,2,2048,336]+time_out=[1,4,2,343980]). No real model quality report, runtime quality report, or native target runtime benchmark has been produced yet. Release gates are NOT landed. To freeze: run run_quality_suite.py --tier release on the stable artifact, run run_runtime_quality_suite.py --tier release on all 5 native targets, compute the model digest and artifact size, and fill in all required fields with the measured values."
     }
   ]
 }

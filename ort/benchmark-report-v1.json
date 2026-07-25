@@ -54,7 +54,8 @@
           },
           "output_shape": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
           "shape_errors": {"type": "array", "items": {"type": "string"}},
-          "frames": {"type": "integer", "minimum": 1}
+          "frames": {"type": "integer", "minimum": 1},
+          "interface": {"type": "string", "enum": ["waveform", "spectral"]}
         }
       }
     },

@@ -5,10 +5,18 @@
 // It never uses the onnxruntime Python wheel as proof that the new library
 // works.
 //
-// It runs one full HTDemucs inference window:
-//   input  [1, 2, 343980]  (float32 zeros)
-//   output [1, 4, 2, 343980] (drums/bass/other/vocals)
-// and rejects any output containing NaN or Inf.
+// It runs one full HTDemucs inference window. One zero-filled float32 tensor
+// is built per model input, using each input's declared static shape from the
+// session, so the harness adapts to both model interfaces without hard-coding
+// either:
+//   waveform : input  [1, 2, 343980]
+//              output [1, 4, 2, 343980] (drums/bass/other/vocals)
+//   spectral : inputs spectral=[1,2,2,2048,336], mix=[1,2,343980]
+//              outputs spectral_out=[1,4,2,2,2048,336], time_out=[1,4,2,343980]
+// It rejects any output containing NaN or Inf. The expected output shape is
+// supplied by the caller via --expect-output-shape (the semicolon-joined,
+// space-free per-output shape string) so the shape gate is interface-aware;
+// it defaults to the waveform "[1,4,2,343980]".
 //
 // The requested execution provider is mandatory. CPU is tested in a separate
 // invocation; a non-CPU provider failure must never be hidden by a replacement
@@ -29,7 +37,8 @@
 //
 // Usage:
 //   ort_smoke --lib <path-to-libonnxruntime> --model <path-to.onnx> \
-//             --provider <cpu|coreml|xnnpack|directml> [--target <triple>]
+//             --provider <cpu|coreml|xnnpack|directml> [--target <triple>] \
+//             [--expect-output-shape "<shape-string>"]
 //
 // Build:
 //   See ort/smoke/CMakeLists.txt. The ORT C API header is included from the
@@ -228,6 +237,9 @@ int main(int argc, char** argv) {
     std::string model_path;
     std::string provider = "cpu";
     std::string target = "unknown";
+    // Expected semicolon-joined per-output shape string. Defaults to the
+    // waveform interface; the spectral interface passes the two-output string.
+    std::string expect_output_shape = "[1,4,2,343980]";
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -235,9 +247,11 @@ int main(int argc, char** argv) {
         else if (a == "--model" && i + 1 < argc) model_path = argv[++i];
         else if (a == "--provider" && i + 1 < argc) provider = argv[++i];
         else if (a == "--target" && i + 1 < argc) target = argv[++i];
+        else if (a == "--expect-output-shape" && i + 1 < argc) expect_output_shape = argv[++i];
         else if (a == "--help") {
             fprintf(stderr, "usage: ort_smoke --lib <lib> --model <onnx> "
-                            "--provider <name> [--target <triple>]\n");
+                            "--provider <name> [--target <triple>] "
+                            "[--expect-output-shape <str>]\n");
             return 0;
         }
     }
@@ -503,48 +517,94 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Get input name.
-    char* input_name_c = nullptr;
-    if (n_inputs > 0) {
-        api->SessionGetInputName(session, 0, allocator, &input_name_c);
-    }
-
-    // Build input tensor [1, 2, 343980] float32 zeros.
-    const int64_t batch = 1;
-    const int64_t channels = 2;
-    const int64_t frames = 343980;
-    std::vector<int64_t> input_shape = {batch, channels, frames};
-    size_t input_count = static_cast<size_t>(batch * channels * frames);
-    std::vector<float> input_data(input_count, 0.0f);
-
     OrtMemoryInfo* mem_info = nullptr;
     api->CreateCpuMemoryInfo(OrtAllocatorType::OrtDeviceAllocator,
                               OrtMemType::OrtMemTypeDefault, &mem_info);
 
-    OrtValue* input_tensor = nullptr;
-    OrtStatus* st = api->CreateTensorWithDataAsOrtValue(
-        mem_info, input_data.data(), input_count * sizeof(float),
-        input_shape.data(), input_shape.size(), ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-        &input_tensor);
-    if (st) {
+    // Build one zero-filled float32 tensor per model input, using each
+    // input's declared static shape from the session. This adapts to the
+    // single-input waveform interface and the two-input spectral-core
+    // interface without hard-coding either shape.
+    std::vector<char*> input_names_owned(n_inputs, nullptr);
+    std::vector<const char*> input_names_c(n_inputs, nullptr);
+    std::vector<OrtValue*> input_tensors(n_inputs, nullptr);
+    std::vector<std::vector<float>> input_buffers(n_inputs);
+    std::string input_build_error;
+
+    for (size_t i = 0; i < n_inputs; ++i) {
+        api->SessionGetInputName(session, i, allocator, &input_names_owned[i]);
+        input_names_c[i] = input_names_owned[i];
+
+        OrtTypeInfo* in_type_info = nullptr;
+        OrtStatus* ti_st = api->SessionGetInputTypeInfo(session, i, &in_type_info);
+        if (ti_st) {
+            input_build_error = std::string("SessionGetInputTypeInfo[") +
+                std::to_string(i) + "]: " + api->GetErrorMessage(ti_st);
+            api->ReleaseStatus(ti_st);
+            break;
+        }
+        const OrtTensorTypeAndShapeInfo* in_tensor_info = nullptr;
+        api->CastTypeInfoToTensorInfo(in_type_info, &in_tensor_info);
+        if (!in_tensor_info) {
+            input_build_error = "input " + std::to_string(i) + " is not a tensor";
+            api->ReleaseTypeInfo(in_type_info);
+            break;
+        }
+        size_t ndims = 0;
+        api->GetDimensionsCount(in_tensor_info, &ndims);
+        std::vector<int64_t> dims(ndims, 0);
+        api->GetDimensions(in_tensor_info, dims.data(), ndims);
+        api->ReleaseTypeInfo(in_type_info);
+
+        int64_t count = 1;
+        bool dynamic = (ndims == 0);
+        for (size_t d = 0; d < ndims; ++d) {
+            if (dims[d] <= 0) { dynamic = true; break; }
+            count *= dims[d];
+        }
+        if (dynamic) {
+            input_build_error = std::string("input '") +
+                (input_names_owned[i] ? input_names_owned[i] : "?") +
+                "' has a non-static shape; the smoke harness requires static input dims";
+            break;
+        }
+        input_buffers[i].assign(static_cast<size_t>(count), 0.0f);
+        OrtStatus* ct_st = api->CreateTensorWithDataAsOrtValue(
+            mem_info, input_buffers[i].data(),
+            static_cast<size_t>(count) * sizeof(float),
+            dims.data(), ndims, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+            &input_tensors[i]);
+        if (ct_st) {
+            input_build_error = std::string("CreateTensorWithDataAsOrtValue[") +
+                std::to_string(i) + "]: " + api->GetErrorMessage(ct_st);
+            api->ReleaseStatus(ct_st);
+            break;
+        }
+    }
+
+    auto free_inputs = [&]() {
+        for (size_t i = 0; i < n_inputs; ++i) {
+            if (input_tensors[i]) api->ReleaseValue(input_tensors[i]);
+            if (input_names_owned[i]) api->AllocatorFree(allocator, input_names_owned[i]);
+        }
+    };
+
+    if (!input_build_error.empty()) {
         print_json_field("inference", "failed", false);
-        print_json_field("inference_error", api->GetErrorMessage(st), false);
-        api->ReleaseStatus(st);
+        print_json_field("inference_error", input_build_error, false);
         print_json_field("output_shape", "", false);
         print_json_field_bool("finite_output", false, false);
         print_json_field("provider_assignment", provider_assigned, false);
         print_json_trailer(-1, used_fallback);
-        if (input_name_c) api->AllocatorFree(allocator, input_name_c);
+        free_inputs();
         api->ReleaseMemoryInfo(mem_info);
         api->ReleaseSession(session);
         api->ReleaseEnv(env);
         return 1;
     }
 
-    // Run inference.
-    const char* input_names[] = {input_name_c};
-    std::vector<char*> output_names;
-    output_names.resize(n_outputs);
+    // Get output names.
+    std::vector<char*> output_names(n_outputs, nullptr);
     for (size_t i = 0; i < n_outputs; ++i) {
         api->SessionGetOutputName(session, i, allocator, &output_names[i]);
     }
@@ -552,11 +612,11 @@ int main(int argc, char** argv) {
     // const-correct arrays from the allocator-returned char* names.
     std::vector<const char*> output_names_c(n_outputs, nullptr);
     for (size_t i = 0; i < n_outputs; ++i) output_names_c[i] = output_names[i];
-    const OrtValue* input_arr[] = {input_tensor};
 
     std::vector<OrtValue*> outputs(n_outputs, nullptr);
-    st = api->Run(session, nullptr, input_names, input_arr, 1,
-                  output_names_c.data(), n_outputs, outputs.data());
+    OrtStatus* st = api->Run(session, nullptr,
+                             input_names_c.data(), input_tensors.data(), n_inputs,
+                             output_names_c.data(), n_outputs, outputs.data());
 
     if (st) {
         print_json_field("inference", "failed", false);
@@ -567,8 +627,7 @@ int main(int argc, char** argv) {
         print_json_field("provider_assignment", provider_assigned, false);
         print_json_trailer(-1, used_fallback);
         for (size_t i = 0; i < n_outputs; ++i) if (output_names[i]) api->AllocatorFree(allocator, output_names[i]);
-        if (input_name_c) api->AllocatorFree(allocator, input_name_c);
-        api->ReleaseValue(input_tensor);
+        free_inputs();
         api->ReleaseMemoryInfo(mem_info);
         api->ReleaseSession(session);
         api->ReleaseEnv(env);
@@ -616,7 +675,7 @@ int main(int argc, char** argv) {
         if (type_info) api->ReleaseTypeInfo(type_info);
     }
     print_json_field("output_shape", shape_str, false);
-    const bool shape_valid = shape_str == "[1,4,2,343980]";
+    const bool shape_valid = shape_str == expect_output_shape;
     print_json_field_bool("finite_output", finite, false);
     print_json_field("provider_assignment", provider_assigned, false);
 
@@ -671,8 +730,7 @@ int main(int argc, char** argv) {
         if (output_names[i]) api->AllocatorFree(allocator, output_names[i]);
         if (outputs[i]) api->ReleaseValue(outputs[i]);
     }
-    if (input_name_c) api->AllocatorFree(allocator, input_name_c);
-    api->ReleaseValue(input_tensor);
+    free_inputs();
     api->ReleaseMemoryInfo(mem_info);
     api->ReleaseSession(session);
     api->ReleaseEnv(env);
