@@ -98,10 +98,18 @@ jobs:
             python scripts/onnx_runtime_contract.py --model "$f" --ort-session
           done
 
-      - name: Checksums
+      - name: Package dual artifacts as deterministic tar.gz
         run: |
           cd work
-          shasum -a 256 htdemucs_ft.dedup.fp32.onnx htdemucs.dual.fp32.onnx htdemucs_ft.dual.fp32.onnx > derived-models.sha256
+          for f in htdemucs.dual.fp32.onnx htdemucs_ft.dual.fp32.onnx; do
+            tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' -cf - "$f" | gzip -n -6 > "$f.tar.gz"
+          done
+          ls -la *.tar.gz
+
+      - name: Checksums (inner models + outer archives)
+        run: |
+          cd work
+          shasum -a 256 htdemucs_ft.dedup.fp32.onnx htdemucs.dual.fp32.onnx htdemucs_ft.dual.fp32.onnx htdemucs.dual.fp32.onnx.tar.gz htdemucs_ft.dual.fp32.onnx.tar.gz > derived-models.sha256
           cat derived-models.sha256
 
       - name: Upload verification reports
@@ -119,9 +127,9 @@ jobs:
         run: |
           gh release create "${{ inputs.release_tag }}" \
             --title "Derived model artifacts ${{ inputs.release_tag }}" \
-            --notes "Deterministic derivations of the stable catalog models (issue #22): initializer-deduplicated htdemucs_ft and dual-output (four-stem + karaoke projection) models — one file serves both application modes. Verified numerically against their sources in this workflow run (run_id ${{ github.run_id }}). See derived-models.sha256 for digests." \
+            --notes "Deterministic derivations of the stable catalog models (issue #22): initializer-deduplicated htdemucs_ft (raw, latest.json compatibility) and dual-output models packaged as deterministic tar.gz archives (-35-40% download). Inner and outer digests in derived-models.sha256. Verified numerically against their sources in this workflow run (run_id ${{ github.run_id }}). See derived-models.sha256 for digests." \
             work/htdemucs_ft.dedup.fp32.onnx \
-            work/htdemucs.dual.fp32.onnx \
-            work/htdemucs_ft.dual.fp32.onnx \
+            work/htdemucs.dual.fp32.onnx.tar.gz \
+            work/htdemucs_ft.dual.fp32.onnx.tar.gz \
             work/derived-models.sha256 \
             work/verify-ft-dedup.json work/verify-h-dual.json work/verify-ft-dual.json

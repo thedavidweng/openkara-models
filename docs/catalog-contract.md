@@ -135,6 +135,16 @@ filename, or URL to infer a version (invariant above).
 A file on disk is identified by its recorded SHA-256, never by its name or
 embedded metadata; embedded `openkara.*` metadata is diagnostic only.
 
+**Compressed model assets:** a model artifact whose `filename` ends in
+`.tar.gz` is an archive, exactly like every runtime artifact.
+`archive_digest`/`byte_size` describe the downloaded archive;
+`extracted_file_digests` lists the contained `.onnx` file's SHA-256 and
+size. The app verifies the archive digest after download, extracts with a
+safe extractor (path traversal, link, and size limits — the same rules the
+runtime archives already require), verifies the extracted file's digest,
+then discards the archive. Raw `.onnx` artifacts have
+`extracted_file_digests` naming themselves with the same digest.
+
 **Release-tag taxonomy (storage only, never version signals):**
 
 | Tag family | Contents |
