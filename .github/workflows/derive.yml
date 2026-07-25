@@ -127,7 +127,7 @@ jobs:
         run: |
           gh release create "${{ inputs.release_tag }}" \
             --title "Derived model artifacts ${{ inputs.release_tag }}" \
-            --notes "Deterministic derivations of the stable catalog models (issue #22): initializer-deduplicated htdemucs_ft (raw, latest.json compatibility) and dual-output models packaged as deterministic tar.gz archives (-35-40% download). Inner and outer digests in derived-models.sha256. Verified numerically against their sources in this workflow run (run_id ${{ github.run_id }}). See derived-models.sha256 for digests." \
+            --notes "Deterministic derivations of the stable catalog models (issue #22): initializer-deduplicated htdemucs_ft (raw) and dual-output models packaged as deterministic tar.gz archives (-35-40% download). Inner and outer digests in derived-models.sha256. Verified numerically against their sources in this workflow run (run_id ${{ github.run_id }}). See derived-models.sha256 for digests." \
             work/htdemucs_ft.dedup.fp32.onnx \
             work/htdemucs.dual.fp32.onnx.tar.gz \
             work/htdemucs_ft.dual.fp32.onnx.tar.gz \
