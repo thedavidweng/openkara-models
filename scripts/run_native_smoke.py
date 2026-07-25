@@ -106,9 +106,18 @@ def _build_harness(ort_source: Path, build_dir: Path) -> Path:
     return binary
 
 
+# Expected semicolon-joined per-output shape string for each model interface.
+# The waveform interface has one output [1,4,2,343980]; the spectral-core
+# interface has two: spectral_out=[1,4,2,2,2048,336] then time_out=[1,4,2,343980].
+INTERFACE_OUTPUT_SHAPES = {
+    "waveform": "[1,4,2,343980]",
+    "spectral": "[1,4,2,2,2048,336];[1,4,2,343980]",
+}
+
+
 def run_smoke(
     lib_path: Path, model_path: Path, target: str, provider: str,
-    harness: Path,
+    harness: Path, expect_output_shape: str,
 ) -> dict[str, Any]:
     """Invoke the harness and return its parsed JSON output."""
     cmd = [
@@ -117,6 +126,7 @@ def run_smoke(
         "--model", str(model_path),
         "--provider", provider,
         "--target", target,
+        "--expect-output-shape", expect_output_shape,
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     # The harness prints JSON to stdout. Parse it.
@@ -164,12 +174,17 @@ def run_smoke(
 HARDWARE_PROVIDERS = {"directml", "coreml"}
 
 
-def validation_failures(report: dict[str, Any], requested_provider: str) -> list[str]:
+def validation_failures(report: dict[str, Any], requested_provider: str,
+                        expected_output_shape: str = "[1,4,2,343980]") -> list[str]:
     """Return strict native-smoke gate failures.
 
     CPU and accelerated providers are tested in separate invocations. A
     non-CPU invocation must use the requested provider for at least one node;
     creating a replacement CPU session is a failure.
+
+    ``expected_output_shape`` is the semicolon-joined per-output shape string
+    for the model interface (waveform vs. spectral-core), defaulting to the
+    waveform interface so existing single-output callers are unaffected.
 
     For hardware-dependent providers (directml, coreml), a ``"skipped"``
     session_creation status is accepted when the hardware is absent — the
@@ -199,8 +214,11 @@ def validation_failures(report: dict[str, Any], requested_provider: str) -> list
         failures.append("inference did not succeed")
     if report.get("finite_output") is not True:
         failures.append("output contains NaN/Inf or was not produced")
-    if report.get("output_shape") != "[1,4,2,343980]":
-        failures.append(f"unexpected output_shape={report.get('output_shape')!r}")
+    if report.get("output_shape") != expected_output_shape:
+        failures.append(
+            f"unexpected output_shape={report.get('output_shape')!r}, "
+            f"expected {expected_output_shape!r}"
+        )
     if report.get("used_fallback") is True:
         failures.append("whole-session CPU fallback was used")
     if report.get("provider_assignment") != requested_provider:
@@ -228,6 +246,12 @@ def main() -> int:
     parser.add_argument("--provider", required=True,
                         choices=["cpu", "coreml", "xnnpack", "directml"],
                         help="Requested execution provider.")
+    parser.add_argument("--interface", choices=["waveform", "spectral"], default="waveform",
+                        help="Model interface. 'waveform' expects a single output "
+                             "[1,4,2,343980]; 'spectral' expects two outputs "
+                             "spectral_out=[1,4,2,2,2048,336] + time_out=[1,4,2,343980]. "
+                             "Selects the harness input generation (one zero tensor per "
+                             "declared input) shape gate and the report assertion.")
     parser.add_argument("--ort-source", type=Path, default=ROOT / "ort" / "source",
                         help="ORT source checkout (for the C API header).")
     parser.add_argument("--harness-build-dir", type=Path, default=SMOKE_DIR / "build",
@@ -273,8 +297,11 @@ def main() -> int:
         model_size, model_sha = _sha256_file(args.model)
 
         # Run the harness.
-        print(f"Running smoke: target={args.target} provider={args.provider}...")
-        result = run_smoke(lib_path, args.model, args.target, args.provider, harness)
+        expect_output_shape = INTERFACE_OUTPUT_SHAPES[args.interface]
+        print(f"Running smoke: target={args.target} provider={args.provider} "
+              f"interface={args.interface}...")
+        result = run_smoke(lib_path, args.model, args.target, args.provider, harness,
+                           expect_output_shape)
 
     # Assemble the final report.
     report = {
@@ -290,6 +317,7 @@ def main() -> int:
             "filename": args.model.name,
         },
         "target": args.target,
+        "interface": args.interface,
         "requested_provider": args.provider,
         "available_providers": result.get("available_providers", ""),
         "output_shape": result.get("output_shape", ""),
@@ -336,7 +364,7 @@ def main() -> int:
     print(f"  finite_output: {report['finite_output']}")
     print(f"  provider_assignment: {report['provider_assignment']}")
 
-    failures = validation_failures(report, args.provider)
+    failures = validation_failures(report, args.provider, expect_output_shape)
     if failures:
         print("FAIL: native smoke harness detected errors", file=sys.stderr)
         if report.get("session_creation_error"):

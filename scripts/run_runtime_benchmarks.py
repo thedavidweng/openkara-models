@@ -31,16 +31,28 @@ Usage::
 
     python scripts/run_runtime_benchmarks.py \\
         --runtime ort/packages/onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz \\
-        --catalog catalog/releases/2026-07-20-001.json \\
+        --catalog catalog/releases/2026-07-25-005.json \\
         --report benchmark-report.json
 
     # Synthetic input only (no model download needed for smoke test):
     python scripts/run_runtime_benchmarks.py --runtime ... --model models/htdemucs.onnx --frames 343980 --report report.json
+
+    # Local mode against the installed onnxruntime wheel (no built archive):
+    python scripts/run_runtime_benchmarks.py \\
+        --model models/htdemucs.spectral.onnx --interface spectral --report report.json
+
+The model interface (single-input waveform vs. two-input spectral-core) is
+detected from the session's input names: a ``{spectral, mix}`` input set feeds
+the spectral interface (``spectral`` synthesized via ``spectral_reference.spec``
+of a deterministic waveform) and asserts the ``spectral_out``/``time_out``
+shapes; anything else feeds the legacy single waveform input. The timing
+semantics (cold/warm/RTF report fields) are identical for both interfaces.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gc
 import hashlib
 import json
@@ -59,6 +71,7 @@ GENERATOR_VERSION = "openkara.runtime-benchmark/v1"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 import archive_utils  # noqa: E402
+import runtime_inputs  # noqa: E402
 
 
 def _sha256_file(path: Path) -> tuple[int, str]:
@@ -136,13 +149,17 @@ def _parse_output_shape(semantics: str) -> list[int] | None:
     return [int(x.strip()) for x in m.group(1).split(",")]
 
 
-def _load_session(lib_path: Path, model_path: str, enable_profiling: bool = False):
-    """Load the ORT shared library and create an InferenceSession."""
+def _load_session(lib_path: Path | None, model_path: str, enable_profiling: bool = False):
+    """Load the ORT shared library and create an InferenceSession.
+
+    When ``lib_path`` is ``None`` (local mode), the installed onnxruntime
+    wheel's bundled library is used unchanged; otherwise the built runtime is
+    swapped in via the ``ORT_RUNTIMES`` env var (semicolon-separated list of
+    paths that ORT's Python wheel honours).
+    """
     import onnxruntime as ort
-    # Override the runtime library path. ORT's Python wheel supports loading
-    # a custom shared library via the ORT_RUNTIMES env var (semicolon-separated
-    # list of paths). This swaps the wheel's bundled lib for our built one.
-    os.environ["ORT_RUNTIMES"] = str(lib_path)
+    if lib_path is not None:
+        os.environ["ORT_RUNTIMES"] = str(lib_path)
     so = ort.SessionOptions()
     if enable_profiling:
         so.enable_profiling = True
@@ -150,11 +167,47 @@ def _load_session(lib_path: Path, model_path: str, enable_profiling: bool = Fals
     return sess
 
 
+def _installed_runtime_record() -> dict[str, Any]:
+    """Describe the installed onnxruntime wheel's shared library (local mode).
+
+    The benchmark report's ``runtime_archive`` block requires ``name`` /
+    ``sha256`` / ``size``; in local mode there is no built archive, so we
+    hash the wheel's bundled runtime library instead for traceability.
+    """
+    import onnxruntime
+    capi = Path(onnxruntime.__file__).resolve().parent / "capi"
+    lib: Path | None = None
+    for pat in ("libonnxruntime*.dylib", "libonnxruntime*.so", "onnxruntime*.dll",
+                "*.dylib", "*.so"):
+        for cand in sorted(capi.glob(pat)):
+            if "onnxruntime" in cand.name.lower() and "pybind" not in cand.name.lower():
+                lib = cand
+                break
+        if lib is not None:
+            break
+    if lib is None:
+        # Fall back to the pybind extension module — always present.
+        for pat in ("onnxruntime_pybind11_state*", "*.so", "*.pyd"):
+            hits = sorted(capi.glob(pat))
+            if hits:
+                lib = hits[0]
+                break
+    if lib is None:
+        raise FileNotFoundError(f"could not locate an onnxruntime library under {capi}")
+    size, sha = _sha256_file(lib)
+    return {"name": lib.name, "sha256": sha, "size": size}
+
+
 def benchmark_model(
-    lib_path: Path, model_path: Path, frames: int,
+    lib_path: Path | None, model_path: Path, frames: int,
     warmup: int, iters: int, expected_output_shape: list[int] | None,
 ) -> dict[str, Any]:
-    """Run the benchmark for one model. Returns a metrics dict."""
+    """Run the benchmark for one model. Returns a metrics dict.
+
+    The input feed and the output-shape assertion adapt to the model
+    interface (single waveform input vs. two-input spectral core), detected
+    from the session's input names. Timing semantics are identical for both.
+    """
     import numpy as np
 
     # Cold load.
@@ -165,33 +218,54 @@ def benchmark_model(
     sess = _load_session(lib_path, str(model_path), enable_profiling=True)
     cold_load = time.perf_counter() - t0
 
-    inp = np.zeros((1, 2, frames), dtype=np.float32)
-    input_name = sess.get_inputs()[0].name
+    # Build the feed by session input names (waveform or spectral).
+    feed, interface = runtime_inputs.build_feed(sess, frames)
+    output_names = [o.name for o in sess.get_outputs()]
 
     # First window.
     t0 = time.perf_counter()
-    out = sess.run(None, {input_name: inp})
+    out = sess.run(None, feed)
     first_window = time.perf_counter() - t0
 
     # Shape + finiteness check.
     shape_errors: list[str] = []
     for i, o in enumerate(out):
         if not np.all(np.isfinite(o)):
-            shape_errors.append(f"output[{i}] contains NaN or Inf")
-        if expected_output_shape is not None and list(o.shape) != expected_output_shape:
-            shape_errors.append(
-                f"output[{i}] shape {list(o.shape)} != expected {expected_output_shape}"
-            )
+            shape_errors.append(f"output[{i}] ({output_names[i]}) contains NaN or Inf")
+
+    if interface == "spectral":
+        # Assert spectral_out / time_out shapes by name.
+        expected_by_name = runtime_inputs.expected_output_shapes(
+            interface, frames, feed["spectral"], None,
+        )
+        for name, o in zip(output_names, out):
+            exp = expected_by_name.get(name)
+            if exp is None:
+                shape_errors.append(f"unexpected output name {name!r} for spectral interface")
+            elif list(o.shape) != exp:
+                shape_errors.append(
+                    f"output {name!r} shape {list(o.shape)} != expected {exp}"
+                )
+        missing = set(expected_by_name) - set(output_names)
+        if missing:
+            shape_errors.append(f"spectral interface missing outputs: {sorted(missing)}")
+    else:
+        # Waveform: a single flat expected shape applied to every output.
+        for i, o in enumerate(out):
+            if expected_output_shape is not None and list(o.shape) != expected_output_shape:
+                shape_errors.append(
+                    f"output[{i}] shape {list(o.shape)} != expected {expected_output_shape}"
+                )
 
     # Warm up.
     for _ in range(warmup):
-        sess.run(None, {input_name: inp})
+        sess.run(None, feed)
 
     # Measure.
     latencies: list[float] = []
     for _ in range(iters):
         t = time.perf_counter()
-        sess.run(None, {input_name: inp})
+        sess.run(None, feed)
         latencies.append(time.perf_counter() - t)
 
     rss_after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -231,20 +305,29 @@ def benchmark_model(
         "output_shape": [list(o.shape) for o in out],
         "shape_errors": shape_errors,
         "frames": frames,
+        "interface": interface,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run native ORT runtime benchmarks.")
-    parser.add_argument("--runtime", required=True, type=Path,
-                        help="Runtime archive to benchmark.")
+    parser.add_argument("--runtime", type=Path, default=None,
+                        help="Runtime archive to benchmark. If omitted, the "
+                             "installed onnxruntime wheel is used (local mode).")
     parser.add_argument("--model", type=Path, default=None,
                         help="Single ONNX model. Requires --expected-output-shape "
-                             "so output-shape validation is not bypassed.")
+                             "(waveform) or --interface spectral so output-shape "
+                             "validation is not bypassed.")
+    parser.add_argument("--interface", choices=["waveform", "spectral"], default="waveform",
+                        help="Model interface hint for the --model path. The actual "
+                             "interface is auto-detected from the session inputs; this "
+                             "only relaxes the waveform shape guard for spectral models "
+                             "(whose two output shapes are asserted intrinsically).")
     parser.add_argument("--expected-output-shape", type=str, default=None,
                         help="Expected output shape as comma-separated dims, "
                              "e.g. '1,4,2,343980'. Required when --model is used "
-                             "without --catalog so shape validation is enforced.")
+                             "with the waveform interface and without --catalog so "
+                             "shape validation is enforced.")
     parser.add_argument("--catalog", type=Path, default=None,
                         help="Catalog manifest to resolve compatible models from.")
     parser.add_argument("--model-artifact-id", type=str, default=None,
@@ -263,14 +346,23 @@ def main() -> int:
                         help="Baseline report to compare fallback node count against.")
     args = parser.parse_args()
 
-    if not args.runtime.is_file():
+    if args.runtime is not None and not args.runtime.is_file():
         print(f"ERROR: runtime archive not found: {args.runtime}", file=sys.stderr)
         return 1
 
-    # Extract runtime.
-    with tempfile.TemporaryDirectory() as tmpd:
-        lib_path = _extract_runtime(args.runtime, Path(tmpd))
-        print(f"runtime library: {lib_path}")
+    # Extract the runtime archive (if given), else use the installed wheel.
+    with contextlib.ExitStack() as stack:
+        if args.runtime is not None:
+            tmpd = stack.enter_context(tempfile.TemporaryDirectory())
+            lib_path: Path | None = _extract_runtime(args.runtime, Path(tmpd))
+            print(f"runtime library: {lib_path}")
+            archive_size, archive_sha = _sha256_file(args.runtime)
+            archive_name = args.runtime.name
+        else:
+            lib_path = None
+            rec = _installed_runtime_record()
+            archive_name, archive_sha, archive_size = rec["name"], rec["sha256"], rec["size"]
+            print(f"local mode: installed onnxruntime library {archive_name}")
 
         # Resolve models.
         models: list[tuple[str, Path, dict[str, Any] | None]] = []
@@ -282,14 +374,15 @@ def main() -> int:
                 parser.error(f"--expected-output-shape must be comma-separated ints, "
                              f"got {args.expected_output_shape!r}")
         if args.model:
-            # Reject a bare --model that bypasses expected-output-shape
-            # validation. Either --catalog (which supplies the shape from the
-            # model artifact's output_semantics) or --expected-output-shape
-            # must be provided.
-            if not args.catalog and explicit_shape is None:
+            # Reject a bare --model that bypasses output-shape validation.
+            # Either --catalog (which supplies the shape from the model
+            # artifact's output_semantics), --expected-output-shape, or
+            # --interface spectral (whose two output shapes are asserted
+            # intrinsically from the synthesized spectral input) must be given.
+            if not args.catalog and explicit_shape is None and args.interface != "spectral":
                 parser.error(
-                    "--model requires --expected-output-shape (or --catalog) so "
-                    "output-shape validation is not bypassed"
+                    "--model requires --expected-output-shape (or --catalog, or "
+                    "--interface spectral) so output-shape validation is not bypassed"
                 )
             art: dict[str, Any] | None = None
             if explicit_shape is not None:
@@ -314,9 +407,8 @@ def main() -> int:
             print("ERROR: no models to benchmark", file=sys.stderr)
             return 1
 
-        # Archive size.
-        archive_size, archive_sha = _sha256_file(args.runtime)
-
+        # Archive size + digest were computed above (built archive or, in
+        # local mode, the installed wheel's shared library).
         results: list[dict[str, Any]] = []
         for name, model_path, art in models:
             print(f"\nBenchmarking {name}...")
@@ -339,7 +431,7 @@ def main() -> int:
         report = {
             "schema_version": GENERATOR_VERSION,
             "runtime_archive": {
-                "name": args.runtime.name,
+                "name": archive_name,
                 "sha256": archive_sha,
                 "size": archive_size,
             },
