@@ -15,9 +15,21 @@ permissions:
   contents: write
   packages: write
 
+# The publish pipeline ships REDUCED-operator runtimes: each target is built
+# with scripts/build_runtime.py --reduced, pruning every operator kernel not in
+# the spectral stable model's operator set (issue #73 step 3 pre-work). The
+# required-operator config is regenerated per-job from the stable catalog model
+# (download_stable_model + generate_required_operators) — it is deliberately not
+# committed (ort/.gitignore), so every job that builds or verifies a reduced
+# archive must regenerate the identical config first. Generation is
+# deterministic (same model bytes + same source lock -> byte-identical config),
+# so the ops_config_sha256 recorded in each build manifest / provenance matches
+# across all jobs. The reduced-build-and-compare job in ort-build.yml is the
+# proven template for the download-model -> generate-ops -> build --reduced flow.
+
 jobs:
-  # Build all 5 targets in parallel, generate supply-chain, verify, upload.
-  # Each job produces a runtime archive artifact consumed by the publish job.
+  # Build all 5 targets in parallel (reduced), generate supply-chain, verify,
+  # upload. Each job produces a reduced runtime archive consumed by publish.
   build:
     strategy:
       fail-fast: false
@@ -45,8 +57,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake build-essential
-      - name: Build ORT for ${{ matrix.target }}
-        run: python scripts/build_runtime.py --target ${{ matrix.target }}
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0"
+      # Reduced build: derive the operator set from the spectral stable model,
+      # then prune every other kernel. The config is regenerated here (not
+      # committed) so build_runtime --reduced can consume it.
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced ORT for ${{ matrix.target }}
+        run: python scripts/build_runtime.py --target ${{ matrix.target }} --reduced
       - name: Generate supply-chain records (SBOM + provenance)
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
@@ -54,7 +79,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ort-${{ matrix.target }}
-          path: ort/packages/onnxruntime-*-${{ matrix.target }}.*
+          path: ort/packages/onnxruntime-*-${{ matrix.target }}-reduced.*
           retention-days: 14
 
   # Linux x64 builds inside manylinux_2_28 with gcc-toolset-13: the glibc
@@ -68,19 +93,27 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install build deps (gcc-toolset-13 + cmake + python 3.11)
+      - name: Install build deps (gcc-toolset-13 + cmake + onnx + python 3.11)
         run: |
           dnf -y install gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils
-          /opt/python/cp311-cp311/bin/python -m pip install "cmake>=3.28"
+          /opt/python/cp311-cp311/bin/python -m pip install "cmake>=3.28" "onnx>=1.22.0"
           {
             echo "/opt/rh/gcc-toolset-13/root/usr/bin"
             echo "/opt/python/cp311-cp311/bin"
           } >> "$GITHUB_PATH"
-      - name: Build ORT for x86_64-unknown-linux-gnu
-        run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced ORT for x86_64-unknown-linux-gnu
+        run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu --reduced
       - name: Verify ABI floor against the release baseline
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
           python scripts/check_linux_abi_floor.py \
             --archive "$RUNTIME" \
             --max-glibc 2.35 --max-glibcxx 3.4.30 --max-cxxabi 1.3.13
@@ -91,12 +124,15 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ort-x86_64-unknown-linux-gnu
-          path: ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz
+          path: ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz
           retention-days: 14
 
-  # Publish: download all 5 archives, generate catalog entries, create a
-  # GitHub release with the archives as assets, and emit the catalog spec
-  # fragment for merge into the release spec.
+  # Publish: download all 5 reduced archives, regenerate the required-operator
+  # config (so verify's ops_config_sha256 gate can revalidate it), generate
+  # catalog entries, create a GitHub release with the archives as assets, and
+  # emit the catalog spec fragment for merge into the release spec. The
+  # required-operators sidecar is uploaded as an artifact for auditability of
+  # the reduced operator set.
   publish:
     needs: [build, build-x86_64-linux]
     runs-on: ubuntu-latest
@@ -107,12 +143,27 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0"
+
       - name: Download all runtime artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: ort-*
           path: ort/packages
           merge-multiple: true
+
+      # Re-derive the identical reduced-operator config so verify_runtime_package
+      # can re-check each reduced archive's ops_config_sha256 against it.
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
 
       - name: Verify all packages
         run: python scripts/verify_runtime_package.py --all
@@ -130,11 +181,19 @@ jobs:
           TAG="${{ inputs.release_id && format('infra-{0}', inputs.release_id) || github.ref_name }}"
           gh release create "$TAG" \
             --title "ORT runtime ${{ github.ref_name || inputs.release_id }}" \
-            --notes "Source-built ONNX Runtime archives for 5 targets. See catalog/specs/runtime-entries.json for the catalog spec fragment." \
+            --notes "Source-built, reduced-operator ONNX Runtime archives for 5 targets. See catalog/specs/runtime-entries.json for the catalog spec fragment and runtime-required-operators for the operator set." \
             ort/packages/onnxruntime-*.tar.gz ort/packages/onnxruntime-*.zip
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: runtime-catalog-entries
           path: catalog/specs/runtime-entries.json
+          retention-days: 30
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: runtime-required-operators
+          path: |
+            ort/required-operators.config
+            ort/required-operators.json
           retention-days: 30
