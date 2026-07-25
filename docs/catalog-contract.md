@@ -103,6 +103,47 @@ manifest by URL, SHA-256, and size. It advances in one atomic step after every
 referenced asset and gate passes. `generation` is monotonically non-decreasing
 and must equal the referenced manifest's generation.
 
+## Update detection (consumer contract)
+
+The app's model-update check works exclusively through the stable pointer.
+GitHub release tags are storage addresses; the app must never parse a tag,
+filename, or URL to infer a version (invariant above).
+
+**Version identity the app persists at install time:**
+
+- the pointer's `generation` (monotonic integer — the catalog version) and
+  `release_id`;
+- for every downloaded file: its `artifact_id` and `archive_digest`
+  (SHA-256) from the manifest.
+
+**Update check algorithm:**
+
+1. Fetch `catalog/channels/stable.json` from the repository's default branch
+   (raw URL). It is a few hundred bytes.
+2. If `generation` is not greater than the stored generation, there is no
+   update. Stop.
+3. Fetch `release_manifest_url` and verify `release_manifest_sha256` and
+   `release_manifest_size` before parsing.
+4. Diff the manifest's artifacts against stored state by `artifact_id` +
+   `archive_digest`. Download only artifacts whose digest changed or that
+   are new; verify each download's SHA-256 and byte size before use.
+5. If a stored `artifact_id` appears with `deprecation.deprecated: true`,
+   migrate to `deprecation.replacement_artifact_id` (present in the same
+   manifest) and delete the old file after the replacement verifies.
+6. Persist the new `generation`, `release_id`, and per-artifact digests.
+
+A file on disk is identified by its recorded SHA-256, never by its name or
+embedded metadata; embedded `openkara.*` metadata is diagnostic only.
+
+**Release-tag taxonomy (storage only, never version signals):**
+
+| Tag family | Contents |
+|---|---|
+| `infra-<release-id>` | immutable catalog release: manifest + supply-chain records |
+| `model-v*`, `model-ft-v*` | converted source model assets |
+| `model-derived-v*` | deterministic derived model assets (dedup, projections) |
+| `ort-v*` | ONNX Runtime archives for the five targets |
+
 ## `latest.json` migration adapter
 
 OpenKara PR #165 currently fetches an ad hoc `latest.json` of the form:
