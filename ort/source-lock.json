@@ -92,7 +92,8 @@
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
-        "-DCMAKE_SKIP_INSTALL_RULES=ON"
+        "-DCMAKE_SKIP_INSTALL_RULES=ON",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
@@ -102,7 +103,7 @@
         "xnnpack"
       ],
       "runner": "ubuntu-24.04-arm",
-      "runner_note": "Linux ARM64 native runner (GitHub-hosted ARM available since 2025)."
+      "runner_note": "Linux arm64 native runner. GitHub offers no ubuntu-22.04-arm hosted runner, so the glibc floor is 24.04's; libstdc++ is linked statically to at least avoid a GLIBCXX floor. Revisit when an older arm image or container build is available."
     },
     "x86_64-apple-darwin": {
       "archive_format": "tar.gz",
@@ -180,7 +181,8 @@
         "-Donnxruntime_USE_CPU=ON",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
-        "-DCMAKE_SKIP_INSTALL_RULES=ON"
+        "-DCMAKE_SKIP_INSTALL_RULES=ON",
+        "-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
@@ -189,8 +191,8 @@
         "cpu",
         "xnnpack"
       ],
-      "runner": "ubuntu-latest",
-      "runner_note": "Linux x64 native runner."
+      "runner": "ubuntu-22.04",
+      "runner_note": "Linux x64 native runner. PINNED to ubuntu-22.04: the shared library's glibc symbol floor is set by the build OS, and ubuntu-22.04 (glibc 2.35) is the oldest OS OpenKara ships for. Building on a newer image produced a runtime requiring GLIBC_2.38/GLIBCXX_3.4.31 that fails to load on the release baseline. libstdc++/libgcc are linked statically so the PPA gcc-13 toolchain adds no GLIBCXX floor of its own."
     }
   },
   "toolchain": {

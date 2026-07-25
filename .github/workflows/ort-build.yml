@@ -149,7 +149,12 @@ jobs:
 
   build-x86_64-unknown-linux-gnu:
     needs: validate-source-lock
-    runs-on: ubuntu-latest
+    # PINNED to ubuntu-22.04: the artifact's glibc symbol floor is set by the
+    # build OS, and 22.04 (glibc 2.35) is OpenKara's Linux release baseline.
+    # gcc-13 comes from the toolchain PPA; libstdc++/libgcc are linked
+    # statically (source-lock cmake_args) so the newer compiler runtime adds
+    # no GLIBCXX floor.
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -158,10 +163,24 @@ jobs:
           python-version: "3.11"
       - name: Install build deps
         run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential
+          sudo apt-get install -y build-essential gcc-13 g++-13
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-13
+          # 22.04's apt cmake is 3.22; the source lock requires >= 3.28.
+          python -m pip install "cmake>=3.28"
       - name: Build ORT for x86_64-unknown-linux-gnu
+        env:
+          CC: gcc-13
+          CXX: g++-13
         run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu
+      - name: Verify ABI floor against the release baseline
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          python scripts/check_linux_abi_floor.py \
+            --archive "$RUNTIME" \
+            --max-glibc 2.35 --max-glibcxx 3.4.30 --max-cxxabi 1.3.13
       - name: Generate supply-chain records (SBOM + provenance)
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
