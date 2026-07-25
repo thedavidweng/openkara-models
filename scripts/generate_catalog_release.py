@@ -196,6 +196,13 @@ def _build_latest_adapter(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]
         variant = model.get("variant")
         if not variant:
             continue
+        # The adapter serves OpenKara PR #165's four-stem waveform consumers:
+        # projections (karaoke_2stem) are never selectable here, and a
+        # deprecated artifact must not shadow its replacement.
+        if model.get("model", {}).get("stem_profile") != "four-stem":
+            continue
+        if (model.get("deprecation") or {}).get("deprecated"):
+            continue
         url = model.get("download_url", "")
         adapter[variant] = {
             "tag": _release_tag_from_url(url),
