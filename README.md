@@ -68,22 +68,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # htdemucs (default)
-python scripts/convert_htdemucs_to_onnx.py
-python scripts/validate_onnx.py
+python scripts/export_spectral_core.py
+python scripts/validate_spectral_contract.py models/htdemucs.spectral.onnx
 
 # htdemucs_ft (fine-tuned)
-python scripts/convert_htdemucs_to_onnx.py --model htdemucs_ft
-python scripts/validate_onnx.py --model htdemucs_ft
+python scripts/export_spectral_core.py --model htdemucs_ft
+python scripts/validate_spectral_contract.py models/htdemucs_ft.spectral.onnx
 ```
 
-Output: `models/htdemucs.onnx` or `models/htdemucs_ft.onnx`
+Output: `models/htdemucs.spectral.onnx` or `models/htdemucs_ft.spectral.onnx`
 
 The final release artifact is the ONNX Runtime optimized graph, not the raw PyTorch export. Each final model also carries:
 
 - `openkara.model_cache_key`: a deterministic cache-busting fingerprint for runtime compiled-model caches
 - `openkara.optimized_by=onnxruntime`: marks ORT offline optimization **under the [runtime contract](docs/runtime-contract.md)** (not “all optimizers including NCHWc layout rewrites”)
 
-GitHub Actions is only the orchestrator here. The actual graph optimization lives in `scripts/convert_htdemucs_to_onnx.py`, so CI and any local rerun use the exact same conversion pipeline instead of duplicating optimization logic in workflow YAML.
+GitHub Actions is only the orchestrator here. The actual graph optimization lives in `scripts/export_spectral_core.py`, so CI and any local rerun use the exact same conversion pipeline instead of duplicating optimization logic in workflow YAML.
 
 The first shipping optimization pass is intentionally structural and deterministic. Semantic rewrites such as GELU approximation or reduction rewrites are deferred until OpenKara runtime profiling shows a specific CoreML fallback hotspot that justifies the numerical trade-off.
 

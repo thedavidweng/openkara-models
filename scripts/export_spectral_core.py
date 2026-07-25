@@ -5,17 +5,16 @@ Export Demucs spectral-core ONNX models (issue #23 PR 2).
 The spectral-core boundary moves the waveform<->spectral transforms out of
 the shipped graph: the public input is the contract spectral tensor plus the
 raw mix (time branch), and the public output is the pre-ISTFT tensor plus the
-time-branch waveform. Compared to the conv-DFT export
-(convert_htdemucs_to_onnx.py) this removes ~134 MB of dense DFT filter-bank
-constants per model and every transform node; architecture and weights are
-otherwise identical.
+time-branch waveform. This drops ~134 MB of dense DFT filter-bank constants
+per model and every transform node that the earlier conv-DFT waveform export
+carried (removed in issue #23 PR 4); architecture and weights are otherwise
+identical.
 
 Contract: docs/spectral-core-contract.md (openkara.spectral-contract/v1).
 
     stems[s] = ispec(spectral_out[:, s], 343980) + time_out[:, s]
 
-CLI mirrors convert_htdemucs_to_onnx.py so convert.yml can drive both
-interfaces with the same job topology:
+The CLI drives convert.yml's single / sub-model / ensemble-merge job topology:
 
     python scripts/export_spectral_core.py --model htdemucs
     python scripts/export_spectral_core.py --model htdemucs_ft --sub-model-index 0

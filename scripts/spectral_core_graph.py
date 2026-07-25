@@ -1,8 +1,8 @@
 """Pure-ONNX helpers for spectral-core graphs (issue #23 PR 2) — no torch.
 
 Separated from scripts/export_spectral_core.py so the graph surgery and the
-contract gate can be unit-tested with only the onnx package (mirrors
-scripts/ensemble_merge.py). Three responsibilities:
+contract gate can be unit-tested with only the onnx package. Three
+responsibilities:
 
 1. ``strip_time_zero_add`` — the trace patch makes ``_ispec`` return a scalar
    zero so the model's ``x = xt + x`` reduces to the time branch; this
@@ -13,18 +13,18 @@ scripts/ensemble_merge.py). Three responsibilities:
 3. ``build_spectral_core_ensemble`` — multi-input/multi-output ensemble
    merge for htdemucs_ft spectral cores. ISTFT is linear, so averaging the
    pre-ISTFT and time-branch outputs is exactly equivalent to averaging the
-   sub-models' waveforms (what scripts/ensemble_merge.py ships today).
+   sub-models' waveforms.
 
 Contract: docs/spectral-core-contract.md (``openkara.spectral-contract/v1``).
 """
 
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper, shape_inference
-
-from ensemble_merge import _deduplicate_initializers
 
 SPECTRAL_CONTRACT_VERSION = "openkara.spectral-contract/v1"
 SPECTRAL_CONTRACT_METADATA = "openkara.spectral_contract"
@@ -282,12 +282,45 @@ def assert_spectral_core_metadata(model: onnx.ModelProto) -> None:
         )
 
 
+def _tensor_content_hash(init: TensorProto) -> str:
+    """Stable hash of tensor data + shape + dtype, excluding the name field."""
+    arr = numpy_helper.to_array(init)
+    h = hashlib.sha256()
+    h.update(str(arr.dtype).encode())
+    h.update(np.array(arr.shape, dtype=np.int64).tobytes())
+    h.update(np.ascontiguousarray(arr).tobytes())
+    return h.hexdigest()
+
+
+def _deduplicate_initializers(nodes, initializers):
+    """Collapse identical initializers to a single shared copy.
+
+    Returns (nodes_with_renamed_inputs, deduped_initializers).
+    """
+    canonical: dict[str, str] = {}   # content_hash -> canonical name
+    rename: dict[str, str] = {}      # old name -> canonical name
+
+    for init in initializers:
+        ch = _tensor_content_hash(init)
+        if ch in canonical:
+            rename[init.name] = canonical[ch]
+        else:
+            canonical[ch] = init.name
+
+    for node in nodes:
+        for i, inp in enumerate(node.input):
+            if inp in rename:
+                node.input[i] = rename[inp]
+
+    deduped = [init for init in initializers if init.name not in rename]
+    return nodes, deduped
+
+
 def build_spectral_core_ensemble(sub_models, n_models,
                                  graph_name="htdemucs_ft_spectral_core_ensemble"):
     """Merge spectral-core sub-models into one averaging ensemble graph.
 
-    Multi-I/O counterpart of scripts/ensemble_merge.py::build_ensemble_graph:
-    the contract inputs are fed to every sub-model unchanged, each contract
+    The contract inputs are fed to every sub-model unchanged, each contract
     output is averaged across sub-models via Sum + Mul (no stacked
     intermediate), all other tensors are namespaced per sub-model, and
     identical initializers are deduplicated. Averaging the pre-ISTFT and

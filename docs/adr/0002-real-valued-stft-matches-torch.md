@@ -1,8 +1,16 @@
 # ADR-0002: Real-valued STFT/ISTFT must match torch.stft/torch.istft
 
+> **Superseded by the spectral-core contract (issue #23); the conv-DFT export
+> path was removed in PR 4.** The waveform↔spectral transforms now run in the
+> application under `openkara.spectral-contract/v1` (see
+> `docs/spectral-core-contract.md`); shipped cores carry no dense DFT
+> filter-bank constants. This ADR is retained as the historical record of the
+> conv-DFT export path that produced the (still immutable) published waveform
+> release assets.
+
 ## Status
 
-Accepted
+Accepted (superseded)
 
 ## Context
 
