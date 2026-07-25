@@ -1,0 +1,307 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT-20260725006",
+  "creationInfo": {
+    "created": "2026-07-25T15:30:00Z",
+    "creators": [
+      "Organization: OpenKara"
+    ],
+    "licenseListVersion": "3.21"
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://openkara.org/spdx/2026-07-25-006",
+  "name": "openkara-models-2026-07-25-006",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-Repo",
+      "copyrightText": "Copyright (c) 2026 Davy",
+      "downloadLocation": "git+https://github.com/thedavidweng/openkara-models",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "openkara-models",
+      "primaryPackagePurpose": "APPLICATION",
+      "supplier": "Organization: OpenKara",
+      "versionInfo": "56ecb8b6f7a2067476b95b14e194a3cb5b17fc61"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs-balanced-fp32-onnx",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs.balanced.fp32.onnx",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs_ft-quality-fp32-onnx",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs_ft.quality.fp32.onnx",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs_ft-quality-fp32-dedup-onnx",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "05b5e94d941667577277e1b4d97029d38d45037439e3daaac76de63d64de6ffd"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-derived-v1.0.0/htdemucs_ft.dedup.fp32.onnx",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs_ft.quality.fp32.dedup.onnx",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs-dual-fp32-onnx-tar-gz",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "30a301be46102b71084836776d4a2e377f8668682c263d9b7cd0716ff5cb4df8"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-derived-v1.2.0/htdemucs.dual.fp32.onnx.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs.dual.fp32.onnx.tar.gz",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs_ft-dual-fp32-onnx-tar-gz",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ea68bc546d46a6181266e83c4a0fdcb9f3b9ed7eb9d25e086a0e1fe3dc45f27d"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-derived-v1.2.0/htdemucs_ft.dual.fp32.onnx.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs_ft.dual.fp32.onnx.tar.gz",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs-spectral-fp32-onnx",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "c3395410b1319976683bc874d97461655a9ea6089bbb0f3bd163d3829db13d02"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-spectral-v1.0.0/htdemucs.spectral.onnx",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs.spectral.fp32.onnx",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-htdemucs_ft-spectral-fp32-onnx",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "af604e3cceb04f1537547bb2edde16fed7cb065d2c8659a0b348bdd9ac16c3a4"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-spectral-v1.0.0/htdemucs_ft.spectral.onnx",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "htdemucs_ft.spectral.fp32.onnx",
+      "primaryPackagePurpose": "FILE"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-aarch64-apple-darwin",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "73551443d7da1777d1702100d6f09086aac54ee5b9d3d359b8b53951e44e3019"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-aarch64-apple-darwin.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-aarch64-apple-darwin",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-aarch64-unknown-linux-gnu",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "059a6f2265fbff1da2a0314401abdf3c972dcc4dda55a89264457406a3851011"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-x86_64-apple-darwin",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "043b711457aee68705ceb573a680a092fa5ec56640bb962a5362900d33184fa2"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-x86_64-apple-darwin.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-x86_64-apple-darwin",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-x86_64-unknown-linux-gnu",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "2a13a1b6c11a37f6399502fdb88fc53aee4a82e1b96c4312d3ef63debb28c631"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-x86_64-pc-windows-msvc",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "830537608381779f00ebaba8dbf2fbd4d0cba781b8c39e70ef40722af5f55499"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-aarch64-apple-darwin-reduced",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "bf8fea238ff272dcbb11ea1114e33e42414ff107a41d211443c659c43122abaf"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-aarch64-apple-darwin-reduced.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-aarch64-apple-darwin-reduced",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-aarch64-unknown-linux-gnu-reduced",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "7115205ce9e537323ba4bdfd959604cd238351b2e0f04574fb726bc365b00e7c"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu-reduced.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu-reduced",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-x86_64-apple-darwin-reduced",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "627e9178165e506596a65df6026883352f14c69cd37db5f4533bd79c91c0ca17"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-x86_64-apple-darwin-reduced.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-x86_64-apple-darwin-reduced",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-x86_64-unknown-linux-gnu-reduced",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "fc71dfb273978b8cf4cc5e84df091a4ee0712d681d27487ca4c4e3083def27eb"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu-reduced.tar.gz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu-reduced",
+      "primaryPackagePurpose": "BINARY"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-onnxruntime-1-27-1-openkara-x86_64-pc-windows-msvc-reduced",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "cf5e4487be600eebe893310d4e942034bd89fe704fa5151a21b493a2542333e8"
+        }
+      ],
+      "copyrightText": "NOASSERTION",
+      "downloadLocation": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc-reduced.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc-reduced",
+      "primaryPackagePurpose": "BINARY"
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Package-Repo",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

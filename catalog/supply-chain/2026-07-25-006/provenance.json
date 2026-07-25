@@ -1,0 +1,119 @@
+{
+  "attestation": {
+    "note": "Commit-based provenance for the legacy migration release. New releases (#19/#22) add sigstore/github-attestation refs.",
+    "type": "commit-provenance",
+    "url": "https://github.com/thedavidweng/openkara-models/commit/56ecb8b6f7a2067476b95b14e194a3cb5b17fc61"
+  },
+  "created_at": "2026-07-25T15:30:00Z",
+  "producer": {
+    "commit_sha": "56ecb8b6f7a2067476b95b14e194a3cb5b17fc61",
+    "repo": "thedavidweng/openkara-models",
+    "run_id": "30174230398",
+    "workflow": "ort-publish.yml"
+  },
+  "release_id": "2026-07-25-006",
+  "subject": [
+    {
+      "artifact_id": "htdemucs.balanced.fp32.onnx",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-v2.1.0/htdemucs.onnx",
+      "sha256": "3d85dad9b53c8a6a16d8d8d0518122c2ca750542f39104dc6ace77372c6dc8a9",
+      "size": 354970480
+    },
+    {
+      "artifact_id": "htdemucs_ft.quality.fp32.onnx",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-v2.1.0/htdemucs_ft.onnx",
+      "sha256": "bf7189043607085299c55379b208067efac12b2c44dddef5f5cc5e789e6cd03b",
+      "size": 1421207127
+    },
+    {
+      "artifact_id": "htdemucs_ft.quality.fp32.dedup.onnx",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-derived-v1.0.0/htdemucs_ft.dedup.fp32.onnx",
+      "sha256": "05b5e94d941667577277e1b4d97029d38d45037439e3daaac76de63d64de6ffd",
+      "size": 1099527345
+    },
+    {
+      "artifact_id": "htdemucs.dual.fp32.onnx.tar.gz",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-derived-v1.2.0/htdemucs.dual.fp32.onnx.tar.gz",
+      "sha256": "30a301be46102b71084836776d4a2e377f8668682c263d9b7cd0716ff5cb4df8",
+      "size": 228999756
+    },
+    {
+      "artifact_id": "htdemucs_ft.dual.fp32.onnx.tar.gz",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-derived-v1.2.0/htdemucs_ft.dual.fp32.onnx.tar.gz",
+      "sha256": "ea68bc546d46a6181266e83c4a0fdcb9f3b9ed7eb9d25e086a0e1fe3dc45f27d",
+      "size": 654101720
+    },
+    {
+      "artifact_id": "htdemucs.spectral.fp32.onnx",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-spectral-v1.0.0/htdemucs.spectral.onnx",
+      "sha256": "c3395410b1319976683bc874d97461655a9ea6089bbb0f3bd163d3829db13d02",
+      "size": 209469333
+    },
+    {
+      "artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-spectral-v1.0.0/htdemucs_ft.spectral.onnx",
+      "sha256": "af604e3cceb04f1537547bb2edde16fed7cb065d2c8659a0b348bdd9ac16c3a4",
+      "size": 839009018
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-aarch64-apple-darwin",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-aarch64-apple-darwin.tar.gz",
+      "sha256": "73551443d7da1777d1702100d6f09086aac54ee5b9d3d359b8b53951e44e3019",
+      "size": 7203505
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu.tar.gz",
+      "sha256": "059a6f2265fbff1da2a0314401abdf3c972dcc4dda55a89264457406a3851011",
+      "size": 9582414
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-x86_64-apple-darwin",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-x86_64-apple-darwin.tar.gz",
+      "sha256": "043b711457aee68705ceb573a680a092fa5ec56640bb962a5362900d33184fa2",
+      "size": 7849828
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "2a13a1b6c11a37f6399502fdb88fc53aee4a82e1b96c4312d3ef63debb28c631",
+      "size": 10272293
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.0.2/onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc.zip",
+      "sha256": "830537608381779f00ebaba8dbf2fbd4d0cba781b8c39e70ef40722af5f55499",
+      "size": 16066827
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-aarch64-apple-darwin-reduced",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-aarch64-apple-darwin-reduced.tar.gz",
+      "sha256": "bf8fea238ff272dcbb11ea1114e33e42414ff107a41d211443c659c43122abaf",
+      "size": 6748305
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu-reduced",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-aarch64-unknown-linux-gnu-reduced.tar.gz",
+      "sha256": "7115205ce9e537323ba4bdfd959604cd238351b2e0f04574fb726bc365b00e7c",
+      "size": 9034217
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-x86_64-apple-darwin-reduced",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-x86_64-apple-darwin-reduced.tar.gz",
+      "sha256": "627e9178165e506596a65df6026883352f14c69cd37db5f4533bd79c91c0ca17",
+      "size": 7348363
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu-reduced",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu-reduced.tar.gz",
+      "sha256": "fc71dfb273978b8cf4cc5e84df091a4ee0712d681d27487ca4c4e3083def27eb",
+      "size": 9680198
+    },
+    {
+      "artifact_id": "onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc-reduced",
+      "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/ort-v1.1.0/onnxruntime-1.27.1-openkara-x86_64-pc-windows-msvc-reduced.zip",
+      "sha256": "cf5e4487be600eebe893310d4e942034bd89fe704fa5151a21b493a2542333e8",
+      "size": 15770628
+    }
+  ]
+}
