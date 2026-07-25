@@ -108,8 +108,10 @@ spectral_out[:, s]) + Σ time_out[:, s]` — one ISTFT instead of three.
 for each fixture (silence, impulse, tone, sweep, band-limited noise,
 hop-aligned and unaligned lengths): the input wave, the spectral tensor, the
 magnitude view, and the identity round-trip reconstruction, as float32
-`.npz`. `quality/spectral-golden-v1.json` pins every array's SHA-256; CI
-regenerates and diffs. The `.npz` bundles are published as release assets
+`.npz`. `quality/spectral-golden-v1.json` pins cross-platform-stable
+statistics for every array (CI regenerates and diffs; byte digests would not
+survive 1-ULP BLAS differences across platforms) plus the exact SHA-256 of
+the authoritative published bundles. The `.npz` bundles are release assets
 (tag `spectral-golden-v1`) for the native implementation to test against.
 
 ## Versioning

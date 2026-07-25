@@ -141,8 +141,18 @@ def test_golden_manifest_covers_all_stages() -> None:
     for name, arrays in manifest["fixtures"].items():
         assert set(arrays) == {"input", "spectral", "magnitude", "roundtrip"}, name
         for meta in arrays.values():
-            assert len(meta["sha256"]) == 64
             assert meta["dtype"] == "float32"
+            assert meta["max_abs"] >= 0.0 and meta["rms"] >= 0.0
+
+
+def test_golden_stats_are_blas_stable() -> None:
+    """The freshness check must not depend on byte-exact float64 matmuls
+    (BLAS implementations differ by 1 ULP across platforms): fixture
+    entries carry 9-digit statistics, not tensor digests."""
+    manifest = golden.build_manifest(golden.build_vectors())
+    for arrays in manifest["fixtures"].values():
+        for meta in arrays.values():
+            assert "sha256" not in meta
 
 
 if __name__ == "__main__":

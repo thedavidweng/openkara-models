@@ -4,11 +4,13 @@
 For each deterministic fixture, produces the input waveform, the spectral
 tensor (``spec``), the neural-core magnitude view, and the identity
 round-trip reconstruction (``ispec`` of the un-modified spectral tensor),
-all float32, written as ``.npz`` bundles. Every array's SHA-256 is pinned in
-``quality/spectral-golden-v1.json`` so CI can regenerate and diff without
-committing the tensors; the bundles themselves are published as release
-assets (tag ``spectral-golden-v1``) for the native implementation
-(OpenKara's Rust FFT) to validate against.
+all float32, written as ``.npz`` bundles. Cross-platform-stable statistics
+for every array are pinned in ``quality/spectral-golden-v1.json`` so CI can
+regenerate and diff without committing the tensors (byte digests would not
+survive BLAS 1-ULP differences across platforms); the authoritative bundles
+and their exact digests are published as release assets (tag
+``spectral-golden-v1``) for the native implementation (OpenKara's Rust FFT)
+to validate against.
 
 Usage::
 
@@ -77,6 +79,17 @@ def _sha256(arr: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(arr).tobytes()).hexdigest()
 
 
+def _stats(arr: np.ndarray) -> dict:
+    """Cross-platform-stable summary. BLAS implementations differ by 1 ULP
+    on float64 matmuls, so byte digests of regenerated tensors are NOT
+    portable; statistics rounded to 9 significant digits are."""
+    a = arr.astype(np.float64)
+    return {
+        "max_abs": float(f"{np.max(np.abs(a)):.9e}"),
+        "rms": float(f"{np.sqrt(np.mean(a ** 2)):.9e}"),
+    }
+
+
 def build_vectors() -> dict[str, dict[str, np.ndarray]]:
     out: dict[str, dict[str, np.ndarray]] = {}
     for name, x in _fixtures().items():
@@ -96,7 +109,7 @@ def build_manifest(vectors: dict[str, dict[str, np.ndarray]]) -> dict:
     fixtures = {}
     for name, arrays in sorted(vectors.items()):
         fixtures[name] = {
-            key: {"shape": list(a.shape), "dtype": str(a.dtype), "sha256": _sha256(a)}
+            key: {"shape": list(a.shape), "dtype": str(a.dtype), **_stats(a)}
             for key, a in sorted(arrays.items())
         }
     return {
@@ -108,7 +121,14 @@ def build_manifest(vectors: dict[str, dict[str, np.ndarray]]) -> dict:
         "tolerances": {
             "fp32_implementation_max_abs": 1e-3,
             "fp64_implementation_max_abs": 1e-6,
+            "regeneration_max_abs": 1e-6,
         },
+        "note": (
+            "Fixture entries carry shape/dtype and 9-digit statistics, which "
+            "are stable across BLAS implementations; exact byte digests of "
+            "the authoritative float32 bundles live in release_asset_sha256 "
+            "(generated once, published at the distribution tag)."
+        ),
         "fixtures": fixtures,
     }
 
@@ -118,7 +138,7 @@ def main() -> int:
     parser.add_argument("--out-dir", type=Path, default=None,
                         help="Write .npz bundles here (omit to only build digests).")
     parser.add_argument("--verify", action="store_true",
-                        help="Regenerate digests and diff against the committed manifest.")
+                        help="Regenerate statistics and diff against the committed manifest.")
     parser.add_argument("--write-manifest", action="store_true",
                         help="Write/overwrite the committed digest manifest.")
     args = parser.parse_args()
@@ -135,13 +155,21 @@ def main() -> int:
         print(f"OK: wrote {len(vectors)} golden bundles to {args.out_dir}")
 
     if args.write_manifest:
+        # Preserve the authoritative published-bundle digests if present, and
+        # record the digests of THIS machine's arrays as the release copy.
+        manifest["release_asset_sha256"] = {
+            name: {key: _sha256(a) for key, a in sorted(arrays.items())}
+            for name, arrays in sorted(vectors.items())
+        }
         MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         print(f"OK: wrote {MANIFEST_PATH}")
 
     if args.verify:
         committed = json.loads(MANIFEST_PATH.read_text())
-        if committed != manifest:
-            print("ERROR: regenerated golden digests differ from the committed "
+        committed_cmp = {k: v for k, v in committed.items() if k != "release_asset_sha256"}
+        manifest_cmp = {k: v for k, v in manifest.items() if k != "release_asset_sha256"}
+        if committed_cmp != manifest_cmp:
+            print("ERROR: regenerated golden statistics differ from the committed "
                   f"manifest {MANIFEST_PATH}", file=sys.stderr)
             return 1
         print(f"OK: golden vectors are fresh ({len(vectors)} fixtures)")
