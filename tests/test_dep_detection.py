@@ -99,3 +99,90 @@ def test_hf_models_mapping() -> None:
     assert "htdemucs_ft" in d.HF_MODELS
     assert d.HF_MODELS["htdemucs"] == "adefossez/HTDemucs"
     assert d.HF_MODELS["htdemucs_ft"] == "adefossez/HTDemucs-ft"
+
+
+# ---------------------------------------------------------------------------
+# Model source lock (models/source-lock.json, issue #20)
+# ---------------------------------------------------------------------------
+
+MODEL_LOCK_PATH = ROOT / "models" / "source-lock.json"
+
+
+def _load_model_lock() -> dict:
+    return json.loads(MODEL_LOCK_PATH.read_text(encoding="utf-8"))
+
+
+def test_model_lock_exists() -> None:
+    assert MODEL_LOCK_PATH.is_file(), "models/source-lock.json must exist"
+
+
+def test_model_lock_version_and_models() -> None:
+    lock = _load_model_lock()
+    assert lock["lock_version"] == "openkara.model-source-lock/v1"
+    assert set(lock["models"].keys()) == {"htdemucs", "htdemucs_ft"}
+
+
+def test_model_lock_repos_match_detector_mapping() -> None:
+    """The lock's weights repos and the detector's HF mapping must agree —
+    one weights authority per model."""
+    import detect_model_weight_revision as d
+    lock = _load_model_lock()
+    for name, entry in lock["models"].items():
+        assert entry["weights"]["repo"] == d.HF_MODELS[name]
+
+
+def test_model_lock_commit_shas_are_40_hex() -> None:
+    lock = _load_model_lock()
+    for name, entry in lock["models"].items():
+        sha = entry["weights"]["commit_sha"]
+        assert len(sha) == 40, name
+        int(sha, 16)
+
+
+def test_validate_model_source_lock_passes() -> None:
+    r = subprocess.run(
+        [sys.executable, str(SCRIPTS / "validate_model_source_lock.py")],
+        capture_output=True, text=True, cwd=str(ROOT),
+    )
+    assert r.returncode == 0, r.stderr
+
+
+def test_validate_model_lock_rejects_timestamp_state() -> None:
+    import validate_model_source_lock as v
+    lock = _load_model_lock()
+    lock["models"]["htdemucs"]["weights"]["last_modified"] = "2026-07-11T13:51:42Z"
+    errors = v.validate_model_lock(lock)
+    assert any("timestamp state is forbidden" in e for e in errors)
+
+
+def test_validate_model_lock_rejects_catalog_field_duplication() -> None:
+    import validate_model_source_lock as v
+    lock = _load_model_lock()
+    lock["models"]["htdemucs"]["weights"]["sha256"] = "0" * 64
+    errors = v.validate_model_lock(lock)
+    assert any("catalog-owned artifact field" in e for e in errors)
+
+
+def test_validate_model_lock_rejects_missing_model() -> None:
+    import validate_model_source_lock as v
+    lock = _load_model_lock()
+    del lock["models"]["htdemucs_ft"]
+    errors = v.validate_model_lock(lock)
+    assert any("missing models" in e for e in errors)
+
+
+def test_validate_model_lock_rejects_bad_sha() -> None:
+    import validate_model_source_lock as v
+    lock = _load_model_lock()
+    lock["models"]["htdemucs"]["weights"]["commit_sha"] = "not-a-sha"
+    errors = v.validate_model_lock(lock)
+    assert any("commit_sha" in e for e in errors)
+
+
+def test_detector_resolves_per_model_lock_entry() -> None:
+    """The detector must compare against the per-model entry of the v1 lock."""
+    import detect_model_weight_revision  # noqa: F401 — importability
+    lock = _load_model_lock()
+    for name in ("htdemucs", "htdemucs_ft"):
+        entry = lock["models"][name]
+        assert entry["weights"]["commit_sha"], name

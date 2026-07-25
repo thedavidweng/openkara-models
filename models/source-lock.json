@@ -1,0 +1,77 @@
+{
+  "lock_version": "openkara.model-source-lock/v1",
+  "note": "Immutable model source authority (issue #20). Weights are identified by immutable HuggingFace revision commit SHAs (never lastModified timestamps). The demucs package version transitively pins the checkpoint signatures its remote registry resolves. Artifact URLs, byte sizes, and SHA-256 digests are owned exclusively by the catalog (catalog/releases/*); this lock never duplicates them.",
+  "models": {
+    "htdemucs": {
+      "artifact_id": "htdemucs.balanced.fp32.onnx",
+      "weights": {
+        "host": "huggingface",
+        "repo": "adefossez/HTDemucs",
+        "commit_sha": "bf35a81b663819a8255c8fefee17f9d812b786b5"
+      },
+      "demucs_package": {
+        "package": "demucs",
+        "version": "4.1.0",
+        "code_repo": "adefossez/demucs",
+        "checkpoint_signatures": [
+          "955717e8-8726e21a.th"
+        ]
+      },
+      "conversion": {
+        "script": "scripts/convert_htdemucs_to_onnx.py",
+        "workflow": ".github/workflows/convert.yml",
+        "loader": "demucs.pretrained.get_model('htdemucs')",
+        "opset": 17,
+        "ir_version": 9,
+        "torch_requirement": "torch>=2.13.0,<3.0",
+        "onnx_requirement": "onnx>=1.22.0"
+      },
+      "output_contract": {
+        "input_semantics": "[1,2,343980] stereo audio at 44.1 kHz",
+        "output_semantics": "[1,4,2,343980] drums/bass/other/vocals",
+        "sample_rate": 44100,
+        "segment_frames": 343980,
+        "stems": ["drums", "bass", "other", "vocals"],
+        "precision": "fp32",
+        "tensor_interface": "waveform"
+      }
+    },
+    "htdemucs_ft": {
+      "artifact_id": "htdemucs_ft.quality.fp32.onnx",
+      "weights": {
+        "host": "huggingface",
+        "repo": "adefossez/HTDemucs-ft",
+        "commit_sha": "478be8a68f85418addd6f7baefd4be76522a4034"
+      },
+      "demucs_package": {
+        "package": "demucs",
+        "version": "4.1.0",
+        "code_repo": "adefossez/demucs",
+        "checkpoint_signatures": [
+          "f7e0c4bc-ba3fe64a.th",
+          "d12395a8-e57c48e6.th",
+          "92cfc3b6-ef3bcb9c.th",
+          "04573f0d-f3cf25b2.th"
+        ]
+      },
+      "conversion": {
+        "script": "scripts/convert_htdemucs_to_onnx.py",
+        "workflow": ".github/workflows/convert.yml",
+        "loader": "demucs.pretrained.get_model('htdemucs_ft')",
+        "opset": 17,
+        "ir_version": 9,
+        "torch_requirement": "torch>=2.13.0,<3.0",
+        "onnx_requirement": "onnx>=1.22.0"
+      },
+      "output_contract": {
+        "input_semantics": "[1,2,343980] stereo audio at 44.1 kHz",
+        "output_semantics": "[1,4,2,343980] drums/bass/other/vocals",
+        "sample_rate": 44100,
+        "segment_frames": 343980,
+        "stems": ["drums", "bass", "other", "vocals"],
+        "precision": "fp32",
+        "tensor_interface": "waveform"
+      }
+    }
+  }
+}

@@ -245,3 +245,66 @@ def test_main_no_runs_not_healthy_message() -> None:
     assert exit_code == 2
     assert "healthy" not in mock_stdout.getvalue().lower()
     assert "NO_RUNS" in mock_stderr.getvalue()
+
+
+def test_check_model_lock_stale_current() -> None:
+    """When every model lock entry matches the latest HF revision, status is
+    'current'."""
+    import check_dep_automation_health as h
+    import detect_model_weight_revision as d
+    lock = json.loads((ROOT / "models" / "source-lock.json").read_text())
+    original = d.detect_latest_revision
+
+    def fake_latest(model, token=None):
+        return {
+            "model": model,
+            "repo": d.HF_MODELS[model],
+            "commit_sha": lock["models"][model]["weights"]["commit_sha"],
+            "last_modified": "", "model_id": "", "tags": [],
+        }
+
+    d.detect_latest_revision = fake_latest
+    try:
+        result = h.check_model_lock_stale(None)
+        assert result["status"] == "current"
+        assert all(not m["update_available"] for m in result["models"].values())
+    finally:
+        d.detect_latest_revision = original
+
+
+def test_check_model_lock_stale_behind() -> None:
+    """A newer HF revision for any model makes the check 'stale'."""
+    import check_dep_automation_health as h
+    import detect_model_weight_revision as d
+    original = d.detect_latest_revision
+
+    def fake_latest(model, token=None):
+        return {
+            "model": model,
+            "repo": d.HF_MODELS[model],
+            "commit_sha": "f" * 40,
+            "last_modified": "", "model_id": "", "tags": [],
+        }
+
+    d.detect_latest_revision = fake_latest
+    try:
+        result = h.check_model_lock_stale(None)
+        assert result["status"] == "stale"
+    finally:
+        d.detect_latest_revision = original
+
+
+def test_check_model_lock_stale_api_error() -> None:
+    import check_dep_automation_health as h
+    import detect_model_weight_revision as d
+    original = d.detect_latest_revision
+
+    def raise_error(model, token=None):
+        raise RuntimeError("HF API down")
+
+    d.detect_latest_revision = raise_error
+    try:
+        result = h.check_model_lock_stale(None)
+        assert result["status"] == "api_error"
+    finally:
+        d.detect_latest_revision = original

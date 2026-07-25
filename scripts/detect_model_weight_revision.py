@@ -81,8 +81,8 @@ def main() -> int:
     parser.add_argument("--model", required=True, choices=list(HF_MODELS.keys()))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--token", default=None, help="HuggingFace API token.")
-    parser.add_argument("--lock", type=Path, default=None,
-                        help="Model source lock path (for comparison).")
+    parser.add_argument("--lock", type=Path, default=ROOT / "models" / "source-lock.json",
+                        help="Model source lock path (default: models/source-lock.json).")
     args = parser.parse_args()
 
     token = args.token or __import__("os").environ.get("HF_TOKEN")
@@ -96,11 +96,18 @@ def main() -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
-    # Compare with lock if provided.
+    # Compare with lock if present.
     comparison = None
     if args.lock and args.lock.is_file():
         lock = json.loads(args.lock.read_text(encoding="utf-8"))
-        lock_sha = lock.get("commit_sha") or lock.get("weights", {}).get("commit_sha")
+        # Per-model lock (openkara.model-source-lock/v1); flat single-model
+        # shapes are accepted for ad-hoc comparisons.
+        entry = lock.get("models", {}).get(args.model, lock)
+        lock_sha = entry.get("commit_sha") or entry.get("weights", {}).get("commit_sha")
+        if not lock_sha:
+            print(f"ERROR: no locked commit_sha for model {args.model!r} in {args.lock}",
+                  file=sys.stderr)
+            return 2
         comparison = {
             "lock_commit_sha": lock_sha,
             "latest_commit_sha": latest["commit_sha"],
