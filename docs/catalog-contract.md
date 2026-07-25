@@ -135,6 +135,16 @@ filename, or URL to infer a version (invariant above).
 A file on disk is identified by its recorded SHA-256, never by its name or
 embedded metadata; embedded `openkara.*` metadata is diagnostic only.
 
+**Archived assets:** a model or runtime asset whose `filename` ends in
+`.tar.gz` is a compressed archive. `archive_digest`/`byte_size` describe the
+downloaded archive; `extracted_file_digests` lists each contained file's
+SHA-256 and size. The client verifies the archive digest after download,
+extracts (rejecting path traversal, links, and absolute paths), verifies
+every extracted file's digest and size, and uses only the extracted files.
+Runtimes have always shipped this way; large model artifacts do too (the
+FP32 weight payload compresses ~35–40% because the source checkpoints are
+half-precision).
+
 **Compressed model assets:** a model artifact whose `filename` ends in
 `.tar.gz` is an archive, exactly like every runtime artifact.
 `archive_digest`/`byte_size` describe the downloaded archive;
