@@ -1,9 +1,9 @@
-"""Demucs model loading — single source of truth for convert and validate pipelines.
+"""Demucs model loading — single source of truth for the export and validation pipelines.
 
-Both the conversion pipeline (convert_htdemucs_to_onnx.py) and the validation
-pipeline (validate_onnx.py) need to load pretrained Demucs models and compute
-segment frames. This module owns that logic so Demucs API changes land in one
-place.
+The spectral-core exporter (export_spectral_core.py) and the contract
+validator (validate_spectral_contract.py) both need to load pretrained Demucs
+models and compute segment frames. This module owns that logic so Demucs API
+changes land in one place.
 """
 
 import gc

@@ -25,9 +25,10 @@ stay identical to the reference), with the four spectrogram methods swapped:
 The magnitude-view mean/std normalization stays INSIDE the traced graph, per
 the contract: applications never implement those statistics.
 
-This module intentionally does not import scripts/onnx_stft.py — the dense
-conv-DFT export path is scheduled for deletion once spectral-core bundles are
-stable (issue #23 PR 4).
+This module does not implement the waveform<->spectral transforms in-graph:
+they live in the application under the spectral contract. The earlier dense
+conv-DFT export path was removed once spectral-core bundles were stable
+(issue #23 PR 4).
 """
 
 import math

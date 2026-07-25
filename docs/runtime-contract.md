@@ -51,7 +51,7 @@ Before tagging a **standard** model release, maintainers MUST:
 The repository enforces a **fast CI gate** on every push/PR:
 
 - Protobuf scan for forbidden node domains (currently `com.microsoft.nchwc`) via `scripts/onnx_runtime_contract.py`  
-- `scripts/convert_htdemucs_to_onnx.py` re-checks the graph immediately after ORT writes the optimized file.
+- `scripts/export_spectral_core.py` re-checks the graph immediately after ORT writes the optimized file.
 
 The **authoritative** check for releases remains loading with **official ORT** on **macOS arm64** as above.
 
@@ -135,9 +135,9 @@ from `ORT_API_VERSION` in the pinned ORT header
 
 ## Related files
 
-- `scripts/convert_htdemucs_to_onnx.py` — offline ORT optimization level and post-write domain check  
+- `scripts/export_spectral_core.py` — spectral-core export, offline ORT optimization level, and post-write domain check  
 - `scripts/onnx_runtime_contract.py` — shared protobuf domain gate and optional ORT session check  
-- `scripts/validate_onnx.py` — numerical validation + domain gate + CPU session load  
+- `scripts/validate_spectral_contract.py` — spectral-core contract gate + numerical validation against the PyTorch reference  
 - `.github/workflows/runtime-contract.yml` — CI gate on pull requests and `main`
 - `ort/source-lock.json` — pinned ORT source + toolchain + build config (issue #19)
 - `scripts/build_runtime.py` — reproducible source build (issue #19 PR 1)

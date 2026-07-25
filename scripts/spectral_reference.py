@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Pure-numpy reference implementation of the OpenKara spectral contract v1.
 
-These functions define the EXACT waveform<->spectral transform semantics that
-the shipped HTDemucs ONNX graphs implement with dense conv1d/conv_transpose1d
-DFT matrices (scripts/onnx_stft.py), extracted per issue #23 PR 1 so an
+These functions define the EXACT waveform<->spectral transform semantics of
+the OpenKara spectral contract v1, extracted per issue #23 PR 1 so an
 independent native implementation (OpenKara's Rust FFT frontend/backend) can
-be validated against golden vectors without PyTorch.
+be validated against golden vectors without PyTorch. The earlier waveform
+HTDemucs ONNX graphs implemented these same transforms in-graph with dense
+conv1d/conv_transpose1d DFT matrices; that conv-DFT export path was removed
+in issue #23 PR 4.
 
 Contract: docs/spectral-core-contract.md (openkara.spectral-contract/v1).
 
