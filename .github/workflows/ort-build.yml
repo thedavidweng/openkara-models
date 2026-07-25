@@ -149,31 +149,35 @@ jobs:
 
   build-x86_64-unknown-linux-gnu:
     needs: validate-source-lock
-    # PINNED to ubuntu-22.04: the artifact's glibc symbol floor is set by the
-    # build OS, and 22.04 (glibc 2.35) is OpenKara's Linux release baseline.
-    # gcc-13 comes from the toolchain PPA; libstdc++/libgcc are linked
-    # statically (source-lock cmake_args) so the newer compiler runtime adds
-    # no GLIBCXX floor.
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    # manylinux_2_28 container: the artifact's glibc symbol floor is set by
+    # the build environment, and OpenKara's Linux release baseline is
+    # ubuntu-22.04 (glibc 2.35). manylinux_2_28 builds against glibc 2.28 —
+    # comfortably below the baseline — while gcc-toolset-13 provides the
+    # gcc 13 + binutils 2.40 the source lock and ORT's AVX-NE-CONVERT mlas
+    # kernels require (22.04's binutils 2.38 cannot assemble them, which is
+    # why a plain ubuntu-22.04 runner cannot build this target).
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.11"
-      - name: Install build deps
+      - name: Install build deps (gcc-toolset-13 + cmake + python 3.11)
         run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
-          sudo apt-get install -y build-essential gcc-13 g++-13
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
-            --slave /usr/bin/g++ g++ /usr/bin/g++-13
-          # 22.04's apt cmake is 3.22; the source lock requires >= 3.28.
-          python -m pip install "cmake>=3.28"
+          dnf -y install gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils
+          /opt/python/cp311-cp311/bin/python -m pip install "cmake>=3.28"
+          {
+            echo "/opt/rh/gcc-toolset-13/root/usr/bin"
+            echo "/opt/python/cp311-cp311/bin"
+          } >> "$GITHUB_PATH"
+      - name: Verify toolchain floor
+        run: |
+          gcc --version | head -1
+          as --version | head -1
+          cmake --version | head -1
+          python --version
+          ldd --version | head -1
       - name: Build ORT for x86_64-unknown-linux-gnu
-        env:
-          CC: gcc-13
-          CXX: g++-13
         run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu
       - name: Verify ABI floor against the release baseline
         run: |
