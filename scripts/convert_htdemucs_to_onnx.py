@@ -22,7 +22,6 @@ import collections
 import gc
 import os
 import sys
-import hashlib
 import tempfile
 from pathlib import Path
 
@@ -33,10 +32,10 @@ ROOT_DIR = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from onnx_runtime_contract import (
+    annotate_optimized_model,
     assert_release_onnx_compatible_with_official_ort,
+    compute_sha256,
     make_contract_compliant_session,
-    MODEL_CACHE_KEY_METADATA,
-    MODEL_OPTIMIZED_BY_METADATA,
 )
 from onnx_stft import RealValuedSpectrogramPatch
 from demucs_loader import SUPPORTED_MODELS, load, load_sub_model
@@ -158,33 +157,6 @@ def verify_onnx(output_path):
         print(f"    - {op_type}: {count}")
 
 
-def upsert_metadata_prop(onnx_model, key, value):
-    for prop in onnx_model.metadata_props:
-        if prop.key == key:
-            prop.value = value
-            return
-    prop = onnx_model.metadata_props.add()
-    prop.key = key
-    prop.value = value
-
-
-def annotate_optimized_model(output_path):
-    """Attach deterministic metadata to the final optimized ONNX artifact.
-
-    The cache key is derived from the optimized model bytes before metadata is
-    injected so it changes whenever graph structure or weights change.
-    """
-    import onnx
-
-    cache_key = hashlib.sha256(output_path.read_bytes()).hexdigest()
-    onnx_model = onnx.load(str(output_path))
-    upsert_metadata_prop(onnx_model, MODEL_CACHE_KEY_METADATA, cache_key)
-    upsert_metadata_prop(onnx_model, MODEL_OPTIMIZED_BY_METADATA, "onnxruntime")
-    onnx.save(onnx_model, str(output_path))
-    print(f"Metadata: {MODEL_CACHE_KEY_METADATA}={cache_key}")
-    return cache_key
-
-
 def optimize_onnx_with_ort(input_path, output_path):
     """Run ONNX Runtime offline graph optimization and emit the final model.
 
@@ -199,14 +171,6 @@ def optimize_onnx_with_ort(input_path, output_path):
 
     assert_release_onnx_compatible_with_official_ort(output_path)
     print(f"Optimized ONNX written to {output_path}")
-
-
-def compute_sha256(output_path):
-    """Compute and save SHA-256 checksum."""
-    with open(output_path, "rb") as f:
-        digest = hashlib.file_digest(f, "sha256").hexdigest()
-    print(f"SHA-256: {digest}")
-    return digest
 
 
 def parse_args():

@@ -9,6 +9,7 @@ macOS x64, and macOS arm64 without custom-built ORT (no reliance on NCHWc layout
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 
@@ -18,6 +19,39 @@ FORBIDDEN_OP_DOMAINS = frozenset({"com.microsoft.nchwc"})
 
 MODEL_CACHE_KEY_METADATA = "openkara.model_cache_key"
 MODEL_OPTIMIZED_BY_METADATA = "openkara.optimized_by"
+
+
+def upsert_metadata_prop(onnx_model, key, value):
+    for prop in onnx_model.metadata_props:
+        if prop.key == key:
+            prop.value = value
+            return
+    prop = onnx_model.metadata_props.add()
+    prop.key = key
+    prop.value = value
+
+
+def annotate_optimized_model(output_path):
+    """Attach deterministic metadata to the final optimized ONNX artifact.
+
+    The cache key is derived from the optimized model bytes before metadata is
+    injected so it changes whenever graph structure or weights change.
+    """
+    cache_key = hashlib.sha256(output_path.read_bytes()).hexdigest()
+    onnx_model = onnx.load(str(output_path))
+    upsert_metadata_prop(onnx_model, MODEL_CACHE_KEY_METADATA, cache_key)
+    upsert_metadata_prop(onnx_model, MODEL_OPTIMIZED_BY_METADATA, "onnxruntime")
+    onnx.save(onnx_model, str(output_path))
+    print(f"Metadata: {MODEL_CACHE_KEY_METADATA}={cache_key}")
+    return cache_key
+
+
+def compute_sha256(output_path):
+    """Compute and print the artifact SHA-256 checksum."""
+    with open(output_path, "rb") as f:
+        digest = hashlib.file_digest(f, "sha256").hexdigest()
+    print(f"SHA-256: {digest}")
+    return digest
 
 
 def collect_op_domains(model: onnx.ModelProto) -> dict[str, set[str]]:
