@@ -24,7 +24,7 @@ Usage::
 
     python scripts/run_native_smoke.py \\
         --runtime ort/packages/onnxruntime-1.27.1-openkara-aarch64-apple-darwin.tar.gz \\
-        --model models/htdemucs.onnx \\
+        --model models/htdemucs.spectral.onnx \\
         --target aarch64-apple-darwin \\
         --provider coreml \\
         --ort-source ort/source \\
@@ -106,13 +106,9 @@ def _build_harness(ort_source: Path, build_dir: Path) -> Path:
     return binary
 
 
-# Expected semicolon-joined per-output shape string for each model interface.
-# The waveform interface has one output [1,4,2,343980]; the spectral-core
-# interface has two: spectral_out=[1,4,2,2,2048,336] then time_out=[1,4,2,343980].
-INTERFACE_OUTPUT_SHAPES = {
-    "waveform": "[1,4,2,343980]",
-    "spectral": "[1,4,2,2,2048,336];[1,4,2,343980]",
-}
+# Expected semicolon-joined per-output shape string for the spectral-core
+# model: spectral_out=[1,4,2,2,2048,336] then time_out=[1,4,2,343980].
+SPECTRAL_OUTPUT_SHAPE = "[1,4,2,2,2048,336];[1,4,2,343980]"
 
 
 def run_smoke(
@@ -175,7 +171,7 @@ HARDWARE_PROVIDERS = {"directml", "coreml"}
 
 
 def validation_failures(report: dict[str, Any], requested_provider: str,
-                        expected_output_shape: str = "[1,4,2,343980]") -> list[str]:
+                        expected_output_shape: str = SPECTRAL_OUTPUT_SHAPE) -> list[str]:
     """Return strict native-smoke gate failures.
 
     CPU and accelerated providers are tested in separate invocations. A
@@ -183,8 +179,7 @@ def validation_failures(report: dict[str, Any], requested_provider: str,
     creating a replacement CPU session is a failure.
 
     ``expected_output_shape`` is the semicolon-joined per-output shape string
-    for the model interface (waveform vs. spectral-core), defaulting to the
-    waveform interface so existing single-output callers are unaffected.
+    for the spectral-core model (``spectral_out`` then ``time_out``).
 
     For hardware-dependent providers (directml, coreml), a ``"skipped"``
     session_creation status is accepted when the hardware is absent — the
@@ -246,12 +241,6 @@ def main() -> int:
     parser.add_argument("--provider", required=True,
                         choices=["cpu", "coreml", "xnnpack", "directml"],
                         help="Requested execution provider.")
-    parser.add_argument("--interface", choices=["waveform", "spectral"], default="waveform",
-                        help="Model interface. 'waveform' expects a single output "
-                             "[1,4,2,343980]; 'spectral' expects two outputs "
-                             "spectral_out=[1,4,2,2,2048,336] + time_out=[1,4,2,343980]. "
-                             "Selects the harness input generation (one zero tensor per "
-                             "declared input) shape gate and the report assertion.")
     parser.add_argument("--ort-source", type=Path, default=ROOT / "ort" / "source",
                         help="ORT source checkout (for the C API header).")
     parser.add_argument("--harness-build-dir", type=Path, default=SMOKE_DIR / "build",
@@ -297,9 +286,9 @@ def main() -> int:
         model_size, model_sha = _sha256_file(args.model)
 
         # Run the harness.
-        expect_output_shape = INTERFACE_OUTPUT_SHAPES[args.interface]
+        expect_output_shape = SPECTRAL_OUTPUT_SHAPE
         print(f"Running smoke: target={args.target} provider={args.provider} "
-              f"interface={args.interface}...")
+              f"interface=spectral...")
         result = run_smoke(lib_path, args.model, args.target, args.provider, harness,
                            expect_output_shape)
 
@@ -317,7 +306,7 @@ def main() -> int:
             "filename": args.model.name,
         },
         "target": args.target,
-        "interface": args.interface,
+        "interface": "spectral",
         "requested_provider": args.provider,
         "available_providers": result.get("available_providers", ""),
         "output_shape": result.get("output_shape", ""),

@@ -2,22 +2,17 @@
 """Shared input synthesis for the native runtime benchmark/comparison harnesses.
 
 The runtime benchmark (``run_runtime_benchmarks.py``) and the full-vs-reduced
-comparison (``compare_runtime_builds.py``) both drive an ONNX model through a
-built ORT runtime. Two model interfaces are supported:
+comparison (``compare_runtime_builds.py``) both drive the spectral-core ONNX
+model through a built ORT runtime. The spectral-core interface has two named
+inputs, ``spectral`` ``[1, 2, 2, 2048, T]`` and ``mix`` ``[1, 2, frames]``,
+producing ``spectral_out`` ``[1, 4, 2, 2, 2048, T]`` and ``time_out``
+``[1, 4, 2, frames]``.
 
-  waveform : a single input ``[1, 2, frames]`` (the gen-1-pinned waveform
-             manifest still consumed elsewhere).
-  spectral : the generation-8 spectral-core interface with two named inputs,
-             ``spectral`` ``[1, 2, 2, 2048, T]`` and ``mix`` ``[1, 2, frames]``,
-             producing ``spectral_out`` ``[1, 4, 2, 2, 2048, T]`` and
-             ``time_out`` ``[1, 4, 2, frames]``.
-
-The interface is detected from the session's input-name set so the two
-harnesses stay in lockstep. For the spectral interface the ``mix`` is a
-deterministic stereo waveform and ``spectral = spectral_reference.spec(mix)``,
-so the two inputs are contract-consistent (contract v1). numpy and
-``spectral_reference`` are imported lazily so importing this module (e.g. for
-``--help`` on a runner without numpy) stays cheap.
+The ``mix`` is a deterministic stereo waveform and
+``spectral = spectral_reference.spec(mix)``, so the two inputs are
+contract-consistent (contract v1) and repeated runs feed byte-identical
+tensors. numpy and ``spectral_reference`` are imported lazily so importing this
+module (e.g. for ``--help`` on a runner without numpy) stays cheap.
 """
 
 from __future__ import annotations
@@ -50,47 +45,35 @@ def deterministic_waveform(frames: int) -> "Any":
     return np.stack([left, right], axis=0)[np.newaxis].astype(np.float32)
 
 
-def detect_interface(session: "Any") -> str:
-    """Return ``"spectral"`` or ``"waveform"`` from the session's input names."""
-    names = {i.name for i in session.get_inputs()}
-    return "spectral" if names == SPECTRAL_INPUT_NAMES else "waveform"
+def build_feed(session: "Any", frames: int) -> dict[str, "Any"]:
+    """Build the spectral-core ORT feed dict for one inference window.
 
-
-def build_feed(session: "Any", frames: int) -> tuple[dict[str, "Any"], str]:
-    """Build the ORT feed dict for one inference window.
-
-    Returns ``(feed, interface)`` where ``interface`` is ``"spectral"`` or
-    ``"waveform"``. The feed is keyed by the session's declared input names so
-    it is fed positionally-independent (by name).
+    The feed is keyed by the two contract input names ``spectral`` and ``mix``:
+    ``mix`` is a deterministic stereo waveform and ``spectral`` is exactly
+    ``spectral_reference.spec(mix)``, so the two inputs are contract-consistent.
+    Raises ``ValueError`` if the session is not the spectral-core interface.
     """
     import numpy as np
+    import spectral_reference
 
-    interface = detect_interface(session)
-    if interface == "spectral":
-        import spectral_reference
+    names = {i.name for i in session.get_inputs()}
+    if names != SPECTRAL_INPUT_NAMES:
+        raise ValueError(
+            f"session inputs {sorted(names)} are not the spectral-core interface "
+            f"{sorted(SPECTRAL_INPUT_NAMES)}"
+        )
 
-        mix = deterministic_waveform(frames)                    # [1, 2, frames]
-        spectral = spectral_reference.spec(mix.astype(np.float64)).astype(np.float32)
-        return {"spectral": spectral, "mix": mix}, "spectral"
-
-    # Waveform: single input, deterministic zeros (unchanged legacy behaviour).
-    name = session.get_inputs()[0].name
-    return {name: np.zeros((1, CHANNELS, frames), dtype=np.float32)}, "waveform"
+    mix = deterministic_waveform(frames)                    # [1, 2, frames]
+    spectral = spectral_reference.spec(mix.astype(np.float64)).astype(np.float32)
+    return {"spectral": spectral, "mix": mix}
 
 
-def expected_output_shapes(interface: str, frames: int, spectral: "Any" | None,
-                           waveform_shape: list[int] | None) -> dict[str, list[int]] | None:
-    """Return expected output shapes keyed by output name for the spectral
-    interface, or ``None`` for the waveform interface (which uses a single
-    flat expected shape supplied by the caller).
+def expected_output_shapes(frames: int, spectral: "Any") -> dict[str, list[int]]:
+    """Return the expected spectral-core output shapes keyed by output name.
 
-    ``spectral`` is the synthesized spectral input tensor (used to read back
-    the ``F`` and ``T`` dims); ``waveform_shape`` is unused for spectral.
+    ``spectral`` is the synthesized spectral input tensor (used to read back the
+    ``F`` and ``T`` dims).
     """
-    if interface != "spectral":
-        return None
-    if spectral is None:
-        raise ValueError("spectral interface requires the synthesized spectral tensor")
     freq = int(spectral.shape[-2])
     frames_t = int(spectral.shape[-1])
     return {

@@ -1,6 +1,6 @@
 """Tests for the shared runtime input synthesis (scripts/runtime_inputs.py).
 
-Covers the interface detection and feed construction used by both
+Covers the spectral-core feed construction used by both
 run_runtime_benchmarks.py and compare_runtime_builds.py. numpy is required
 for the synthesis path, so the whole module is skipped when it is absent
 (e.g. the numpy-less source-lock CI job).
@@ -45,27 +45,9 @@ def test_deterministic_waveform_shape_and_determinism() -> None:
     assert np.all(np.isfinite(a))
 
 
-def test_detect_interface() -> None:
-    assert runtime_inputs.detect_interface(_FakeSession(["spectral", "mix"])) == "spectral"
-    assert runtime_inputs.detect_interface(_FakeSession(["mix"])) == "waveform"
-    assert runtime_inputs.detect_interface(_FakeSession(["audio"])) == "waveform"
-    # A superset of the spectral names is NOT the spectral interface.
-    assert runtime_inputs.detect_interface(
-        _FakeSession(["spectral", "mix", "extra"])) == "waveform"
-
-
-def test_build_feed_waveform() -> None:
-    feed, interface = runtime_inputs.build_feed(_FakeSession(["wav"]), 4096)
-    assert interface == "waveform"
-    assert set(feed) == {"wav"}
-    assert feed["wav"].shape == (1, 2, 4096)
-    assert feed["wav"].dtype == np.float32
-
-
 def test_build_feed_spectral_is_contract_consistent() -> None:
     frames = 4096  # le = ceil(4096/1024) = 4 frames
-    feed, interface = runtime_inputs.build_feed(_FakeSession(["spectral", "mix"]), frames)
-    assert interface == "spectral"
+    feed = runtime_inputs.build_feed(_FakeSession(["spectral", "mix"]), frames)
     assert set(feed) == {"spectral", "mix"}
     assert feed["mix"].shape == (1, 2, frames)
     assert feed["mix"].dtype == np.float32
@@ -79,16 +61,20 @@ def test_build_feed_spectral_is_contract_consistent() -> None:
     assert np.array_equal(feed["spectral"], expected)
 
 
+def test_build_feed_rejects_non_spectral_session() -> None:
+    """A session whose inputs are not the spectral-core set is rejected — the
+    spectral interface is the only supported path."""
+    for names in (["mix"], ["audio"], ["spectral", "mix", "extra"]):
+        with pytest.raises(ValueError):
+            runtime_inputs.build_feed(_FakeSession(names), 4096)
+
+
 def test_expected_output_shapes_spectral() -> None:
     frames = 4096
-    feed, _ = runtime_inputs.build_feed(_FakeSession(["spectral", "mix"]), frames)
-    exp = runtime_inputs.expected_output_shapes("spectral", frames, feed["spectral"], None)
+    feed = runtime_inputs.build_feed(_FakeSession(["spectral", "mix"]), frames)
+    exp = runtime_inputs.expected_output_shapes(frames, feed["spectral"])
     import spectral_reference
     assert exp == {
         "spectral_out": [1, 4, 2, 2, spectral_reference.CONTRACT_FREQS, 4],
         "time_out": [1, 4, 2, frames],
     }
-
-
-def test_expected_output_shapes_waveform_is_none() -> None:
-    assert runtime_inputs.expected_output_shapes("waveform", 4096, None, [1, 4, 2, 4096]) is None

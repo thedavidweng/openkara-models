@@ -35,18 +35,17 @@ Usage::
         --report benchmark-report.json
 
     # Synthetic input only (no model download needed for smoke test):
-    python scripts/run_runtime_benchmarks.py --runtime ... --model models/htdemucs.onnx --frames 343980 --report report.json
+    python scripts/run_runtime_benchmarks.py --runtime ... --model models/htdemucs.spectral.onnx --frames 343980 --report report.json
 
     # Local mode against the installed onnxruntime wheel (no built archive):
     python scripts/run_runtime_benchmarks.py \\
-        --model models/htdemucs.spectral.onnx --interface spectral --report report.json
+        --model models/htdemucs.spectral.onnx --report report.json
 
-The model interface (single-input waveform vs. two-input spectral-core) is
-detected from the session's input names: a ``{spectral, mix}`` input set feeds
-the spectral interface (``spectral`` synthesized via ``spectral_reference.spec``
-of a deterministic waveform) and asserts the ``spectral_out``/``time_out``
-shapes; anything else feeds the legacy single waveform input. The timing
-semantics (cold/warm/RTF report fields) are identical for both interfaces.
+The model is the two-input spectral-core interface: the ``{spectral, mix}``
+input set is fed ``mix`` (a deterministic stereo waveform) and
+``spectral = spectral_reference.spec(mix)``, and the ``spectral_out`` /
+``time_out`` output shapes are asserted intrinsically from the synthesized
+spectral input.
 """
 
 from __future__ import annotations
@@ -140,15 +139,6 @@ def _download_model(art: dict[str, Any], download_dir: Path) -> Path:
     return dest
 
 
-def _parse_output_shape(semantics: str) -> list[int] | None:
-    """Parse '[1,4,2,343980] drums/bass/other/vocals' into [1,4,2,343980]."""
-    import re
-    m = re.match(r"\[([0-9,\s]+)\]", semantics)
-    if not m:
-        return None
-    return [int(x.strip()) for x in m.group(1).split(",")]
-
-
 def _load_session(lib_path: Path | None, model_path: str, enable_profiling: bool = False):
     """Load the ORT shared library and create an InferenceSession.
 
@@ -200,13 +190,13 @@ def _installed_runtime_record() -> dict[str, Any]:
 
 def benchmark_model(
     lib_path: Path | None, model_path: Path, frames: int,
-    warmup: int, iters: int, expected_output_shape: list[int] | None,
+    warmup: int, iters: int,
 ) -> dict[str, Any]:
-    """Run the benchmark for one model. Returns a metrics dict.
+    """Run the benchmark for one spectral-core model. Returns a metrics dict.
 
-    The input feed and the output-shape assertion adapt to the model
-    interface (single waveform input vs. two-input spectral core), detected
-    from the session's input names. Timing semantics are identical for both.
+    The two-input spectral-core feed is synthesized from a deterministic
+    waveform and the ``spectral_out`` / ``time_out`` output shapes are asserted
+    intrinsically from the synthesized spectral input.
     """
     import numpy as np
 
@@ -218,8 +208,8 @@ def benchmark_model(
     sess = _load_session(lib_path, str(model_path), enable_profiling=True)
     cold_load = time.perf_counter() - t0
 
-    # Build the feed by session input names (waveform or spectral).
-    feed, interface = runtime_inputs.build_feed(sess, frames)
+    # Build the spectral-core feed (spectral + mix) by session input names.
+    feed = runtime_inputs.build_feed(sess, frames)
     output_names = [o.name for o in sess.get_outputs()]
 
     # First window.
@@ -233,29 +223,19 @@ def benchmark_model(
         if not np.all(np.isfinite(o)):
             shape_errors.append(f"output[{i}] ({output_names[i]}) contains NaN or Inf")
 
-    if interface == "spectral":
-        # Assert spectral_out / time_out shapes by name.
-        expected_by_name = runtime_inputs.expected_output_shapes(
-            interface, frames, feed["spectral"], None,
-        )
-        for name, o in zip(output_names, out):
-            exp = expected_by_name.get(name)
-            if exp is None:
-                shape_errors.append(f"unexpected output name {name!r} for spectral interface")
-            elif list(o.shape) != exp:
-                shape_errors.append(
-                    f"output {name!r} shape {list(o.shape)} != expected {exp}"
-                )
-        missing = set(expected_by_name) - set(output_names)
-        if missing:
-            shape_errors.append(f"spectral interface missing outputs: {sorted(missing)}")
-    else:
-        # Waveform: a single flat expected shape applied to every output.
-        for i, o in enumerate(out):
-            if expected_output_shape is not None and list(o.shape) != expected_output_shape:
-                shape_errors.append(
-                    f"output[{i}] shape {list(o.shape)} != expected {expected_output_shape}"
-                )
+    # Assert spectral_out / time_out shapes by name.
+    expected_by_name = runtime_inputs.expected_output_shapes(frames, feed["spectral"])
+    for name, o in zip(output_names, out):
+        exp = expected_by_name.get(name)
+        if exp is None:
+            shape_errors.append(f"unexpected output name {name!r} for spectral interface")
+        elif list(o.shape) != exp:
+            shape_errors.append(
+                f"output {name!r} shape {list(o.shape)} != expected {exp}"
+            )
+    missing = set(expected_by_name) - set(output_names)
+    if missing:
+        shape_errors.append(f"spectral interface missing outputs: {sorted(missing)}")
 
     # Warm up.
     for _ in range(warmup):
@@ -305,7 +285,7 @@ def benchmark_model(
         "output_shape": [list(o.shape) for o in out],
         "shape_errors": shape_errors,
         "frames": frames,
-        "interface": interface,
+        "interface": "spectral",
     }
 
 
@@ -315,19 +295,9 @@ def main() -> int:
                         help="Runtime archive to benchmark. If omitted, the "
                              "installed onnxruntime wheel is used (local mode).")
     parser.add_argument("--model", type=Path, default=None,
-                        help="Single ONNX model. Requires --expected-output-shape "
-                             "(waveform) or --interface spectral so output-shape "
-                             "validation is not bypassed.")
-    parser.add_argument("--interface", choices=["waveform", "spectral"], default="waveform",
-                        help="Model interface hint for the --model path. The actual "
-                             "interface is auto-detected from the session inputs; this "
-                             "only relaxes the waveform shape guard for spectral models "
-                             "(whose two output shapes are asserted intrinsically).")
-    parser.add_argument("--expected-output-shape", type=str, default=None,
-                        help="Expected output shape as comma-separated dims, "
-                             "e.g. '1,4,2,343980'. Required when --model is used "
-                             "with the waveform interface and without --catalog so "
-                             "shape validation is enforced.")
+                        help="Single spectral-core ONNX model. Its two output shapes "
+                             "are asserted intrinsically from the synthesized spectral "
+                             "input, so no expected-shape argument is required.")
     parser.add_argument("--catalog", type=Path, default=None,
                         help="Catalog manifest to resolve compatible models from.")
     parser.add_argument("--model-artifact-id", type=str, default=None,
@@ -364,31 +334,12 @@ def main() -> int:
             archive_name, archive_sha, archive_size = rec["name"], rec["sha256"], rec["size"]
             print(f"local mode: installed onnxruntime library {archive_name}")
 
-        # Resolve models.
+        # Resolve models. A spectral-core model's output shapes are asserted
+        # intrinsically from the synthesized spectral input, so a bare --model
+        # never bypasses shape validation.
         models: list[tuple[str, Path, dict[str, Any] | None]] = []
-        explicit_shape: list[int] | None = None
-        if args.expected_output_shape:
-            try:
-                explicit_shape = [int(x.strip()) for x in args.expected_output_shape.split(",")]
-            except ValueError:
-                parser.error(f"--expected-output-shape must be comma-separated ints, "
-                             f"got {args.expected_output_shape!r}")
         if args.model:
-            # Reject a bare --model that bypasses output-shape validation.
-            # Either --catalog (which supplies the shape from the model
-            # artifact's output_semantics), --expected-output-shape, or
-            # --interface spectral (whose two output shapes are asserted
-            # intrinsically from the synthesized spectral input) must be given.
-            if not args.catalog and explicit_shape is None and args.interface != "spectral":
-                parser.error(
-                    "--model requires --expected-output-shape (or --catalog, or "
-                    "--interface spectral) so output-shape validation is not bypassed"
-                )
-            art: dict[str, Any] | None = None
-            if explicit_shape is not None:
-                art = {"model": {"output_semantics": str(explicit_shape)},
-                       "artifact_id": args.model.name}
-            models.append((args.model.name, args.model, art))
+            models.append((args.model.name, args.model, None))
         elif args.catalog:
             arts = _resolve_model_from_catalog(args.catalog, args.download_dir, args.target)
             if args.model_artifact_id:
@@ -412,13 +363,8 @@ def main() -> int:
         results: list[dict[str, Any]] = []
         for name, model_path, art in models:
             print(f"\nBenchmarking {name}...")
-            expected_shape = None
-            if art:
-                expected_shape = _parse_output_shape(
-                    art.get("model", {}).get("output_semantics", "")
-                )
             metrics = benchmark_model(
-                lib_path, model_path, args.frames, args.warmup, args.iters, expected_shape,
+                lib_path, model_path, args.frames, args.warmup, args.iters,
             )
             metrics["model"] = name
             metrics["model_artifact_id"] = art["artifact_id"] if art else None

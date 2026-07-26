@@ -3,12 +3,14 @@
 
 Reads a release spec (``catalog/specs/<release-id>.spec.json``), assembles an
 immutable release manifest, validates it against the v1 schema + invariants,
-and writes three artifacts:
+and writes the immutable manifest:
 
-1. ``catalog/releases/<release-id>.json`` — the immutable manifest.
-2. ``catalog/channels/stable.json`` — the stable-channel pointer, advanced only
-   after the manifest validates.
-   carrying ``{ "<variant>": {tag, url, sha256, size} }`` for OpenKara PR #165.
+    ``catalog/releases/<release-id>.json`` — the immutable manifest.
+
+The candidate stable-channel pointer (``catalog/channels/stable.json``) is
+validated for shape but NOT written: it is advanced only by
+``scripts/publish_catalog_release.py`` after every referenced asset is uploaded
+and SHA-256-verified (issue #18 PR 4 atomicity contract).
 
 Generation is deterministic: ``created_at`` comes from the spec (never wall
 clock), and JSON is serialized with sorted keys, 2-space indent, UTF-8, and a

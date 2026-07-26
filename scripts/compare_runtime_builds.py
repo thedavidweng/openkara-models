@@ -34,7 +34,7 @@ Usage::
 
     # With inference comparison (native runner only):
     python scripts/compare_runtime_builds.py --full ... --reduced ... \\
-        --model models/htdemucs.onnx --frames 343980 --report report.json
+        --model models/htdemucs.spectral.onnx --frames 343980 --report report.json
 """
 
 from __future__ import annotations
@@ -147,14 +147,13 @@ def inference_comparison(
 
     report: dict[str, Any] = {}
 
-    # Load full runtime. The input feed adapts to the model interface
-    # (single waveform input vs. two-input spectral core), detected from the
-    # session's input names; both runtimes are fed the same deterministic
-    # tensors so the numerical comparison is meaningful.
+    # Load full runtime. The spectral-core feed (spectral + mix) is synthesized
+    # from a deterministic waveform; both runtimes are fed the same tensors so
+    # the numerical comparison is meaningful.
     t0 = time.perf_counter()
     full_sess = _load_session_with_lib(full_files[full_lib], Path(full_lib).suffix, str(model_path))
     full_cold_load = time.perf_counter() - t0
-    feed, _interface = runtime_inputs.build_feed(full_sess, frames)
+    feed = runtime_inputs.build_feed(full_sess, frames)
     full_sess.run(None, feed)
 
     # Load reduced runtime.
@@ -169,7 +168,7 @@ def inference_comparison(
 
     # Warm up + measure.
     def _bench(sess) -> dict[str, Any]:
-        bench_feed, _iface = runtime_inputs.build_feed(sess, frames)
+        bench_feed = runtime_inputs.build_feed(sess, frames)
         for _ in range(warmup):
             sess.run(None, bench_feed)
         import resource

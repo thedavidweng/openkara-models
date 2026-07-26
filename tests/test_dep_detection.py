@@ -197,6 +197,18 @@ def test_validate_model_lock_pins_spectral_contract_version() -> None:
     assert any("spectral_core.contract" in e for e in errors)
 
 
+def test_validate_model_lock_requires_spectral_sole_artifact_authority() -> None:
+    """The top-level artifact_id must name the spectral-core artifact; the
+    retired waveform artifact is no longer the entry's identity."""
+    import validate_model_source_lock as v
+    lock = _load_model_lock()
+    for name, entry in lock["models"].items():
+        assert entry["artifact_id"] == entry["spectral_core"]["artifact_id"], name
+    lock["models"]["htdemucs"]["artifact_id"] = "htdemucs.balanced.fp32.onnx"
+    errors = v.validate_model_lock(lock)
+    assert any("sole artifact authority" in e for e in errors)
+
+
 def test_detector_resolves_per_model_lock_entry() -> None:
     """The detector must compare against the per-model entry of the v1 lock."""
     import detect_model_weight_revision  # noqa: F401 — importability

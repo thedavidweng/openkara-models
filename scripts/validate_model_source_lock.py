@@ -6,7 +6,9 @@ The model lock is the immutable model source authority. Checks that:
   - Weights are pinned by immutable HuggingFace revision commit SHAs
     (timestamp-only state is forbidden).
   - The Demucs package revision and checkpoint signatures are declared.
-  - Conversion toolchain identity and output contract are declared.
+  - The spectral-core export authority (exporter toolchain + output contract)
+    is declared, pins the spectral contract version, and is the entry's sole
+    artifact authority.
   - The lock never duplicates catalog-owned artifact URLs/sizes/digests
     (one dependency, one authority).
 
@@ -31,7 +33,9 @@ MODEL_LOCK_PATH = ROOT / "models" / "source-lock.json"
 
 REQUIRED_MODELS = {"htdemucs", "htdemucs_ft"}
 
-CONVERSION_REQUIRED_FIELDS = {
+# Fields the spectral-core exporter block must declare to identify its
+# toolchain (script + workflow + loader + opset/ir_version + torch/onnx pins).
+EXPORT_REQUIRED_FIELDS = {
     "script", "workflow", "loader", "opset", "ir_version",
     "torch_requirement", "onnx_requirement",
 }
@@ -41,10 +45,13 @@ OUTPUT_CONTRACT_REQUIRED_FIELDS = {
     "stems", "precision", "tensor_interface",
 }
 
-# The spectral-core export path (issue #23) is a second conversion authority
-# per model: same pinned weights and demucs package, different exporter and
-# tensor boundary. It must declare the contract version it implements.
-SPECTRAL_CORE_REQUIRED_FIELDS = CONVERSION_REQUIRED_FIELDS | {
+# The spectral-core export path (issue #23) is each model's sole conversion
+# authority: the pinned weights + demucs package exported through
+# export_spectral_core.py to the contract-v1 tensor boundary. It declares its
+# exporter toolchain, the contract version it implements, its artifact_id, and
+# its output contract. (The retired conv-DFT waveform exporter and its
+# output_contract block were removed with the waveform pipeline.)
+SPECTRAL_CORE_REQUIRED_FIELDS = EXPORT_REQUIRED_FIELDS | {
     "contract", "artifact_id", "output_contract",
 }
 SPECTRAL_CONTRACT_VERSION = "openkara.spectral-contract/v1"
@@ -106,16 +113,6 @@ def validate_model_lock(lock: dict[str, Any]) -> list[str]:
         if not isinstance(sigs, list) or not sigs:
             errors.append(f"{prefix}.demucs_package.checkpoint_signatures missing or empty")
 
-        conv = entry.get("conversion", {})
-        missing_conv = CONVERSION_REQUIRED_FIELDS - set(conv.keys())
-        if missing_conv:
-            errors.append(f"{prefix}.conversion: missing fields: {sorted(missing_conv)}")
-
-        contract = entry.get("output_contract", {})
-        missing_contract = OUTPUT_CONTRACT_REQUIRED_FIELDS - set(contract.keys())
-        if missing_contract:
-            errors.append(f"{prefix}.output_contract: missing fields: {sorted(missing_contract)}")
-
         spectral = entry.get("spectral_core", {})
         if not spectral:
             errors.append(f"{prefix}.spectral_core missing (issue #23 export authority)")
@@ -141,6 +138,14 @@ def validate_model_lock(lock: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"{prefix}.spectral_core.output_contract.tensor_interface "
                     "must be 'spectral-core'"
+                )
+            # The spectral-core export is the entry's sole artifact authority:
+            # the top-level artifact_id must name the same artifact.
+            if entry.get("artifact_id") != spectral.get("artifact_id"):
+                errors.append(
+                    f"{prefix}.artifact_id ({entry.get('artifact_id')!r}) must equal "
+                    f"spectral_core.artifact_id ({spectral.get('artifact_id')!r}) — the "
+                    "spectral-core export is the sole artifact authority"
                 )
 
         def _reject_catalog_fields(obj: Any, path: str) -> None:

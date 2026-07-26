@@ -42,14 +42,19 @@ class GeneratedCatalogTests(unittest.TestCase):
     def test_generated_pointer_validates(self):
         self.assertTrue(validate_document(_load(POINTER), schema="channel").ok)
 
-    def test_latest_json_adapter_is_gone(self):
-        """The PR #165 migration alias was deleted after OpenKara #167/#179;
-        channel pointers and release manifests are the only contract
-        surfaces. Nothing may resurrect an ad hoc distribution file."""
-        self.assertFalse((ROOT_DIR / "latest.json").exists())
-        import generate_catalog_release as gen
-
-        self.assertFalse(hasattr(gen, "_build_latest_adapter"))
+    def test_generator_output_is_exactly_the_manifest(self):
+        """The generator's only output is the immutable release manifest — no
+        stable pointer and no ad hoc distribution file. Asserting the exact
+        output set is the positive form of the old 'latest.json must stay
+        deleted' guard: any unexpected side output fails."""
+        with tempfile.TemporaryDirectory() as td:
+            cat = Path(td) / "cat"
+            r = _run(["--spec", str(SPEC), "--catalog-dir", str(cat)])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            written = sorted(
+                p.relative_to(cat).as_posix() for p in cat.rglob("*") if p.is_file()
+            )
+            self.assertEqual(written, ["releases/2026-07-20-001.json"])
 
     def test_pointer_references_manifest_digest(self):
         import hashlib
@@ -185,9 +190,13 @@ class FreshnessTests(unittest.TestCase):
                 (tdp / "cat" / "releases" / "2026-07-20-001.json").read_bytes(),
                 RELEASE.read_bytes(),
             )
-            # The generator writes only catalog documents — the deleted
-            # latest.json adapter must never come back as a side output.
-            self.assertFalse((tdp / "latest.json").exists())
+            # The generator writes exactly the release manifest and nothing
+            # else — no stray side output document is ever produced.
+            cat = tdp / "cat"
+            written = sorted(
+                p.relative_to(cat).as_posix() for p in cat.rglob("*") if p.is_file()
+            )
+            self.assertEqual(written, ["releases/2026-07-20-001.json"])
 
     def test_generator_does_not_advance_stable_pointer(self):
         """The generator must NOT write catalog/channels/stable.json. The stable

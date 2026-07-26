@@ -1,12 +1,12 @@
-"""Tests for the native smoke harness wrapper and benchmark shape-validation
-bypass rejection.
+"""Tests for the native smoke harness wrapper and benchmark model resolution.
 
 Covers:
-  - run_native_smoke.py CLI help and report assembly (without building the
-    C++ harness, which requires an ORT source checkout).
-  - run_runtime_benchmarks.py rejects a bare --model without
-    --expected-output-shape or --catalog (prevents bypassing output-shape
-    validation).
+  - run_native_smoke.py CLI help, the spectral-core shape gate, and report
+    assembly (without building the C++ harness, which requires an ORT source
+    checkout).
+  - run_runtime_benchmarks.py model/catalog resolution: a bare --model is
+    accepted (the spectral-core output shapes are asserted intrinsically), and
+    an unknown --model-artifact-id is rejected.
 """
 
 from __future__ import annotations
@@ -47,6 +47,9 @@ def test_run_native_smoke_requires_args() -> None:
     assert r.returncode != 0
 
 
+SPECTRAL_SHAPE = "[1,4,2,2,2048,336];[1,4,2,343980]"
+
+
 def _valid_smoke_report(provider: str) -> dict[str, object]:
     return {
         "requested_provider": provider,
@@ -54,7 +57,7 @@ def _valid_smoke_report(provider: str) -> dict[str, object]:
         "session_creation": "ok",
         "inference": "ok",
         "finite_output": True,
-        "output_shape": "[1,4,2,343980]",
+        "output_shape": SPECTRAL_SHAPE,
         "used_fallback": False,
         "provider_assignment": provider,
         "provider_node_count": 1,
@@ -81,43 +84,20 @@ def test_strict_smoke_gate_rejects_whole_session_cpu_fallback() -> None:
 
 def test_strict_smoke_gate_rejects_wrong_shape() -> None:
     report = _valid_smoke_report("xnnpack")
-    report["output_shape"] = "[1,3,2,343980]"
+    report["output_shape"] = "[1,3,2,343980]"  # not the spectral two-output shape
     failures = run_native_smoke.validation_failures(report, "xnnpack")
     assert any("output_shape" in failure for failure in failures)
 
 
-SPECTRAL_SHAPE = "[1,4,2,2,2048,336];[1,4,2,343980]"
-
-
 def test_strict_smoke_gate_accepts_spectral_output_shape() -> None:
-    """The spectral interface passes when the report carries the two-output
-    spectral shape string and the caller asserts against it."""
+    """The spectral-core two-output shape string is the default (and only)
+    expectation."""
     report = _valid_smoke_report("cpu")
-    report["output_shape"] = SPECTRAL_SHAPE
-    assert run_native_smoke.validation_failures(
-        report, "cpu", SPECTRAL_SHAPE
-    ) == []
+    assert run_native_smoke.validation_failures(report, "cpu") == []
 
 
-def test_strict_smoke_gate_rejects_spectral_shape_under_waveform_expectation() -> None:
-    """A spectral output shape must fail the default waveform expectation."""
-    report = _valid_smoke_report("cpu")
-    report["output_shape"] = SPECTRAL_SHAPE
-    failures = run_native_smoke.validation_failures(report, "cpu")
-    assert any("output_shape" in failure for failure in failures)
-
-
-def test_strict_smoke_gate_rejects_waveform_shape_under_spectral_expectation() -> None:
-    """A waveform output shape must fail when the spectral interface is
-    expected (interface-aware shape gate)."""
-    report = _valid_smoke_report("cpu")  # output_shape = "[1,4,2,343980]"
-    failures = run_native_smoke.validation_failures(report, "cpu", SPECTRAL_SHAPE)
-    assert any("output_shape" in failure for failure in failures)
-
-
-def test_interface_output_shapes_mapping() -> None:
-    assert run_native_smoke.INTERFACE_OUTPUT_SHAPES["waveform"] == "[1,4,2,343980]"
-    assert run_native_smoke.INTERFACE_OUTPUT_SHAPES["spectral"] == SPECTRAL_SHAPE
+def test_spectral_output_shape_constant() -> None:
+    assert run_native_smoke.SPECTRAL_OUTPUT_SHAPE == SPECTRAL_SHAPE
 
 
 def test_strict_smoke_gate_rejects_zero_provider_nodes() -> None:
@@ -182,11 +162,10 @@ def test_strict_smoke_gate_rejects_skipped_for_xnnpack() -> None:
     assert any("session creation" in f for f in failures)
 
 
-def test_benchmark_rejects_bare_model_without_shape(tmp_path: Path) -> None:
-    """A bare --model without --expected-output-shape or --catalog must be
-    rejected so output-shape validation is not bypassed."""
-    # Create a fake runtime archive so the --runtime check passes; the script
-    # will fail at the model-bypass check before extracting.
+def test_benchmark_bare_model_not_rejected_for_missing_shape(tmp_path: Path) -> None:
+    """A bare --model is accepted: a spectral-core model's output shapes are
+    asserted intrinsically, so there is no expected-shape bypass guard. The
+    run fails later (fake model), but never for a missing shape argument."""
     import io
     import tarfile
     archive = tmp_path / "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz"
@@ -202,39 +181,12 @@ def test_benchmark_rejects_bare_model_without_shape(tmp_path: Path) -> None:
     r = subprocess.run(
         [sys.executable, str(SCRIPTS / "run_runtime_benchmarks.py"),
          "--runtime", str(archive), "--model", str(model),
-         "--target", "x86_64-unknown-linux-gnu"],
-        capture_output=True, text=True,
-    )
-    assert r.returncode != 0
-    assert "expected-output-shape" in r.stderr or "expected-output-shape" in r.stdout
-
-
-def test_benchmark_accepts_model_with_explicit_shape(tmp_path: Path) -> None:
-    """--model with --expected-output-shape should pass the bypass check
-    (it will fail later at extraction/inference, but not at the bypass guard)."""
-    import io
-    import tarfile
-    archive = tmp_path / "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz"
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        data = b"x"
-        info = tarfile.TarInfo(name="libonnxruntime.so")
-        info.size = len(data)
-        tar.addfile(info, io.BytesIO(data))
-    archive.write_bytes(buf.getvalue())
-    model = tmp_path / "model.onnx"
-    model.write_bytes(b"fake")
-    r = subprocess.run(
-        [sys.executable, str(SCRIPTS / "run_runtime_benchmarks.py"),
-         "--runtime", str(archive), "--model", str(model),
-         "--expected-output-shape", "1,4,2,343980",
          "--target", "x86_64-unknown-linux-gnu",
          "--report", str(tmp_path / "report.json")],
         capture_output=True, text=True,
     )
-    # It should get past the bypass guard; it will fail at inference because
-    # the model is fake, but the error should NOT mention expected-output-shape.
-    assert "expected-output-shape" not in r.stderr
+    # No expected-shape argument exists anymore; the failure is never about one.
+    assert "expected-output-shape" not in (r.stderr + r.stdout)
 
 
 def test_benchmark_rejects_unknown_model_artifact_id(tmp_path: Path) -> None:
