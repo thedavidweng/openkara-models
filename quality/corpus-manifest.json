@@ -131,7 +131,7 @@
       "mse_budget": {
         "pr": 0.0002
       },
-      "mse_budget_note": "A unit impulse drives the nonlinear masks far harder than any musical content: the shipped stable waveform artifact measures MSE 1.03e-4 vs the PyTorch reference (the spectral-core candidate measures the identical 1.03e-4). Budget = 2x the measured stable baseline; the tier default was never achievable on this fixture.",
+      "mse_budget_note": "A unit impulse drives the nonlinear masks far harder than any musical content: MSE against the PyTorch reference measures 1.03e-4, identically for the spectral-core artifact now shipped and for the retired waveform artifact it was measured against. Budget = 2x that baseline; the tier default was never achievable on this fixture.",
       "notes": "Single impulse at 1s. Exercises transient response.",
       "sample_rate": 44100,
       "tier": "pr"
