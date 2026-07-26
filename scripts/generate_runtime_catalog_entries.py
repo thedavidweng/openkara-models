@@ -65,6 +65,38 @@ def _read_archive(archive: Path) -> dict[str, bytes]:
     return archive_utils.safe_read_archive(archive)
 
 
+def _archive_file_digests(files: dict[str, bytes]) -> dict[str, dict[str, Any]]:
+    """Size + SHA-256 of every packed member, keyed by archive-relative path."""
+    return {
+        path: {
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size": len(payload),
+        }
+        for path, payload in sorted(files.items())
+    }
+
+
+def _assert_manifest_matches_archive(
+    archive_name: str,
+    manifest_files: dict[str, Any],
+    archive_files: dict[str, dict[str, Any]],
+) -> None:
+    """Fail when the build manifest disagrees with the packed bytes."""
+    for path, declared in sorted(manifest_files.items()):
+        packed = archive_files.get(path)
+        if packed is None:
+            raise ValueError(
+                f"{archive_name}: build manifest declares {path}, "
+                "which is not in the archive"
+            )
+        for field in ("sha256", "size"):
+            if field in declared and declared[field] != packed[field]:
+                raise ValueError(
+                    f"{archive_name}: {path} {field} mismatch "
+                    f"(manifest={declared[field]} archive={packed[field]})"
+                )
+
+
 def _parse_target(archive_name: str) -> tuple[str, str, str, bool]:
     """Return (target_triple, arch, os, is_reduced) from an archive name."""
     base = archive_name
@@ -134,8 +166,14 @@ def _build_entry(
 
     archive_size, archive_sha = _sha256_file(archive)
 
-    # Per-file digests from the build manifest.
-    file_digests = manifest.get("files", {})
+    # Per-file digests describe what the archive actually ships, so they are
+    # derived from the archive itself rather than from the build manifest's
+    # `files` map: the manifest cannot list itself, and consumers that reject
+    # undeclared members would refuse an otherwise valid package. The
+    # manifest's own entries are cross-checked against the packed bytes so a
+    # packing bug still fails here rather than at install time.
+    file_digests = _archive_file_digests(files)
+    _assert_manifest_matches_archive(archive.name, manifest.get("files", {}), file_digests)
 
     # Supply chain refs from the build manifest.
     sc = manifest.get("supply_chain", {})
