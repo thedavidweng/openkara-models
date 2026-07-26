@@ -32,24 +32,31 @@ issue #167 switches the app to consuming `catalog/channels/stable.json` and
 
 ## Models
 
+Both models ship as **spectral-core** artifacts (contract v1): the ONNX graph
+takes the demucs spectral tensor plus the raw mix and returns the pre-ISTFT
+spectral heads plus the time branch. The app performs the STFT/ISTFT — the
+graph contains no DFT constant matrices (see [How it works](#how-it-works)).
+
 ### htdemucs (default)
 
-| Property     | Value                                                                         |
-| ------------ | ----------------------------------------------------------------------------- |
-| Source model | `htdemucs` (Hybrid Transformer Demucs)                                        |
-| Input        | `[1, 2, 343980]` — stereo audio at 44.1 kHz (fixed 7.8s segment)              |
-| Output       | `[1, 4, 2, 343980]` — batch, stems (drums/bass/other/vocals), stereo, samples |
-| Format       | ONNX (opset 17)                                                               |
+| Property     | Value                                                                                              |
+| ------------ | -------------------------------------------------------------------------------------------------- |
+| Source model | `htdemucs` (Hybrid Transformer Demucs)                                                             |
+| Inputs       | `spectral [1, 2, 2, 2048, 336]` (contract-v1 spec of `mix`) + `mix [1, 2, 343980]` stereo 44.1 kHz |
+| Outputs      | `spectral_out [1, 4, 2, 2, 2048, 336]` (pre-ISTFT) + `time_out [1, 4, 2, 343980]`; stems[s] = ispec(spectral_out[:, s]) + time_out[:, s] |
+| Format       | ONNX (opset 17), spectral-core contract v1                                                         |
+| Size         | 199.8 MB                                                                                           |
 
 ### htdemucs_ft (fine-tuned, higher quality)
 
-| Property     | Value                                                                         |
-| ------------ | ----------------------------------------------------------------------------- |
-| Source model | `htdemucs_ft` (Fine-tuned Hybrid Transformer Demucs, 4-model ensemble)        |
-| Input        | `[1, 2, 343980]` — stereo audio at 44.1 kHz (fixed 7.8s segment)              |
-| Output       | `[1, 4, 2, 343980]` — batch, stems (drums/bass/other/vocals), stereo, samples |
-| Format       | ONNX (opset 17)                                                               |
-| Note         | Ensemble of 4 fine-tuned models averaged into a single ONNX graph (~300MB+)   |
+| Property     | Value                                                                                              |
+| ------------ | -------------------------------------------------------------------------------------------------- |
+| Source model | `htdemucs_ft` (Fine-tuned Hybrid Transformer Demucs, 4-model ensemble)                             |
+| Inputs       | `spectral [1, 2, 2, 2048, 336]` (contract-v1 spec of `mix`) + `mix [1, 2, 343980]` stereo 44.1 kHz |
+| Outputs      | `spectral_out [1, 4, 2, 2, 2048, 336]` (pre-ISTFT) + `time_out [1, 4, 2, 343980]`; stems[s] = ispec(spectral_out[:, s]) + time_out[:, s] |
+| Format       | ONNX (opset 17), spectral-core contract v1                                                         |
+| Size         | 800.2 MB                                                                                           |
+| Note         | Ensemble of 4 fine-tuned models averaged into a single ONNX graph                                  |
 
 ## Usage
 
@@ -57,8 +64,8 @@ issue #167 switches the app to consuming `catalog/channels/stable.json` and
 
 Grab model files from the [Releases](https://github.com/thedavidweng/openkara-models/releases) page:
 
-- **htdemucs**: `htdemucs.onnx` + `htdemucs.onnx.sha256` (tags: `model-v*`)
-- **htdemucs_ft**: `htdemucs_ft.onnx` + `htdemucs_ft.onnx.sha256` (tags: `model-ft-v*`)
+- **htdemucs**: `htdemucs.spectral.onnx` + `htdemucs.spectral.onnx.sha256` (tags: `model-spectral-v*`)
+- **htdemucs_ft**: `htdemucs_ft.spectral.onnx` + `htdemucs_ft.spectral.onnx.sha256` (tags: `model-ft-spectral-v*`)
 
 ### Build locally
 
@@ -97,14 +104,14 @@ constants — consume `catalog/channels/stable.json` and
 
 ## How it works
 
-ONNX does not support complex-valued STFT/ISTFT operations used by Demucs. The conversion pipeline rewrites these as real-valued conv1d operations (DFT filter matrices), following the approach from [sevagh/demucs.onnx](https://github.com/sevagh/demucs.onnx) and the [Mixxx GSOC 2025 project](https://mixxx.org/news/2025-10-27-gsoc2025-demucs-to-onnx-dhunstack/).
+Demucs' STFT/ISTFT are complex-valued and have no portable ONNX operator, so the **spectral-core** contract (v1) keeps them out of the graph entirely. The app computes the forward STFT and the final ISTFT; the ONNX graph is the demucs core between them. It takes the demucs spectral tensor (`spectral`) plus the raw mix (`mix`) and returns the pre-ISTFT spectral heads (`spectral_out`) plus the time branch (`time_out`), and the app composes each stem as `ispec(spectral_out[:, s]) + time_out[:, s]`. Because the transforms live in the app, the graph carries **no DFT constant matrices**, and the shipped ONNX Runtime is a **23-operator reduced build** containing only the kernels this graph uses.
 
-For `htdemucs_ft` (4-model ensemble), the pipeline exports each sub-model to a separate ONNX graph, then merges them into a single graph that averages all four outputs. The merge step also **deduplicates identical initializers** — the STFT/ISTFT filter banks are shared across all sub-models, so only one copy is kept, reducing model size and improving runtime cache locality. Averaging uses `Sum + Mul(1/N)` instead of materializing a stacked intermediate tensor.
+For `htdemucs_ft` (4-model ensemble), the exporter emits each sub-model's core to a separate graph, then merges them into a single graph that averages all four outputs. The merge step **deduplicates identical initializers** shared across the sub-models, reducing model size and improving runtime cache locality. Averaging uses `Sum + Mul(1/N)` instead of materializing a stacked intermediate tensor.
 
 ## CI/CD
 
-- Pushing a tag matching `model-v*` triggers conversion and release of **htdemucs**.
-- Pushing a tag matching `model-ft-v*` triggers conversion and release of **htdemucs_ft**.
+- Pushing a tag matching `model-spectral-v*` triggers conversion and release of **htdemucs**.
+- Pushing a tag matching `model-ft-spectral-v*` triggers conversion and release of **htdemucs_ft**.
 
 **htdemucs** runs in a single job: export → optimize → validate → release (~5 min).
 
@@ -112,7 +119,7 @@ For `htdemucs_ft` (4-model ensemble), the pipeline exports each sub-model to a s
 
 Each workflow:
 
-1. Exports the model to raw ONNX with the real-valued STFT/ISTFT rewrite
+1. Exports the spectral-core graph (STFT/ISTFT stay in the app; no DFT constants in the graph)
 2. Rewrites the final artifact through ONNX Runtime offline optimization (`ORT_ENABLE_EXTENDED`; see [runtime contract](docs/runtime-contract.md))
 3. Validates ONNX output against PyTorch (MSE < 1e-4), checks optimized-artifact metadata, and asserts the graph contains no `com.microsoft.nchwc` nodes
 4. Publishes the optimized ONNX file + SHA-256 checksum as a GitHub Release (release body includes model size and validation MSE)

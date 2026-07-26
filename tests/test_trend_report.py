@@ -31,7 +31,7 @@ def _quality_report(mse: float = 1e-6) -> dict:
 
 def test_trend_with_pending_baseline() -> None:
     import generate_trend_report as t
-    trend = t.generate_trend("htdemucs.balanced.fp32.onnx", _quality_report(), None)
+    trend = t.generate_trend("htdemucs.spectral.fp32.onnx", _quality_report(), None)
     assert "error" not in trend
     assert trend["schema_version"] == "openkara.trend-report/v1"
     # With pending baseline, deltas are None but trends are still listed.
@@ -47,7 +47,7 @@ def test_trend_unknown_artifact() -> None:
 
 def test_trend_markdown() -> None:
     import generate_trend_report as t
-    trend = t.generate_trend("htdemucs.balanced.fp32.onnx", _quality_report(), None)
+    trend = t.generate_trend("htdemucs.spectral.fp32.onnx", _quality_report(), None)
     md = t._markdown(trend)
     assert "Trend report" in md
     assert "mse" in md
@@ -60,7 +60,7 @@ def test_cli() -> None:
     md = Path("/tmp/test-trend.md")
     r = subprocess.run(
         [sys.executable, str(SCRIPTS / "generate_trend_report.py"),
-         "--artifact-id", "htdemucs.balanced.fp32.onnx",
+         "--artifact-id", "htdemucs.spectral.fp32.onnx",
          "--quality-report", str(q), "--output", str(out), "--markdown", str(md)],
         capture_output=True, text=True,
     )

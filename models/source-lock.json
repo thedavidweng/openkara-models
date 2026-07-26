@@ -2,16 +2,7 @@
   "lock_version": "openkara.model-source-lock/v1",
   "models": {
     "htdemucs": {
-      "artifact_id": "htdemucs.balanced.fp32.onnx",
-      "conversion": {
-        "ir_version": 9,
-        "loader": "demucs.pretrained.get_model('htdemucs')",
-        "onnx_requirement": "onnx>=1.22.0",
-        "opset": 17,
-        "script": "scripts/convert_htdemucs_to_onnx.py",
-        "torch_requirement": "torch>=2.13.0,<3.0",
-        "workflow": ".github/workflows/convert.yml"
-      },
+      "artifact_id": "htdemucs.spectral.fp32.onnx",
       "demucs_package": {
         "checkpoint_signatures": [
           "955717e8-8726e21a.th"
@@ -19,20 +10,6 @@
         "code_repo": "adefossez/demucs",
         "package": "demucs",
         "version": "4.1.0"
-      },
-      "output_contract": {
-        "input_semantics": "[1,2,343980] stereo audio at 44.1 kHz",
-        "output_semantics": "[1,4,2,343980] drums/bass/other/vocals",
-        "precision": "fp32",
-        "sample_rate": 44100,
-        "segment_frames": 343980,
-        "stems": [
-          "drums",
-          "bass",
-          "other",
-          "vocals"
-        ],
-        "tensor_interface": "waveform"
       },
       "spectral_core": {
         "artifact_id": "htdemucs.spectral.fp32.onnx",
@@ -66,16 +43,7 @@
       }
     },
     "htdemucs_ft": {
-      "artifact_id": "htdemucs_ft.quality.fp32.onnx",
-      "conversion": {
-        "ir_version": 9,
-        "loader": "demucs.pretrained.get_model('htdemucs_ft')",
-        "onnx_requirement": "onnx>=1.22.0",
-        "opset": 17,
-        "script": "scripts/convert_htdemucs_to_onnx.py",
-        "torch_requirement": "torch>=2.13.0,<3.0",
-        "workflow": ".github/workflows/convert.yml"
-      },
+      "artifact_id": "htdemucs_ft.spectral.fp32.onnx",
       "demucs_package": {
         "checkpoint_signatures": [
           "f7e0c4bc-ba3fe64a.th",
@@ -86,20 +54,6 @@
         "code_repo": "adefossez/demucs",
         "package": "demucs",
         "version": "4.1.0"
-      },
-      "output_contract": {
-        "input_semantics": "[1,2,343980] stereo audio at 44.1 kHz",
-        "output_semantics": "[1,4,2,343980] drums/bass/other/vocals",
-        "precision": "fp32",
-        "sample_rate": 44100,
-        "segment_frames": 343980,
-        "stems": [
-          "drums",
-          "bass",
-          "other",
-          "vocals"
-        ],
-        "tensor_interface": "waveform"
       },
       "spectral_core": {
         "artifact_id": "htdemucs_ft.spectral.fp32.onnx",

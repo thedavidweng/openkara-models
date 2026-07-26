@@ -132,8 +132,21 @@ jobs:
       - name: Install build deps (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
-      - name: Build ORT for ${{ matrix.target }}
-        run: python scripts/build_runtime.py --target ${{ matrix.target }}
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      # Reduced build: derive the operator set from the spectral stable model,
+      # then prune every other kernel (matches ort-publish.yml, so the candidate
+      # runtimes are the same reduced archives publish ships).
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced ORT for ${{ matrix.target }}
+        run: python scripts/build_runtime.py --target ${{ matrix.target }} --reduced
       - name: Generate supply-chain
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package
@@ -141,7 +154,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: runtime-${{ matrix.target }}
-          path: ort/packages/onnxruntime-*-${{ matrix.target }}.*
+          path: ort/packages/onnxruntime-*-${{ matrix.target }}-reduced.*
 
   # Run quality gates (for both ORT and model-weight updates).
   #
@@ -181,12 +194,19 @@ jobs:
             echo "Model quality suite script not present in this checkout"
             exit 0
           fi
-          if [ ! -f models/htdemucs.onnx ]; then
+          # Fetch the stable spectral artifact so the gate runs against the
+          # thing that actually ships (matches the artifact-id used by the gate
+          # enforcer below).
+          python scripts/download_stable_model.py \
+            --catalog catalog/releases/2026-07-25-005.json \
+            --artifact htdemucs.spectral.fp32.onnx \
+            --dest models/htdemucs.spectral.onnx
+          if [ ! -f models/htdemucs.spectral.onnx ]; then
             echo "status=not_run" >> "$GITHUB_OUTPUT"
-            echo "No model file available (models/htdemucs.onnx); quality suite not run"
+            echo "Stable spectral model unavailable; quality suite not run"
             exit 0
           fi
-          python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.onnx --report quality-report.json
+          python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.spectral.onnx --report quality-report.json
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "status=failed" >> "$GITHUB_OUTPUT"

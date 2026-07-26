@@ -21,8 +21,8 @@ Fails (non-zero exit) if:
 
 Usage::
 
-    python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.onnx --report report.json
-    python scripts/run_quality_suite.py --tier release --onnx models/htdemucs.onnx --report report.json
+    python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.spectral.onnx --report report.json
+    python scripts/run_quality_suite.py --tier release --onnx models/htdemucs.spectral.onnx --report report.json
 """
 
 from __future__ import annotations
@@ -133,24 +133,29 @@ def _compute_pytorch_reference(model_name: str, inp: np.ndarray) -> np.ndarray:
 
 
 def _compute_onnx_output(onnx_path: str, inp: np.ndarray) -> np.ndarray:
-    """Run the ONNX model and return waveform stems `[1, S, C, frames]`.
+    """Run the spectral-core ONNX model and return waveform stems `[1, S, C, frames]`.
 
-    Waveform-interface models return their first output directly. A
-    spectral-core artifact (issue #23; identified by its typed contract
+    The spectral-core artifact (issue #23; identified by its typed contract
     inputs ``spectral`` + ``mix``) is fed the reference forward transform and
     its outputs are composed per the contract —
-    ``stems[s] = ispec(spectral_out[:, s]) + time_out[:, s]`` — so the same
-    corpus metrics, budgets, and PyTorch baseline apply to both interfaces.
-    All shipped interfaces are fixed-shape; fixtures longer than the model
-    window are stitched with the product's overlap-add semantics.
+    ``stems[s] = ispec(spectral_out[:, s]) + time_out[:, s]`` — so the corpus
+    metrics, budgets, and PyTorch baseline apply directly. The artifact is
+    fixed-shape; fixtures longer than the model window are stitched with the
+    product's overlap-add semantics.
     """
     from onnx_runtime_contract import make_contract_compliant_session
+    import spectral_reference as sr
+
     sess = make_contract_compliant_session(Path(onnx_path))
     input_names = sorted(i.name for i in sess.get_inputs())
+    if input_names != ["mix", "spectral"]:
+        raise ValueError(
+            "expected the spectral-core interface (inputs 'mix' + 'spectral'), "
+            f"got {input_names}"
+        )
 
-    # The stitch window comes from the session's fixed waveform-input length
-    # (the `mix` input for spectral cores, the audio input otherwise) so the
-    # ONNX path can never drift from the artifact's actual window.
+    # The stitch window comes from the session's fixed `mix` waveform-input
+    # length so the ONNX path can never drift from the artifact's actual window.
     def _fixed_frames(input_name_filter) -> int:
         for i in sess.get_inputs():
             if input_name_filter(i.name):
@@ -159,28 +164,18 @@ def _compute_onnx_output(onnx_path: str, inp: np.ndarray) -> np.ndarray:
                     return last
         return SEGMENT_FRAMES
 
-    if input_names == ["mix", "spectral"]:
-        import spectral_reference as sr
+    window = _fixed_frames(lambda name: name == "mix")
 
-        window = _fixed_frames(lambda name: name == "mix")
-
-        def run_window(chunk: np.ndarray) -> np.ndarray:
-            t = chunk[np.newaxis, ...]
-            spectral = sr.spec(t).astype(np.float32)
-            spectral_out, time_out = sess.run(
-                ["spectral_out", "time_out"], {"spectral": spectral, "mix": t}
-            )
-            return (
-                sr.ispec(spectral_out.astype(np.float64), t.shape[-1])
-                + time_out.astype(np.float64)
-            ).astype(np.float32)
-    else:
-        input_name = sess.get_inputs()[0].name
-        window = _fixed_frames(lambda name: name == input_name)
-
-        def run_window(chunk: np.ndarray) -> np.ndarray:
-            out = sess.run(None, {input_name: chunk[np.newaxis, ...]})
-            return out[0]
+    def run_window(chunk: np.ndarray) -> np.ndarray:
+        t = chunk[np.newaxis, ...]
+        spectral = sr.spec(t).astype(np.float32)
+        spectral_out, time_out = sess.run(
+            ["spectral_out", "time_out"], {"spectral": spectral, "mix": t}
+        )
+        return (
+            sr.ispec(spectral_out.astype(np.float64), t.shape[-1])
+            + time_out.astype(np.float64)
+        ).astype(np.float32)
 
     result = _stitch_windows(run_window, inp, window=window)
     del sess

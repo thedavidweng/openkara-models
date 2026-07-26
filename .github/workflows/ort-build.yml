@@ -65,7 +65,7 @@ jobs:
         run: |
           python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py tests/test_runtime_supply_chain.py tests/test_benchmark_report.py tests/test_runtime_catalog_entries.py tests/test_archive_utils.py tests/test_ort_api_version.py tests/test_native_smoke.py tests/test_profile_parser.py -q
       - name: Syntax check build scripts
-        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/run_runtime_quality_suite.py scripts/download_stable_model.py scripts/runtime_inputs.py
+        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/download_stable_model.py scripts/runtime_inputs.py
 
   build-aarch64-apple-darwin:
     needs: validate-source-lock
@@ -76,28 +76,34 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
-      - name: Build ORT for aarch64-apple-darwin
-        run: python scripts/build_runtime.py --target aarch64-apple-darwin
-      - name: Generate supply-chain records (SBOM + provenance)
-        run: python scripts/generate_runtime_supply_chain.py --all
-      - name: Verify package (incl. supply-chain)
-        run: python scripts/verify_runtime_package.py --all
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      # Reduced build: derive the operator set from the spectral stable model,
+      # then prune every other kernel (matches the ort-publish.yml template, so
+      # CI builds the same reduced runtime that publish ships).
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
           --catalog catalog/releases/2026-07-25-005.json
           --artifact htdemucs.spectral.fp32.onnx
           --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced ORT for aarch64-apple-darwin
+        run: python scripts/build_runtime.py --target aarch64-apple-darwin --reduced
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
       - name: Run native smoke harness (CPU + CoreML)
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-apple-darwin.tar.gz | grep -v reduced)
+          RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-apple-darwin-reduced.tar.gz)
           for PROV in cpu coreml; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
               --model models/htdemucs.spectral.onnx \
               --target aarch64-apple-darwin \
               --provider "$PROV" \
-              --interface spectral \
               --ort-source ort/source \
               --report "smoke-aarch64-apple-darwin-${PROV}.json"
           done
@@ -105,7 +111,7 @@ jobs:
         with:
           name: ort-aarch64-apple-darwin
           path: |
-            ort/packages/onnxruntime-*-aarch64-apple-darwin.tar.gz
+            ort/packages/onnxruntime-*-aarch64-apple-darwin-reduced.tar.gz
             smoke-aarch64-apple-darwin-*.json
           retention-days: 14
 
@@ -118,28 +124,34 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
-      - name: Build ORT for x86_64-apple-darwin
-        run: python scripts/build_runtime.py --target x86_64-apple-darwin
-      - name: Generate supply-chain records (SBOM + provenance)
-        run: python scripts/generate_runtime_supply_chain.py --all
-      - name: Verify package (incl. supply-chain)
-        run: python scripts/verify_runtime_package.py --all
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      # Reduced build: derive the operator set from the spectral stable model,
+      # then prune every other kernel (matches the ort-publish.yml template, so
+      # CI builds the same reduced runtime that publish ships).
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
           --catalog catalog/releases/2026-07-25-005.json
           --artifact htdemucs.spectral.fp32.onnx
           --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced ORT for x86_64-apple-darwin
+        run: python scripts/build_runtime.py --target x86_64-apple-darwin --reduced
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
       - name: Run native smoke harness (CPU + XNNPACK)
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-apple-darwin.tar.gz | grep -v reduced)
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-apple-darwin-reduced.tar.gz)
           for PROV in cpu xnnpack; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
               --model models/htdemucs.spectral.onnx \
               --target x86_64-apple-darwin \
               --provider "$PROV" \
-              --interface spectral \
               --ort-source ort/source \
               --report "smoke-x86_64-apple-darwin-${PROV}.json"
           done
@@ -147,7 +159,7 @@ jobs:
         with:
           name: ort-x86_64-apple-darwin
           path: |
-            ort/packages/onnxruntime-*-x86_64-apple-darwin.tar.gz
+            ort/packages/onnxruntime-*-x86_64-apple-darwin-reduced.tar.gz
             smoke-x86_64-apple-darwin-*.json
           retention-days: 14
 
@@ -208,7 +220,6 @@ jobs:
               --model models/htdemucs.spectral.onnx \
               --target x86_64-unknown-linux-gnu \
               --provider "$PROV" \
-              --interface spectral \
               --ort-source ort/source \
               --report "smoke-x86_64-unknown-linux-gnu-${PROV}.json"
           done
@@ -233,28 +244,34 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake build-essential
-      - name: Build ORT for aarch64-unknown-linux-gnu
-        run: python scripts/build_runtime.py --target aarch64-unknown-linux-gnu
-      - name: Generate supply-chain records (SBOM + provenance)
-        run: python scripts/generate_runtime_supply_chain.py --all
-      - name: Verify package (incl. supply-chain)
-        run: python scripts/verify_runtime_package.py --all
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      # Reduced build: derive the operator set from the spectral stable model,
+      # then prune every other kernel (matches the ort-publish.yml template, so
+      # CI builds the same reduced runtime that publish ships).
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
           --catalog catalog/releases/2026-07-25-005.json
           --artifact htdemucs.spectral.fp32.onnx
           --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced ORT for aarch64-unknown-linux-gnu
+        run: python scripts/build_runtime.py --target aarch64-unknown-linux-gnu --reduced
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
       - name: Run native smoke harness (CPU + XNNPACK)
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu-reduced.tar.gz)
           for PROV in cpu xnnpack; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
               --model models/htdemucs.spectral.onnx \
               --target aarch64-unknown-linux-gnu \
               --provider "$PROV" \
-              --interface spectral \
               --ort-source ort/source \
               --report "smoke-aarch64-unknown-linux-gnu-${PROV}.json"
           done
@@ -262,7 +279,7 @@ jobs:
         with:
           name: ort-aarch64-unknown-linux-gnu
           path: |
-            ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu.tar.gz
+            ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu-reduced.tar.gz
             smoke-aarch64-unknown-linux-gnu-*.json
           retention-days: 14
 
@@ -275,29 +292,35 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
-      - name: Build ORT for x86_64-pc-windows-msvc
-        run: python scripts/build_runtime.py --target x86_64-pc-windows-msvc
-      - name: Generate supply-chain records (SBOM + provenance)
-        run: python scripts/generate_runtime_supply_chain.py --all
-      - name: Verify package (incl. supply-chain)
-        run: python scripts/verify_runtime_package.py --all
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      # Reduced build: derive the operator set from the spectral stable model,
+      # then prune every other kernel (matches the ort-publish.yml template, so
+      # CI builds the same reduced runtime that publish ships).
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py
           --catalog catalog/releases/2026-07-25-005.json
           --artifact htdemucs.spectral.fp32.onnx
           --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced ORT for x86_64-pc-windows-msvc
+        run: python scripts/build_runtime.py --target x86_64-pc-windows-msvc --reduced
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
       - name: Run native smoke harness (CPU + DirectML)
         shell: bash
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-pc-windows-msvc.zip | grep -v reduced)
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-pc-windows-msvc-reduced.zip)
           # CPU always runs with the full strict gate.
           python scripts/run_native_smoke.py \
             --runtime "$RUNTIME" \
             --model models/htdemucs.spectral.onnx \
             --target x86_64-pc-windows-msvc \
             --provider cpu \
-            --interface spectral \
             --ort-source ort/source \
             --report "smoke-x86_64-pc-windows-msvc-cpu.json"
           # DirectML requires a GPU. GitHub-hosted Windows runners do not have
@@ -309,7 +332,6 @@ jobs:
             --model models/htdemucs.spectral.onnx \
             --target x86_64-pc-windows-msvc \
             --provider directml \
-            --interface spectral \
             --ort-source ort/source \
             --report "smoke-x86_64-pc-windows-msvc-directml.json" \
             --allow-skip-no-gpu
@@ -317,7 +339,7 @@ jobs:
         with:
           name: ort-x86_64-pc-windows-msvc
           path: |
-            ort/packages/onnxruntime-*-x86_64-pc-windows-msvc.zip
+            ort/packages/onnxruntime-*-x86_64-pc-windows-msvc-reduced.zip
             smoke-x86_64-pc-windows-msvc-*.json
           retention-days: 14
 
@@ -386,14 +408,24 @@ jobs:
           path: runtime-comparison-report.json
           retention-days: 30
 
-  # Native compatibility + performance benchmark matrix.
-  # Runs one full 343980-frame stereo inference window per stable model on
-  # each target's native runner, recording session load, latency, peak RSS,
-  # provider assignment, fallback node count, and output shape/finite check.
-  # Fails if the model cannot load, output contains NaN/Inf, or shape mismatches.
-  # The report is validated against ort/benchmark-report-v1.json and uploaded.
+      # Publish the reduced archive this job built so the benchmark job can
+      # measure the actual reduced deliverable (Linux x64 is the only reduced
+      # x86_64 archive produced in this workflow — the build job stays full as
+      # this job's comparison baseline). The comparison above is unchanged.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ort-x86_64-unknown-linux-gnu-reduced
+          path: ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz
+          retention-days: 14
+
+  # Native compatibility + performance benchmark for the reduced x86_64 Linux
+  # deliverable. Runs one full 343980-frame stereo inference window on the
+  # reduced runtime, recording session load, latency, peak RSS, provider
+  # assignment, fallback node count, and output shape/finite check. Fails if
+  # the model cannot load, output contains NaN/Inf, or shape mismatches. The
+  # report is validated against ort/benchmark-report-v1.json and uploaded.
   benchmark-x86_64-unknown-linux-gnu:
-    needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
+    needs: [validate-source-lock, reduced-build-and-compare]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -407,16 +439,21 @@ jobs:
       - name: Install Python deps
         run: pip install "onnx>=1.22.0" "onnxruntime>=1.27.0,<2" "numpy>=1.24" "jsonschema>=4.20"
 
-      - name: Download runtime build artifact
+      # upload-artifact roots the archive at the least common ancestor of the
+      # matched files; this artifact holds a single file from ort/packages, so
+      # its entry is at the archive root and must be restored into that
+      # directory explicitly (the multi-path build artifacts keep their
+      # ort/packages/ prefix because they also match repo-root smoke reports).
+      - name: Download reduced runtime build artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: ort-x86_64-unknown-linux-gnu
-          path: .
+          name: ort-x86_64-unknown-linux-gnu-reduced
+          path: ort/packages
           merge-multiple: true
 
-      - name: Run native benchmark (full 343980-frame window)
+      - name: Run native benchmark (reduced runtime, full 343980-frame window)
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
           python scripts/run_runtime_benchmarks.py \
             --runtime "$RUNTIME" \
             --catalog catalog/releases/2026-07-25-005.json \

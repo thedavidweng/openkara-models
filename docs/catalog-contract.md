@@ -1,15 +1,12 @@
 # OpenKara artifact catalog contract
 
 This repository is the single source of truth for every model and ONNX Runtime
-artifact consumed by the OpenKara app. The contract has three layers:
+artifact consumed by the OpenKara app. The contract has two layers:
 
 1. **Immutable release manifests** — one per infrastructure release, content-addressed,
    never mutated after publication.
 2. **Stable-channel pointer** — a tiny document that advances only after every
    referenced manifest, asset, and release gate passes.
-3. **`latest.json` migration adapter** — temporary, generated from the stable
-   pointer, deleted once OpenKara PR #165 consumes the versioned schema
-   (issue #18 PR 4).
 
 OpenKara must validate the schema instead of embedding a second Rust-only
 interpretation. It must reject incompatible target/runtime/model combinations
@@ -162,17 +159,15 @@ half-precision, so half the weight bytes are zero mantissas.)
 | Tag family | Contents |
 |---|---|
 | `infra-<release-id>` | immutable catalog release: manifest + supply-chain records |
-| `model-v*`, `model-ft-v*` | converted source model assets |
+| `model-spectral-v*`, `model-ft-spectral-v*` | converted spectral-core model assets |
 | `model-derived-v*` | deterministic derived model assets (dedup, projections) |
 | `ort-v*` | ONNX Runtime archives for the five targets |
 
-## `latest.json` migration adapter (deleted)
+## Historical note
 
-The temporary `latest.json` alias for OpenKara PR #165 was deleted after
+The temporary `latest.json` migration alias (OpenKara PR #165) was deleted after
 OpenKara #167/#179 switched every consumer to the stable pointer + immutable
-manifest (the documented deletion procedure in this section's earlier
-revision). No ad hoc distribution files remain: channel pointers and release
-manifests are the only contract surfaces.
+manifest; channel pointers and release manifests are the only contract surfaces.
 
 ## Atomic publication
 
@@ -196,11 +191,11 @@ stable pointer atomically:
    On any failure before step 4, the release is deleted and the stable pointer
    is not moved.
 
-`generate_catalog_release.py` writes the immutable manifest and `latest.json`
-adapter only. It does **not** advance the stable pointer — that is the sole
-responsibility of `publish_catalog_release.py` after asset verification. This
-enforces the issue #18 PR 4 atomicity contract: the stable pointer never
-references a release whose assets have not been uploaded and verified.
+`generate_catalog_release.py` writes the immutable manifest only. It does
+**not** advance the stable pointer — that is the sole responsibility of
+`publish_catalog_release.py` after asset verification. This enforces the issue
+#18 PR 4 atomicity contract: the stable pointer never references a release whose
+assets have not been uploaded and verified.
 
 ## Cross-repository pairing
 
@@ -222,7 +217,6 @@ references a release whose assets have not been uploaded and verified.
 5. Unknown required schema fields fail validation (`unevaluatedProperties: false`).
 6. A deprecated artifact's replacement must exist in the same release.
 7. Bundle target/provider must match its runtime.
-8. `latest.json` is a migration alias only and is deleted after migration.
 
 ## Required vs. optional fields (v1 policy)
 

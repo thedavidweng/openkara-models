@@ -54,7 +54,7 @@ def test_enforce_gates_rejects_release_with_unfrozen_baseline() -> None:
     are NOT landed and no artifact can be promoted without a real baseline."""
     import enforce_quality_gates as g
     errors = g.enforce_gates(
-        "htdemucs.balanced.fp32.onnx",
+        "htdemucs.spectral.fp32.onnx",
         _quality_report(mse=1e-6),
         _runtime_report(rtf=0.14),
         tier="release",
@@ -67,7 +67,7 @@ def test_enforce_gates_pr_tier_passes_with_unfrozen_baseline() -> None:
     """PR tier uses absolute thresholds only — no frozen baseline required."""
     import enforce_quality_gates as g
     errors = g.enforce_gates(
-        "htdemucs.balanced.fp32.onnx",
+        "htdemucs.spectral.fp32.onnx",
         _quality_report(mse=1e-6),
         _runtime_report(rtf=0.14),
         tier="pr",
@@ -105,7 +105,7 @@ def test_is_baseline_frozen_accepts_real() -> None:
 def test_enforce_gates_rejects_nan() -> None:
     import enforce_quality_gates as g
     errors = g.enforce_gates(
-        "htdemucs.balanced.fp32.onnx",
+        "htdemucs.spectral.fp32.onnx",
         _quality_report(has_nan=True),
         None,
         tier="pr",
@@ -116,7 +116,7 @@ def test_enforce_gates_rejects_nan() -> None:
 def test_enforce_gates_rejects_shape_mismatch() -> None:
     import enforce_quality_gates as g
     errors = g.enforce_gates(
-        "htdemucs.balanced.fp32.onnx",
+        "htdemucs.spectral.fp32.onnx",
         _quality_report(shape_match=False),
         None,
         tier="pr",
@@ -127,7 +127,7 @@ def test_enforce_gates_rejects_shape_mismatch() -> None:
 def test_enforce_gates_rejects_high_mse() -> None:
     import enforce_quality_gates as g
     errors = g.enforce_gates(
-        "htdemucs.balanced.fp32.onnx",
+        "htdemucs.spectral.fp32.onnx",
         _quality_report(mse=1e-3),
         None,
         tier="pr",
@@ -143,7 +143,7 @@ def test_enforce_gates_rejects_unknown_artifact() -> None:
 
 def test_enforce_gates_rejects_no_reports() -> None:
     import enforce_quality_gates as g
-    errors = g.enforce_gates("htdemucs.balanced.fp32.onnx", None, None, tier="pr")
+    errors = g.enforce_gates("htdemucs.spectral.fp32.onnx", None, None, tier="pr")
     assert any("no candidate" in e for e in errors)
 
 

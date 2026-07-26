@@ -17,7 +17,7 @@ catalog publish workflow before a stable artifact is promoted.
 Usage::
 
     python scripts/enforce_quality_gates.py \\
-        --artifact-id htdemucs.balanced.fp32.onnx \\
+        --artifact-id htdemucs.spectral.fp32.onnx \\
         --quality-report quality-report.json \\
         --runtime-report runtime-quality-report.json \\
         --tier release
