@@ -7,16 +7,14 @@
 //
 // It runs one full HTDemucs inference window. One zero-filled float32 tensor
 // is built per model input, using each input's declared static shape from the
-// session, so the harness adapts to both model interfaces without hard-coding
-// either:
-//   waveform : input  [1, 2, 343980]
-//              output [1, 4, 2, 343980] (drums/bass/other/vocals)
-//   spectral : inputs spectral=[1,2,2,2048,336], mix=[1,2,343980]
-//              outputs spectral_out=[1,4,2,2,2048,336], time_out=[1,4,2,343980]
+// session, so the harness carries no model interface of its own. The shipped
+// spectral interface is:
+//   inputs  spectral=[1,2,2,2048,336], mix=[1,2,343980]
+//   outputs spectral_out=[1,4,2,2,2048,336], time_out=[1,4,2,343980]
 // It rejects any output containing NaN or Inf. The expected output shape is
-// supplied by the caller via --expect-output-shape (the semicolon-joined,
-// space-free per-output shape string) so the shape gate is interface-aware;
-// it defaults to the waveform "[1,4,2,343980]".
+// required from the caller via --expect-output-shape (the semicolon-joined,
+// space-free per-output shape string) so the shape gate stays interface-aware
+// without this harness hard-coding an interface.
 //
 // The requested execution provider is mandatory. CPU is tested in a separate
 // invocation; a non-CPU provider failure must never be hidden by a replacement
@@ -237,9 +235,12 @@ int main(int argc, char** argv) {
     std::string model_path;
     std::string provider = "cpu";
     std::string target = "unknown";
-    // Expected semicolon-joined per-output shape string. Defaults to the
-    // waveform interface; the spectral interface passes the two-output string.
-    std::string expect_output_shape = "[1,4,2,343980]";
+    // Expected semicolon-joined per-output shape string, supplied by the
+    // caller. There is deliberately no default: the only shape worth
+    // defaulting to belonged to the retired waveform interface, so a caller
+    // that forgot the flag would have silently gated on a shape no current
+    // model produces.
+    std::string expect_output_shape;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -250,14 +251,14 @@ int main(int argc, char** argv) {
         else if (a == "--expect-output-shape" && i + 1 < argc) expect_output_shape = argv[++i];
         else if (a == "--help") {
             fprintf(stderr, "usage: ort_smoke --lib <lib> --model <onnx> "
-                            "--provider <name> [--target <triple>] "
-                            "[--expect-output-shape <str>]\n");
+                            "--expect-output-shape <str> "
+                            "--provider <name> [--target <triple>]\n");
             return 0;
         }
     }
 
-    if (lib_path.empty() || model_path.empty()) {
-        fprintf(stderr, "ERROR: --lib and --model are required\n");
+    if (lib_path.empty() || model_path.empty() || expect_output_shape.empty()) {
+        fprintf(stderr, "ERROR: --lib, --model, and --expect-output-shape are required\n");
         return 2;
     }
 

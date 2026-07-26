@@ -224,7 +224,13 @@ def test_corpus_impulse_budget_is_declared_with_rationale() -> None:
         if f["fixture_id"] == "synth-impulse-343980"
     )
     assert impulse["mse_budget"]["pr"] > 1e-4
-    assert "stable" in impulse["mse_budget_note"]
+    # The budget exceeds the tier default, so the note must show its work: the
+    # measured baseline it was calibrated against and the headroom applied.
+    # Asserting those instead of the word "stable" keeps the guard meaningful
+    # when the baseline's provenance is reworded.
+    note = impulse["mse_budget_note"]
+    assert "1.03e-4" in note, note
+    assert "2x" in note, note
 
 
 def test_aggregate_excludes_budgeted_fixtures_and_enforces_their_budgets() -> None:

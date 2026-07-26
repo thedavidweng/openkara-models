@@ -16,7 +16,8 @@ Accepted (superseded)
 
 ONNX does not support complex-valued tensors or `torch.stft`/`torch.istft`.
 The conversion pipeline replaces Demucs' complex spectrogram path with
-real-valued `conv1d`/`conv_transpose1d` operations (`scripts/onnx_stft.py`).
+real-valued `conv1d`/`conv_transpose1d` operations (`scripts/onnx_stft.py`,
+removed with the waveform pipeline).
 The exported ONNX model must produce numerically equivalent output to the
 original PyTorch model (validation gate: MSE < 1e-4).
 
