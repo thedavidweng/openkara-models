@@ -20,6 +20,7 @@ REQUIRED_TARGETS = {
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
     "x86_64-pc-windows-msvc",
+    "x86_64-pc-windows-msvc-cpu",
 }
 
 
@@ -36,7 +37,7 @@ class SourceLockStructureTests(unittest.TestCase):
         lock = _load_lock()
         self.assertEqual(lock["lock_version"], "openkara.ort-source-lock/v1")
 
-    def test_all_five_targets_present(self):
+    def test_all_six_targets_present(self):
         lock = _load_lock()
         self.assertEqual(set(lock["targets"].keys()), REQUIRED_TARGETS)
 
@@ -115,6 +116,19 @@ class TargetConfigTests(unittest.TestCase):
         lock = _load_lock()
         companions = lock["targets"]["x86_64-pc-windows-msvc"]["companion_libraries"]
         self.assertIn("DirectML.dll", companions)
+
+    def test_windows_cpu_target_has_no_directml(self):
+        """The CPU-only Windows target (issue OpenKara/OpenKara#284) must not
+        compile DirectML in nor ship DirectML.dll — that import is what
+        deadlocks on virtual display adapters."""
+        lock = _load_lock()
+        target = lock["targets"]["x86_64-pc-windows-msvc-cpu"]
+        self.assertEqual(target["execution_providers"], ["cpu"])
+        self.assertEqual(target["companion_libraries"], [])
+        cmake_args = target["cmake_args"]
+        self.assertNotIn("-Donnxruntime_USE_DML=ON", cmake_args)
+        self.assertIn("-Donnxruntime_USE_CPU=ON", cmake_args)
+        self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL", cmake_args)
 
     def test_linux_targets_have_xnnpack(self):
         lock = _load_lock()

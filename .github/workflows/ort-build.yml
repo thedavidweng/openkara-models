@@ -1,4 +1,4 @@
-name: ORT source build (5 targets)
+name: ORT source build (6 targets)
 
 on:
   pull_request:
@@ -341,6 +341,55 @@ jobs:
           path: |
             ort/packages/onnxruntime-*-x86_64-pc-windows-msvc-reduced.zip
             smoke-x86_64-pc-windows-msvc-*.json
+          retention-days: 14
+
+  # Windows CPU-only runtime (issue OpenKara/OpenKara#284). A virtual display
+  # adapter can pass the D3D12 capability probe yet deadlock while loading
+  # DirectML.dll during ORT initialization. This artifact links no DirectML
+  # import, so it loads on any Windows host. Built reduced to match the
+  # DirectML reduced runtime the publish flow ships.
+  build-x86_64-pc-windows-msvc-cpu:
+    needs: validate-source-lock
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-07-25-005.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Generate required-operator config
+        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
+      - name: Build reduced CPU-only ORT for x86_64-pc-windows-msvc-cpu
+        run: python scripts/build_runtime.py --target x86_64-pc-windows-msvc-cpu --reduced
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
+      - name: Run native smoke harness (CPU only — no DirectML import)
+        shell: bash
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-pc-windows-msvc-cpu-reduced.zip)
+          python scripts/run_native_smoke.py \
+            --runtime "$RUNTIME" \
+            --model models/htdemucs.spectral.onnx \
+            --target x86_64-pc-windows-msvc-cpu \
+            --provider cpu \
+            --ort-source ort/source \
+            --report "smoke-x86_64-pc-windows-msvc-cpu-cpu.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ort-x86_64-pc-windows-msvc-cpu
+          path: |
+            ort/packages/onnxruntime-*-x86_64-pc-windows-msvc-cpu-reduced.zip
+            smoke-x86_64-pc-windows-msvc-cpu-*.json
           retention-days: 14
 
   # Reduced-operator build + full-vs-reduced comparison for x86_64 Linux.

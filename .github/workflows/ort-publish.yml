@@ -1,4 +1,4 @@
-name: ORT runtime publish (5 targets + catalog entries)
+name: ORT runtime publish (6 targets + catalog entries)
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ permissions:
 # proven template for the download-model -> generate-ops -> build --reduced flow.
 
 jobs:
-  # Build all 5 targets in parallel (reduced), generate supply-chain, verify,
+  # Build all 6 targets in parallel (reduced), generate supply-chain, verify,
   # upload. Each job produces a reduced runtime archive consumed by publish.
   build:
     strategy:
@@ -44,6 +44,10 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
           - target: x86_64-pc-windows-msvc
+            runner: windows-2022
+          # Windows CPU-only runtime (issue OpenKara/OpenKara#284): no
+          # DirectML import so the DLL loads on hosts where DirectML hangs.
+          - target: x86_64-pc-windows-msvc-cpu
             runner: windows-2022
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60

@@ -40,6 +40,7 @@ SUPPORTED_TARGET_TRIPLES: frozenset[str] = frozenset(
         "x86_64-unknown-linux-gnu",
         "aarch64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
+        "x86_64-pc-windows-msvc-cpu",
     }
 )
 
@@ -49,6 +50,7 @@ TARGET_ARCH_OS: dict[str, tuple[str, str]] = {
     "x86_64-unknown-linux-gnu": ("x86_64", "linux"),
     "aarch64-unknown-linux-gnu": ("aarch64", "linux"),
     "x86_64-pc-windows-msvc": ("x86_64", "windows"),
+    "x86_64-pc-windows-msvc-cpu": ("x86_64", "windows"),
 }
 
 RELEASE_ID_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}$")

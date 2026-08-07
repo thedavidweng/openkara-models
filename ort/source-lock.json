@@ -166,6 +166,34 @@
       "runner": "windows-2022",
       "runner_note": "Windows x64 native runner with MSVC VS 2022 (pinned to windows-2022 to satisfy the toolchain visual_studio_version requirement; windows-latest may ship a newer VS)."
     },
+    "x86_64-pc-windows-msvc-cpu": {
+      "archive_format": "zip",
+      "artifact_name": "onnxruntime.dll",
+      "cmake_args": [
+        "-Donnxruntime_BUILD_SHARED_LIB=ON",
+        "-DORT_ENABLE_TRAINING=OFF",
+        "-DORT_ENABLE_PYTHON=OFF",
+        "-Dbuild_ort_onnx_flaky_tests=OFF",
+        "-Dbuild_ort_perf_tests=OFF",
+        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
+        "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
+        "-Donnxruntime_USE_CPU=ON",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "-DCMAKE_SKIP_INSTALL_RULES=ON",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-Dprotobuf_MSVC_STATIC_RUNTIME=OFF",
+        "-Dabsl_MSVC_STATIC_RUNTIME=OFF"
+      ],
+      "cmake_toolchain": "",
+      "companion_libraries": [],
+      "deployment_target": "",
+      "execution_providers": [
+        "cpu"
+      ],
+      "runner": "windows-2022",
+      "runner_note": "Windows x64 CPU-only runtime. Same MSVC VS 2022 toolchain as the DirectML target but built with -Donnxruntime_USE_DML=OFF and no DirectML.dll companion. Shipped for hosts where the DirectML-linked DLL load hangs (issue OpenKara/OpenKara#284): a virtual display adapter can pass the D3D12 capability probe yet deadlock while loading DirectML.dll during ORT initialization. This artifact has no DirectML import, so it loads on any Windows host."
+    },
     "x86_64-unknown-linux-gnu": {
       "archive_format": "tar.gz",
       "artifact_name": "libonnxruntime.so",
