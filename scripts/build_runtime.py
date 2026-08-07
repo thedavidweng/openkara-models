@@ -514,7 +514,7 @@ def main() -> int:
     parser.add_argument("--target", required=True,
                         choices=["aarch64-apple-darwin", "x86_64-apple-darwin",
                                  "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu",
-                                 "x86_64-pc-windows-msvc"],
+                                 "x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc-cpu"],
                         help="Target triple to build.")
     parser.add_argument("--skip-clone", action="store_true",
                         help="Skip cloning; use existing ort/source/ checkout.")

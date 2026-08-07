@@ -2,7 +2,7 @@
 """Validate the ORT source lock file structure and consistency.
 
 Checks that:
-  - All 5 required targets are present with correct target triples.
+  - All 6 required targets are present with correct target triples.
   - Each target has required fields (runner, cmake_args, artifact_name, etc.).
   - The upstream commit SHA is a 40-char hex string.
   - The C API level is declared.
@@ -29,6 +29,7 @@ REQUIRED_TARGETS = {
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
     "x86_64-pc-windows-msvc",
+    "x86_64-pc-windows-msvc-cpu",
 }
 
 TARGET_REQUIRED_FIELDS = {
