@@ -1,11 +1,11 @@
 {
   "channel": "stable",
-  "generation": 11,
-  "previous_release_id": "2026-07-26-001",
-  "release_id": "2026-08-07-001",
-  "release_manifest_sha256": "074ff42588805cae833688f04a09f0a2b77d309bf875fb6888f989d6fe218dc6",
-  "release_manifest_size": 110060,
-  "release_manifest_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-07-001/release-manifest.json",
+  "generation": 12,
+  "previous_release_id": "2026-08-07-001",
+  "release_id": "2026-08-07-002",
+  "release_manifest_sha256": "2da8cb6d1c921e27543ecf17bbc79f15c97ebc7f47b291b1ed4e06753861b1f8",
+  "release_manifest_size": 110122,
+  "release_manifest_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-07-002/release-manifest.json",
   "schema_version": "openkara.catalog/channel-v1",
-  "updated_at": "2026-08-07T18:30:00Z"
+  "updated_at": "2026-08-07T19:30:00Z"
 }
