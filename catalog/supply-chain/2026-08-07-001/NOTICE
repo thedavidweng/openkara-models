@@ -1,0 +1,13 @@
+OpenKara Models — release 2026-08-07-001
+Copyright (c) 2026 Davy
+
+This release is distributed under the MIT License (see LICENSE).
+
+Third-party model weights are derived from Demucs by Alexandre Défossez
+(https://github.com/adefossez/demucs), released under the MIT License.
+
+Producer:
+  repo:      thedavidweng/openkara-models
+  commit:    a8e8acab56d85a0121132ce8fe512d640bff1041
+  workflow:  ort-publish.yml
+  run_id:    31226994818
