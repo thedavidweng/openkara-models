@@ -103,13 +103,27 @@ class TargetConfigTests(unittest.TestCase):
         self.assertIn("cpu", eps)
         self.assertIn("directml", eps)
 
-    def test_windows_uses_dynamic_crt(self):
-        """DirectML's NuGet package is built with MultiThreadedDLL; the ORT
-        build must use the same CRT to link correctly."""
+    def test_windows_uses_static_crt(self):
+        """Both Windows targets must link the CRT statically (/MT) so the
+        shipped onnxruntime.dll has no VC++ Redistributable import
+        (OpenKara/OpenKara#284). Third-party deps that manage their own CRT
+        flag (onnx, protobuf, abseil) must match, mirroring upstream
+        build.py --enable_msvc_static_runtime. DirectML.dll is unaffected:
+        it is a self-contained redistributable (itself statically linked)
+        reached through a C ABI import library, so it does not need to
+        share the ORT build's CRT."""
         lock = _load_lock()
-        cmake_args = lock["targets"]["x86_64-pc-windows-msvc"]["cmake_args"]
-        self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL", cmake_args)
-        self.assertIn("-Donnxruntime_USE_DML=ON", cmake_args)
+        for target in ("x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc-cpu"):
+            cmake_args = lock["targets"][target]["cmake_args"]
+            self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+                          cmake_args, target)
+            self.assertNotIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+                             cmake_args, target)
+            self.assertIn("-DONNX_USE_MSVC_STATIC_RUNTIME=ON", cmake_args, target)
+            self.assertIn("-Dprotobuf_MSVC_STATIC_RUNTIME=ON", cmake_args, target)
+            self.assertIn("-DABSL_MSVC_STATIC_RUNTIME=ON", cmake_args, target)
+        self.assertIn("-Donnxruntime_USE_DML=ON",
+                      lock["targets"]["x86_64-pc-windows-msvc"]["cmake_args"])
 
     def test_windows_companion_libraries_include_directml(self):
         """DirectML.dll must be shipped as a companion library."""
@@ -128,7 +142,7 @@ class TargetConfigTests(unittest.TestCase):
         cmake_args = target["cmake_args"]
         self.assertNotIn("-Donnxruntime_USE_DML=ON", cmake_args)
         self.assertIn("-Donnxruntime_USE_CPU=ON", cmake_args)
-        self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL", cmake_args)
+        self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded", cmake_args)
 
     def test_linux_targets_have_xnnpack(self):
         lock = _load_lock()
