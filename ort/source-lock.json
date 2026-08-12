@@ -150,9 +150,10 @@
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON",
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
-        "-Dprotobuf_MSVC_STATIC_RUNTIME=OFF",
-        "-Dabsl_MSVC_STATIC_RUNTIME=OFF"
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+        "-DONNX_USE_MSVC_STATIC_RUNTIME=ON",
+        "-Dprotobuf_MSVC_STATIC_RUNTIME=ON",
+        "-DABSL_MSVC_STATIC_RUNTIME=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [
@@ -181,9 +182,10 @@
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON",
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
-        "-Dprotobuf_MSVC_STATIC_RUNTIME=OFF",
-        "-Dabsl_MSVC_STATIC_RUNTIME=OFF"
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+        "-DONNX_USE_MSVC_STATIC_RUNTIME=ON",
+        "-Dprotobuf_MSVC_STATIC_RUNTIME=ON",
+        "-DABSL_MSVC_STATIC_RUNTIME=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
