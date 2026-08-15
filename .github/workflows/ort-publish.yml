@@ -52,8 +52,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Install build deps (Linux)
@@ -80,7 +80,7 @@ jobs:
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ort-${{ matrix.target }}
           path: ort/packages/onnxruntime-*-${{ matrix.target }}-reduced.*
@@ -96,7 +96,7 @@ jobs:
       image: quay.io/pypa/manylinux_2_28_x86_64
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install build deps (gcc-toolset-13 + cmake + onnx + python 3.11)
         run: |
           dnf -y install gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils
@@ -125,7 +125,7 @@ jobs:
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ort-x86_64-unknown-linux-gnu
           path: ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz
@@ -142,8 +142,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -151,7 +151,7 @@ jobs:
         run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
 
       - name: Download all runtime artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: ort-*
           path: ort/packages
@@ -188,13 +188,13 @@ jobs:
             --notes "Source-built, reduced-operator ONNX Runtime archives for 5 targets. See catalog/specs/runtime-entries.json for the catalog spec fragment and runtime-required-operators for the operator set." \
             ort/packages/onnxruntime-*.tar.gz ort/packages/onnxruntime-*.zip
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: runtime-catalog-entries
           path: catalog/specs/runtime-entries.json
           retention-days: 30
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: runtime-required-operators
           path: |
