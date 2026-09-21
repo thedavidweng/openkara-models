@@ -81,7 +81,7 @@
         "workflow": ".github/workflows/convert.yml"
       },
       "weights": {
-        "commit_sha": "478be8a68f85418addd6f7baefd4be76522a4034",
+        "commit_sha": "d74ac89c3a1e874fc78f152555cf4d8533f06cd4",
         "host": "huggingface",
         "repo": "adefossez/HTDemucs-ft"
       }
