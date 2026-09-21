@@ -1,7 +1,5 @@
 version: 2
 updates:
-  # Python dependencies — owned by Dependabot.
-  # Renovate and repository-owned scripts do NOT touch requirements.txt.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
@@ -18,21 +16,14 @@ updates:
       onnx:
         patterns: ["onnx", "onnxruntime"]
 
-  # GitHub Actions — owned by Dependabot.
-  # Renovate and repository-owned scripts do NOT touch workflow files.
+    # GitHub Actions — owned by Dependabot.
+    # Renovate and repository-owned scripts do NOT touch workflow files.
     cooldown:
       default-days: 7
       semver-major-days: 10
       semver-minor-days: 7
       semver-patch-days: 3
   - package-ecosystem: "github-actions"
-    groups:
-      github-actions:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -42,6 +33,13 @@ updates:
       - "github-actions"
     commit-message:
       prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 5
       semver-major-days: 7
