@@ -65,9 +65,11 @@ jobs:
           EXIT_CODE=$?
           cat /tmp/ort-detection.json
           if [ $EXIT_CODE -eq 0 ]; then
-            echo "update_available=true" >> "$GITHUB_OUTPUT"
-            echo "latest_tag=$(python3 -c "import json; print(json.load(open('/tmp/ort-detection.json'))['latest']['tag'])")" >> "$GITHUB_OUTPUT"
-            echo "latest_commit=$(python3 -c "import json; print(json.load(open('/tmp/ort-detection.json'))['latest']['commit_sha'])")" >> "$GITHUB_OUTPUT"
+            {
+              echo "update_available=true"
+              echo "latest_tag=$(python3 -c "import json; print(json.load(open('/tmp/ort-detection.json'))['latest']['tag'])")"
+              echo "latest_commit=$(python3 -c "import json; print(json.load(open('/tmp/ort-detection.json'))['latest']['commit_sha'])")"
+            } >> "$GITHUB_OUTPUT"
           elif [ $EXIT_CODE -eq 1 ]; then
             echo "update_available=false" >> "$GITHUB_OUTPUT"
           else
@@ -99,8 +101,10 @@ jobs:
           EXIT_CODE=$?
           cat /tmp/model-detection.json
           if [ $EXIT_CODE -eq 0 ]; then
-            echo "update_available=true" >> "$GITHUB_OUTPUT"
-            echo "latest_commit=$(python3 -c "import json; print(json.load(open('/tmp/model-detection.json'))['latest']['commit_sha'])")" >> "$GITHUB_OUTPUT"
+            {
+              echo "update_available=true"
+              echo "latest_commit=$(python3 -c "import json; print(json.load(open('/tmp/model-detection.json'))['latest']['commit_sha'])")"
+            } >> "$GITHUB_OUTPUT"
           elif [ $EXIT_CODE -eq 1 ]; then
             echo "update_available=false" >> "$GITHUB_OUTPUT"
           else
