@@ -444,17 +444,17 @@ jobs:
           # Create PR or update existing PR body. gh pr create exits non-zero
           # when a PR already exists for the head branch; distinguish that from
           # other failures by inspecting the output.
-          PR_CREATE_OUTPUT=$(gh pr create \
+          # gh pr create returns exit 1 when a PR already exists; any other
+          # failure (permissions, network, invalid label) should re-raise.
+          if PR_CREATE_OUTPUT=$(gh pr create \
             --title "deps: candidate update ($BRANCH_NAME)" \
             --body-file pr-body.md \
             --head "$BRANCH_NAME" \
             --base main \
-            --label "dependencies" 2>&1) && {
+            --label "dependencies" 2>&1); then
             echo "Created new candidate PR"
             echo "$PR_CREATE_OUTPUT"
-          } || {
-            # gh pr create returns exit 1 when a PR already exists; any other
-            # failure (permissions, network, invalid label) should re-raise.
+          else
             if echo "$PR_CREATE_OUTPUT" | grep -qi "already exists"; then
               echo "PR already exists, updating body"
               gh pr edit "$BRANCH_NAME" --body-file pr-body.md
@@ -463,4 +463,4 @@ jobs:
               echo "$PR_CREATE_OUTPUT" >&2
               exit 1
             fi
-          }
+          fi
