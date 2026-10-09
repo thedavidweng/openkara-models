@@ -1,23 +1,11 @@
 name: Catalog schema & fixtures
 
 on:
+  # NOTE: pull_request intentionally has NO paths filter — `validate` is a
+  # required status check, and GitHub treats a required check that never
+  # reports as BLOCKED forever (e.g. a codeql-only PR never touches
+  # catalog/**). push keeps the paths filter to save CI minutes on main.
   pull_request:
-    paths:
-      - "catalog/**"
-      - "scripts/catalog_model.py"
-      - "scripts/validate_catalog.py"
-      - "scripts/generate_catalog_fixtures.py"
-      - "scripts/generate_catalog_release.py"
-      - "scripts/generate_supply_chain.py"
-      - "scripts/verify_supply_chain.py"
-      - "scripts/publish_catalog_release.py"
-      - "tests/test_catalog_validation.py"
-      - "tests/test_catalog_generator.py"
-      - "tests/test_supply_chain.py"
-      - "tests/test_publish_catalog.py"
-      - "requirements.txt"
-      - "requirements-dev.txt"
-      - ".github/workflows/catalog-validate.yml"
   push:
     branches: [main]
     paths:
