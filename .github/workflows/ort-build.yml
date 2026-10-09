@@ -197,7 +197,12 @@ jobs:
         run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu
       - name: Verify ABI floor against the release baseline
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          RUNTIME=""
+          for ARCHIVE in ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz; do
+            [ -e "$ARCHIVE" ] || continue
+            case "$ARCHIVE" in *reduced*) continue ;; esac
+            RUNTIME="$ARCHIVE"
+          done
           python scripts/check_linux_abi_floor.py \
             --archive "$RUNTIME" \
             --max-glibc 2.35 --max-glibcxx 3.4.30 --max-cxxabi 1.3.13
@@ -213,7 +218,12 @@ jobs:
           --dest models/htdemucs.spectral.onnx
       - name: Run native smoke harness (CPU + XNNPACK)
         run: |
-          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          RUNTIME=""
+          for ARCHIVE in ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz; do
+            [ -e "$ARCHIVE" ] || continue
+            case "$ARCHIVE" in *reduced*) continue ;; esac
+            RUNTIME="$ARCHIVE"
+          done
           for PROV in cpu xnnpack; do
             python scripts/run_native_smoke.py \
               --runtime "$RUNTIME" \
@@ -443,7 +453,12 @@ jobs:
 
       - name: Compare full vs reduced (size + inference)
         run: |
-          FULL=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz | grep -v reduced)
+          FULL=""
+          for ARCHIVE in ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu.tar.gz; do
+            [ -e "$ARCHIVE" ] || continue
+            case "$ARCHIVE" in *reduced*) continue ;; esac
+            FULL="$ARCHIVE"
+          done
           REDUCED=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
           python scripts/compare_runtime_builds.py \
             --full "$FULL" --reduced "$REDUCED" \
