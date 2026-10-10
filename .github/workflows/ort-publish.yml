@@ -12,25 +12,18 @@ on:
       - "ort-v*"
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
-# The publish pipeline ships REDUCED-operator runtimes: each target is built
-# with scripts/build_runtime.py --reduced, pruning every operator kernel not in
-# the spectral stable model's operator set (issue #73 step 3 pre-work). The
-# required-operator config is regenerated per-job from the stable catalog model
-# (download_stable_model + generate_required_operators) — it is deliberately not
-# committed (ort/.gitignore), so every job that builds or verifies a reduced
-# archive must regenerate the identical config first. Generation is
-# deterministic (same model bytes + same source lock -> byte-identical config),
-# so the ops_config_sha256 recorded in each build manifest / provenance matches
-# across all jobs. The reduced-build-and-compare job in ort-build.yml is the
-# proven template for the download-model -> generate-ops -> build --reduced flow.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # Build all 6 targets in parallel (reduced), generate supply-chain, verify,
   # upload. Each job produces a reduced runtime archive consumed by publish.
   build:
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -52,8 +45,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Install build deps (Linux)
@@ -80,7 +75,7 @@ jobs:
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ort-${{ matrix.target }}
           path: ort/packages/onnxruntime-*-${{ matrix.target }}-reduced.*
@@ -91,12 +86,16 @@ jobs:
   # and 22.04's own binutils cannot assemble ORT's AVX-NE-CONVERT kernels.
   # Keep in lockstep with the same job in ort-build.yml.
   build-x86_64-linux:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     container:
-      image: quay.io/pypa/manylinux_2_28_x86_64
+      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:4131ddd7acb9c6c966af02fe7e71edc51e078c2d41f475966697676430bfa2ae
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install build deps (gcc-toolset-13 + cmake + onnx + python 3.11)
         run: |
           dnf -y install gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils
@@ -125,7 +124,7 @@ jobs:
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
         run: python scripts/verify_runtime_package.py --all
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ort-x86_64-unknown-linux-gnu
           path: ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz
@@ -138,12 +137,16 @@ jobs:
   # required-operators sidecar is uploaded as an artifact for auditability of
   # the reduced operator set.
   publish:
+    permissions:
+      contents: write
     needs: [build, build-x86_64-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -151,7 +154,7 @@ jobs:
         run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
 
       - name: Download all runtime artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ort-*
           path: ort/packages
@@ -173,28 +176,32 @@ jobs:
         run: python scripts/verify_runtime_package.py --all
 
       - name: Generate runtime catalog entries
+        env:
+          RELEASE_ID: ${{ inputs.release_id || github.ref_name }}
         run: |
           python scripts/generate_runtime_catalog_entries.py \
-            --release "${{ inputs.release_id || github.ref_name }}" \
+            --release "$RELEASE_ID" \
             --output catalog/specs/runtime-entries.json
 
       - name: Create GitHub release + upload archives
         env:
+          RELEASE_TAG: ${{ inputs.release_id && format('infra-{0}', inputs.release_id) || github.ref_name }}
+          RELEASE_TITLE: ${{ github.ref_name || inputs.release_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ inputs.release_id && format('infra-{0}', inputs.release_id) || github.ref_name }}"
+          TAG="$RELEASE_TAG"
           gh release create "$TAG" \
-            --title "ORT runtime ${{ github.ref_name || inputs.release_id }}" \
+            --title "ORT runtime $RELEASE_TITLE" \
             --notes "Source-built, reduced-operator ONNX Runtime archives for 5 targets. See catalog/specs/runtime-entries.json for the catalog spec fragment and runtime-required-operators for the operator set." \
             ort/packages/onnxruntime-*.tar.gz ort/packages/onnxruntime-*.zip
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-catalog-entries
           path: catalog/specs/runtime-entries.json
           retention-days: 30
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-required-operators
           path: |

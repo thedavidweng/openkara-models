@@ -21,20 +21,26 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
-  actions: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   prepare:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       branch_name: ${{ steps.branch.outputs.branch_name }}
       is_ort_update: ${{ steps.branch.outputs.is_ort_update }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Generate candidate branch name
@@ -83,7 +89,7 @@ jobs:
       - name: Validate updated model lock
         if: inputs.model != ''
         run: python scripts/validate_model_source_lock.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: candidate-summary
           path: |
@@ -94,6 +100,8 @@ jobs:
 
   # Build all 5 runtime targets (only for ORT updates).
   build-runtimes:
+    permissions:
+      contents: read
     needs: prepare
     if: inputs.ort_tag != ''
     strategy:
@@ -113,8 +121,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: candidate-summary
       - name: Apply lock update
@@ -126,7 +136,7 @@ jobs:
             exit 1
           fi
           echo "Applied candidate source-lock.json"
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Install build deps (Linux)
@@ -151,7 +161,7 @@ jobs:
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package
         run: python scripts/verify_runtime_package.py --all
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-${{ matrix.target }}
           path: ort/packages/onnxruntime-*-${{ matrix.target }}-reduced.*
@@ -169,13 +179,17 @@ jobs:
   # The gate-status generator (generate_gate_status.py) reads those
   # reports and produces the final classification used in the PR body.
   quality-gates:
+    permissions:
+      contents: read
     needs: [prepare, build-runtimes]
     if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Install deps
@@ -263,7 +277,7 @@ jobs:
             echo "status=failed" >> "$GITHUB_OUTPUT"
             echo "Gate enforcement FAILED (exit code $EXIT_CODE)"
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: quality-reports
@@ -279,24 +293,28 @@ jobs:
   # gate status and MUST NOT describe an incomplete candidate as verified,
   # ready, or passed. The stable pointer is never modified by this workflow.
   create-pr:
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
     needs: [prepare, build-runtimes, quality-gates]
     if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: candidate-summary
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: quality-reports
           path: artifacts/quality-reports
         if: always()
         continue-on-error: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: runtime-*
           path: artifacts/runtimes
