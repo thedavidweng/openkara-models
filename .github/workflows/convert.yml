@@ -14,7 +14,7 @@ on:
         default: htdemucs
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: convert-${{ github.ref }}-${{ github.event.inputs.model || 'auto' }}
@@ -29,7 +29,9 @@ jobs:
       is_ensemble: ${{ steps.model.outputs.is_ensemble }}
       artifact: ${{ steps.model.outputs.artifact }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Determine model from tag or input
         id: model
         run: |
@@ -63,25 +65,19 @@ jobs:
       matrix:
         index: [0, 1, 2, 3]
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements.txt
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Cache Demucs pretrained weights
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/huggingface/hub
-          key: demucs-weights-htdemucs_ft-${{ hashFiles('requirements.txt') }}
 
       - name: Export sub-model ${{ matrix.index }} (spectral-core)
         run: |
@@ -91,7 +87,7 @@ jobs:
             --output sub_${{ matrix.index }}.onnx
 
       - name: Upload sub-model artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sub-model-${{ matrix.index }}
           path: sub_${{ matrix.index }}.onnx
@@ -100,6 +96,8 @@ jobs:
   # Single-model path for htdemucs: export + optimize + validate + release
   # in one job (already fast, ~5min).
   convert-single:
+    permissions:
+      contents: write
     needs: detect-model
     if: needs.detect-model.outputs.is_ensemble == 'false'
     runs-on: ubuntu-latest
@@ -107,25 +105,19 @@ jobs:
     env:
       ARTIFACT: ${{ needs.detect-model.outputs.artifact }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements.txt
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Cache Demucs pretrained weights
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/huggingface/hub
-          key: demucs-weights-htdemucs-${{ hashFiles('requirements.txt') }}
 
       - name: Export spectral-core model
         run: python scripts/export_spectral_core.py --model ${{ needs.detect-model.outputs.model }}
@@ -136,6 +128,7 @@ jobs:
           SIZE_MB=$(stat -c%s "models/$ARTIFACT" | awk '{printf "%.1f", $1/1048576}')
           echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
 
+        shell: bash
       - name: Validate spectral contract (torch reference)
         id: validate-spectral
         run: |
@@ -144,6 +137,7 @@ jobs:
           MSE=$(grep 'composed:' validate.log | head -1 | awk '{print $3}')
           echo "mse=$MSE" >> "$GITHUB_OUTPUT"
 
+        shell: bash
       - name: Runtime contract (protobuf + ORT CPU session)
         run: python scripts/onnx_runtime_contract.py --model "models/$ARTIFACT" --ort-session
 
@@ -183,7 +177,7 @@ jobs:
           EOF
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ needs.detect-model.outputs.model }}-spectral-core-onnx
           path: |
@@ -193,7 +187,9 @@ jobs:
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        # v3.0.3 retained for coordinated uploads/release metadata; no shell execution.
+        # v3.0.3; required create/update release semantics.
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # zizmor: ignore[superfluous-actions]
         with:
           files: |
             models/${{ needs.detect-model.outputs.artifact }}
@@ -204,6 +200,8 @@ jobs:
   # Ensemble merge + finalize path for htdemucs_ft: merges 4 sub-model
   # artifacts, optimizes, validates, and releases.
   finalize-ensemble:
+    permissions:
+      contents: write
     needs: [detect-model, export-sub-models]
     if: needs.detect-model.outputs.is_ensemble == 'true'
     runs-on: ubuntu-latest
@@ -211,13 +209,13 @@ jobs:
     env:
       ARTIFACT: ${{ needs.detect-model.outputs.artifact }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements.txt
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -225,14 +223,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Cache Demucs pretrained weights
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.cache/huggingface/hub
-          key: demucs-weights-htdemucs_ft-${{ hashFiles('requirements.txt') }}
-
       - name: Download all sub-model artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: sub-model-*
           path: sub-models
@@ -250,6 +242,7 @@ jobs:
           SIZE_MB=$(stat -c%s "models/$ARTIFACT" | awk '{printf "%.1f", $1/1048576}')
           echo "size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
 
+        shell: bash
       - name: Validate spectral contract (torch reference)
         id: validate-spectral
         run: |
@@ -258,6 +251,7 @@ jobs:
           MSE=$(grep 'composed:' validate.log | head -1 | awk '{print $3}')
           echo "mse=$MSE" >> "$GITHUB_OUTPUT"
 
+        shell: bash
       - name: Runtime contract (protobuf + ORT CPU session)
         run: python scripts/onnx_runtime_contract.py --model "models/$ARTIFACT" --ort-session
 
@@ -296,7 +290,7 @@ jobs:
           EOF
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: htdemucs_ft-spectral-core-onnx
           path: |
@@ -306,7 +300,9 @@ jobs:
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        # v3.0.3 retained for coordinated uploads/release metadata; no shell execution.
+        # v3.0.3; required create/update release semantics.
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # zizmor: ignore[superfluous-actions]
         with:
           files: |
             models/${{ needs.detect-model.outputs.artifact }}
