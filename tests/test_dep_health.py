@@ -46,7 +46,8 @@ def test_check_ort_lock_stale_behind() -> None:
         "release_url": "", "published_at": "", "name": "", "body": "",
     }
     try:
-        result = h.check_ort_lock_stale(None)
+        with patch.object(h, "_active_hold", return_value=None):
+            result = h.check_ort_lock_stale(None)
         assert result["status"] == "stale"
         assert result["update_available"] is True
     finally:
@@ -308,3 +309,51 @@ def test_check_model_lock_stale_api_error() -> None:
         assert result["status"] == "api_error"
     finally:
         d.detect_latest_revision = original
+
+
+def _stub_latest(tag: str):
+    import detect_ort_release
+    lock = json.loads((ROOT / "ort" / "source-lock.json").read_text())
+    return detect_ort_release, lambda token=None: {
+        "tag": tag, "commit_sha": "f" * 40,
+        "release_url": "", "published_at": "", "name": "", "body": "",
+    }, lock
+
+
+def test_ort_stale_with_active_hold_is_held() -> None:
+    """A hold covering the locked tag turns 'stale' into non-alerting 'held'."""
+    import check_dep_automation_health as h
+    mod, stub, lock = _stub_latest("v99.0.0")
+    with patch.object(mod, "detect_latest_stable", stub):
+        result = h.check_ort_lock_stale(None)
+    assert lock["upstream"]["tag"] == json.loads((ROOT / "ort" / "update-hold.json").read_text())["held_tag"]
+    assert result["status"] == "held"
+    assert result["update_available"] is True
+
+
+def test_ort_hold_expired_is_stale() -> None:
+    import check_dep_automation_health as h
+    mod, stub, _ = _stub_latest("v99.0.0")
+    with patch.object(mod, "detect_latest_stable", stub), \
+         patch.object(h, "_active_hold", return_value=None):
+        assert h.check_ort_lock_stale(None)["status"] == "stale"
+
+
+def test_hold_for_other_tag_or_expired_is_inactive() -> None:
+    import check_dep_automation_health as h
+    from datetime import date
+    assert h._active_hold("v0.0.0") is None
+    assert h._active_hold("v1.27.1", today=date(2999, 1, 1)) is None
+    assert h._active_hold("v1.27.1", today=date(2026, 10, 11)) is not None
+
+
+def test_main_held_is_healthy() -> None:
+    import check_dep_automation_health as h
+    held = {"status": "held", "lock_tag": "v1.27.1", "latest_tag": "v9",
+            "update_available": True}
+    with patch.object(h, "check_ort_lock_stale", return_value=held), \
+         patch.object(h, "check_model_lock_stale", return_value={"status": "current"}), \
+         patch.object(h, "check_workflow_recency", return_value={"status": "current"}), \
+         patch.object(h, "check_duplicate_candidates", return_value={"status": "clean"}), \
+         patch.object(sys, "argv", ["x", "--json"]):
+        assert h.main() == 0

@@ -1,0 +1,6 @@
+{
+  "hold_version": "openkara.ort-update-hold/v1",
+  "held_tag": "v1.27.1",
+  "reason": "Generation 9 ships spectral-core reduced-operator runtimes (ort-v1.1.0) built from v1.27.1 with ORT API 27. A newer ORT requires rebuilding and re-validating all five runtimes and publishing a new catalog generation, which is a deliberate release decision rather than an automatic follow-up.",
+  "review_by": "2027-01-10"
+}

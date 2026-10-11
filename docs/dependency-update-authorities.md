@@ -85,3 +85,15 @@ The repository-owned scripts own:
 
 No file is owned by two authorities. If a future dependency falls into a
 gap, it is assigned to exactly one authority via this document.
+
+## ORT update hold and health alert
+
+`ort/update-hold.json` records a deliberate, time-boxed decision to stay on
+the locked ORT tag (a bump means rebuilding and re-validating all runtimes and
+publishing a new catalog generation). While the hold covers the locked tag and
+`review_by` has not passed, the health monitor reports ORT as `held` and does
+not alert. Expiry or a tag change makes it `stale` again.
+
+The health monitor maintains a single canonical issue titled
+"deps: automation health alert (stale or failed)": it edits the oldest open one
+in place, creates one only if none exists, and closes it when healthy.
