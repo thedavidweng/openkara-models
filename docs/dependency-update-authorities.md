@@ -85,3 +85,11 @@ The repository-owned scripts own:
 
 No file is owned by two authorities. If a future dependency falls into a
 gap, it is assigned to exactly one authority via this document.
+
+## Dependency health alert
+
+The health monitor maintains a single canonical issue titled
+"deps: automation health alert (stale or failed)": it edits the oldest open one
+in place, creates one only if none exists, and closes it when healthy.
+A newer stable ORT remains stale and actionable until the lock is upgraded;
+there is no update hold or alert suppression.

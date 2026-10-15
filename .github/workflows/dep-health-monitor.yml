@@ -29,30 +29,40 @@ jobs:
       - name: Run health check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           python scripts/check_dep_automation_health.py --json > /tmp/health.json
           EXIT_CODE=$?
+          set -e
           cat /tmp/health.json
+          TITLE="deps: automation health alert (stale or failed)"
+          # One canonical alert: reuse the oldest open issue with this exact title.
+          EXISTING=$(gh issue list --state open --label dependencies --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"$TITLE\")] | sort_by(.number) | .[0].number // empty")
           if [ $EXIT_CODE -ne 0 ]; then
-            # Open or update a maintenance issue.
-            ISSUE_BODY=$(python3 -c "
+            python3 -c "
           import json
           d = json.load(open('/tmp/health.json'))
           lines = ['## Dependency automation health alert', '']
           for k, v in d.items():
               lines.append(f'### {k}')
-              lines.append(f'\`\`\`json')
+              lines.append('\`\`\`json')
               lines.append(json.dumps(v, indent=2))
-              lines.append(f'\`\`\`')
+              lines.append('\`\`\`')
               lines.append('')
           print('\n'.join(lines))
-          ")
-            gh issue create \
-              --title "deps: automation health alert (stale or failed)" \
-              --body "$ISSUE_BODY" \
-              --label "dependencies" || true
+          " > /tmp/body.md
+            if [ -n "$EXISTING" ]; then
+              gh issue edit "$EXISTING" --body-file /tmp/body.md
+            else
+              gh issue create --title "$TITLE" --body-file /tmp/body.md --label dependencies
+            fi
             exit $EXIT_CODE
+          elif [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" --reason completed \
+              --comment "Automation health check is healthy again (run ${GITHUB_RUN_ID}); closing the canonical alert."
           fi
       - name: Health check tests
         run: |

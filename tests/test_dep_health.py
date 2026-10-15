@@ -308,3 +308,17 @@ def test_check_model_lock_stale_api_error() -> None:
         assert result["status"] == "api_error"
     finally:
         d.detect_latest_revision = original
+
+
+def test_main_newer_ort_remains_actionable() -> None:
+    """A newer stable ORT must keep the monitor unhealthy until upgraded."""
+    import check_dep_automation_health as h
+    import detect_ort_release
+    latest = {"tag": "v99.0.0", "commit_sha": "f" * 40,
+              "release_url": "", "published_at": "", "name": "", "body": ""}
+    with patch.object(detect_ort_release, "detect_latest_stable", return_value=latest), \
+         patch.object(h, "check_model_lock_stale", return_value={"status": "current"}), \
+         patch.object(h, "check_workflow_recency", return_value={"status": "current"}), \
+         patch.object(h, "check_duplicate_candidates", return_value={"status": "clean"}), \
+         patch.object(sys, "argv", ["x", "--json"]):
+        assert h.main() == 1
