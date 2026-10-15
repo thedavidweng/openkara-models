@@ -7,8 +7,7 @@ fails and prints a maintenance message.
 
 Checks:
   1. ORT source lock tag is not stale (compared to latest stable GitHub
-     release, ignoring prereleases). A deliberate, time-boxed hold in
-     ort/update-hold.json reports ``held`` instead of ``stale``.
+     release, ignoring prereleases).
   2. The dep-detection workflow has run within the expected interval
      (checked via workflow run timestamp, if GITHUB_TOKEN is available).
   3. No duplicate candidate branches exist for the same upstream version.
@@ -31,34 +30,13 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
-HOLD_PATH = ROOT / "ort" / "update-hold.json"
-
-
-def _active_hold(lock_tag: str, today: date | None = None) -> dict[str, Any] | None:
-    """Return the ORT update hold if it covers the locked tag and has not expired.
-
-    A hold records a deliberate decision to stay on the locked ORT tag. It is
-    bounded by ``review_by`` so the pin cannot silently outlive its review.
-    """
-    if not HOLD_PATH.is_file():
-        return None
-    hold = json.loads(HOLD_PATH.read_text(encoding="utf-8"))
-    if hold.get("held_tag") != lock_tag:
-        return None
-    try:
-        review_by = date.fromisoformat(hold["review_by"])
-    except (KeyError, ValueError):
-        return None
-    if review_by < (today or datetime.now(timezone.utc).date()):
-        return None
-    return hold
 
 
 def _github_get(url: str, token: str | None = None) -> Any:
@@ -85,18 +63,12 @@ def check_ort_lock_stale(token: str | None = None) -> dict[str, Any]:
     lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
     lock_tag = lock["upstream"]["tag"]
     comparison = detect_ort_release.compare_with_lock(latest, lock)
-    result = {
+    return {
         "status": "stale" if comparison["update_available"] else "current",
         "lock_tag": lock_tag,
         "latest_tag": latest["tag"],
         "update_available": comparison["update_available"],
     }
-    if result["status"] == "stale":
-        hold = _active_hold(lock_tag)
-        if hold is not None:
-            result["status"] = "held"
-            result["held_until_review"] = hold["review_by"]
-    return result
 
 
 def check_model_lock_stale(token: str | None = None) -> dict[str, Any]:
