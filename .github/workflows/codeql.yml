@@ -1,16 +1,16 @@
-name: "CodeQL"
+name: CodeQL
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    branches: [ "main" ]
+    branches: [main]
+  workflow_dispatch:
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: '0 0 * * 1'
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -19,30 +19,38 @@ concurrency:
 jobs:
   analyze:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
-    name: Analyze
+    name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
-      security-events: write
-      actions: read
       contents: read
-
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            queries: ''
+          - language: c-cpp
+            queries: ''
+          - language: python
+            queries: security-extended
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
-          languages: python
-          queries: security-extended
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: ${{ matrix.queries }}
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
-          category: "/language:python"
+          category: /language:${{ matrix.language }}
+          # Validate all languages before switching off default setup.
+          upload: never
+          upload-database: false
