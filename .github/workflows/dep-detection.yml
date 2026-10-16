@@ -5,6 +5,7 @@ on:
     - cron: "0 9 * * 1"  # Every Monday at 09:00 UTC
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - "models/source-lock.json"
       - "scripts/detect_model_weight_revision.py"
@@ -20,14 +21,14 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   # PR-time validation of the model source lock and detection/candidate
   # scripts. Detection jobs poll upstream APIs and only run on schedule
   # or manual dispatch.
   validate-locks:
-    if: github.event_name == 'pull_request'
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name == 'pull_request') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -53,7 +54,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-    if: github.event_name != 'pull_request'
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name != 'pull_request') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -92,7 +93,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-    if: github.event_name != 'pull_request'
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name != 'pull_request') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
