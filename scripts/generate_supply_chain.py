@@ -14,6 +14,11 @@ Then injects ``supply_chain`` refs into the release spec at
 ``generate_catalog_release.py`` run embeds them in the manifest. The generator
 is deterministic: sorted keys, no wall-clock timestamps (uses spec.created_at).
 
+Specs pin ``supply_chain_generator_version`` when first generated. Version 2
+uses the canonical SPDX document ID; version 1 reproduces immutable historical
+records, including their release-suffixed document ID. Unversioned specs use
+the current version.
+
 Usage::
 
     python scripts/generate_supply_chain.py --release 2026-07-20-001
@@ -41,6 +46,7 @@ LICENSE_PATH = ROOT / "LICENSE"
 
 SPDX_SCHEMA = "https://spdx.org/schema/spdx-schema.json"
 SPDX_VERSION = "SPDX-2.3"
+GENERATOR_VERSION = 2
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -70,6 +76,14 @@ def _load_spec(release_id: str) -> tuple[Path, dict[str, Any]]:
 
 def _build_sbom(spec: dict[str, Any], release_id: str) -> dict[str, Any]:
     """Minimal SPDX-2.3 JSON SBOM: repo package + one package per artifact."""
+    version = spec.get("supply_chain_generator_version", GENERATOR_VERSION)
+    if version == 1:
+        document_id = f"SPDXRef-DOCUMENT-{release_id.replace('-', '')}"
+    elif version == 2:
+        document_id = "SPDXRef-DOCUMENT"
+    else:
+        raise ValueError(f"unsupported supply_chain_generator_version: {version!r}")
+
     packages: list[dict[str, Any]] = [
         {
             "name": "openkara-models",
@@ -111,7 +125,7 @@ def _build_sbom(spec: dict[str, Any], release_id: str) -> dict[str, Any]:
     return {
         "spdxVersion": SPDX_VERSION,
         "dataLicense": "CC0-1.0",
-        "SPDXID": f"SPDXRef-DOCUMENT-{release_id.replace('-', '')}",
+        "SPDXID": document_id,
         "name": f"openkara-models-{release_id}",
         "documentNamespace": f"https://openkara.org/spdx/{release_id}",
         "creationInfo": {
@@ -200,11 +214,14 @@ def main() -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
+    # 1. SBOM
+    try:
+        sbom = _build_sbom(spec, args.release)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     out_dir = SC_DIR / args.release
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    # 1. SBOM
-    sbom = _build_sbom(spec, args.release)
     sbom_bytes = json.dumps(sbom, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8")
     (out_dir / "sbom.spdx.json").write_bytes(sbom_bytes)
 
@@ -245,6 +262,9 @@ def main() -> int:
 
     # Inject into spec (release-level + per-artifact).
     new_spec = copy.deepcopy(spec)
+    new_spec["supply_chain_generator_version"] = spec.get(
+        "supply_chain_generator_version", GENERATOR_VERSION
+    )
     new_spec["supply_chain"] = supply_chain
     for kind in ("models", "runtimes", "bundles"):
         for art in new_spec.get("artifacts", {}).get(kind, []):

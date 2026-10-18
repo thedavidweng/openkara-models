@@ -939,5 +939,6 @@
       "size": 5618,
       "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-07-23-003/sbom.spdx.json"
     }
-  }
+  },
+  "supply_chain_generator_version": 1
 }

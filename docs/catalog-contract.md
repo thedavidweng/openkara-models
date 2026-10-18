@@ -163,6 +163,21 @@ half-precision, so half the weight bytes are zero mantissas.)
 | `model-derived-v*` | deterministic derived model assets (dedup, projections) |
 | `ort-v*` | ONNX Runtime archives for the five targets |
 
+## Supply-chain generation
+
+`scripts/generate_supply_chain.py --release <release-id>` pins
+`supply_chain_generator_version` in the release spec. New specs use version 2,
+which identifies the SPDX document as `SPDXRef-DOCUMENT`, matching its
+`DESCRIBES` relationship. When copying a historical spec for a new release,
+remove the version pin or set it to 2.
+
+Historical specs explicitly pin version 1 to reproduce their published
+release-suffixed document IDs and digests. Their original SPDX relationship
+mismatch remains in the immutable records; correcting those published bytes
+requires a new release ID. The version pin is generator input only and is
+not included in the published manifest. CI still regenerates every spec and
+verifies supply-chain digests and immutable manifest bytes.
+
 ## Historical note
 
 The temporary `latest.json` migration alias (OpenKara PR #165) was deleted after
