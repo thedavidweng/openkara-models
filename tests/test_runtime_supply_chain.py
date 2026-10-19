@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import pytest
 import json
 import subprocess
 import sys
@@ -13,7 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 
 
+@pytest.fixture(autouse=True)
+def pinned_header(monkeypatch):
+    sys.path.insert(0, str(SCRIPTS))
+    import ort_api_version
+    monkeypatch.setattr(ort_api_version, "pinned_header", lambda upstream: b"#define ORT_API_VERSION 27\n")
+
+
 def _make_archive(path: Path, files: dict[str, bytes]) -> None:
+    if "build-manifest.json" in files:
+        header = b"#define ORT_API_VERSION 27\n"
+        files["onnxruntime_c_api.h"] = header
+        manifest = json.loads(files["build-manifest.json"])
+        manifest["files"]["onnxruntime_c_api.h"] = {"size": len(header), "sha256": hashlib.sha256(header).hexdigest()}
+        files["build-manifest.json"] = json.dumps(manifest).encode()
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name, data in sorted(files.items()):
@@ -186,3 +201,27 @@ def test_verify_accepts_archive_with_supply_chain(tmp_path: Path) -> None:
     # submodule checks (empty in fake manifest). Focus on supply-chain errors.
     sc_errors = [e for e in errors if "supply_chain" in e or "sbom" in e or "provenance" in e]
     assert sc_errors == [], sc_errors
+
+
+def test_verify_rejects_untrusted_api_and_header(tmp_path, monkeypatch):
+    import ort_api_version
+    import verify_runtime_package as verifier
+    archive = tmp_path / 'onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz'
+    _make_archive(archive, {'build-manifest.json': json.dumps(_make_build_manifest()).encode()})
+    monkeypatch.setattr(ort_api_version, 'pinned_header', lambda upstream: b'#define ORT_API_VERSION 31\n')
+    lock = json.loads((ROOT / 'ort/source-lock.json').read_text())
+    errors = verifier.verify_archive(archive, lock)
+    assert any('C API level mismatch' in e for e in errors)
+    assert any('header differs' in e for e in errors)
+
+
+def test_verify_header_fetch_failure_is_not_a_fallback(tmp_path, monkeypatch):
+    import ort_api_version
+    import verify_runtime_package as verifier
+    archive = tmp_path / 'onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz'
+    _make_archive(archive, {'build-manifest.json': json.dumps(_make_build_manifest()).encode()})
+    def fail(upstream):
+        raise OSError('network unavailable')
+    monkeypatch.setattr(ort_api_version, 'pinned_header', fail)
+    lock = json.loads((ROOT / 'ort/source-lock.json').read_text())
+    assert any('cannot verify pinned upstream' in e for e in verifier.verify_archive(archive, lock))

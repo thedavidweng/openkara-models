@@ -317,3 +317,10 @@ Read-only qualification: `python scripts/validate_release_evidence.py MANIFEST`.
 Reports must be produced by real measurement tooling and attached as immutable
 release assets before referencing them; there is no command to manufacture a
 passing report from absent hardware, reference stems or measurements.
+
+Runtime package API verification uses the C header at the exact immutable
+`upstream.commit_sha`, not a tag-to-API table or a local checkout. New builds
+include `onnxruntime_c_api.h` in the digested manifest. Verification fetches
+only that small upstream header and fails closed on fetch failure, API mismatch,
+or substituted header bytes. Historical packages without the header require a
+new candidate build; this does not rewrite historical release assets.
