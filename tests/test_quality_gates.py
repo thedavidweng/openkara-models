@@ -75,6 +75,25 @@ def test_enforce_gates_pr_tier_passes_with_unfrozen_baseline() -> None:
     assert errors == [], errors
 
 
+def test_target_provider_selection_reaches_exact_baseline(tmp_path, monkeypatch):
+    import enforce_quality_gates as g
+    import generate_trend_report as trend
+    doc = json.loads(g.BASELINES_PATH.read_text())
+    entry = doc["stable_baselines"][0]
+    doc["stable_baselines"] = [entry | {"target": "first"}, entry | {"target": "second"}]
+    path = tmp_path / "baselines.json"
+    path.write_text(json.dumps(doc))
+    monkeypatch.setattr(g, "BASELINES_PATH", path)
+    monkeypatch.setattr(trend, "BASELINES_PATH", path)
+    artifact, provider = entry["artifact_id"], entry["provider"]
+    assert any("ambiguous" in e for e in g.enforce_gates(artifact, _quality_report(), None, "pr"))
+    assert g.enforce_gates(artifact, _quality_report(), None, "pr", target="second", provider=provider) == []
+    assert "ambiguous" in trend.generate_trend(artifact, _quality_report(), None)["error"]
+    selected = trend.generate_trend(artifact, _quality_report(), None, target="second", provider=provider)
+    assert "error" not in selected
+    assert any("NOT FROZEN" in e for e in selected["gate_errors"])
+
+
 def test_is_baseline_frozen_rejects_pending() -> None:
     """_is_baseline_frozen returns False for pending-pr4-freeze and null."""
     import enforce_quality_gates as g
@@ -105,6 +124,8 @@ def _frozen_baseline() -> dict:
         "model": "htdemucs",
         "model_digest": "a" * 64,
         "runtime_id": "ort.test",
+        "runtime_digest": "d" * 64,
+        "runtime_size": 200,
         "target": "aarch64-apple-darwin",
         "provider": "cpu",
         "frozen_at": "2026-07-21T00:00:00Z",

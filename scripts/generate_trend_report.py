@@ -47,15 +47,16 @@ def _delta(candidate: float | None, baseline: float | None) -> dict[str, Any]:
 def generate_trend(
     artifact_id: str, quality_report: dict[str, Any] | None,
     runtime_report: dict[str, Any] | None,
+    *, target: str | None = None, provider: str | None = None,
 ) -> dict[str, Any]:
     baselines = json.loads(BASELINES_PATH.read_text(encoding="utf-8"))
     budgets = json.loads(BUDGETS_PATH.read_text(encoding="utf-8"))
-    baseline_entry = next(
-        (b for b in baselines["stable_baselines"] if b["artifact_id"] == artifact_id),
-        None,
-    )
-    if baseline_entry is None:
-        return {"error": f"no baseline for {artifact_id}"}
+    matches = [b for b in baselines["stable_baselines"] if b["artifact_id"] == artifact_id
+               and (target is None or b["target"] == target)
+               and (provider is None or b["provider"] == provider)]
+    if len(matches) != 1:
+        return {"error": f"no baseline or ambiguous baseline for {artifact_id}; select target/provider"}
+    baseline_entry = matches[0]
     baseline_metrics = baseline_entry.get("baseline_metrics", {})
     candidate: dict[str, Any] = {}
     if quality_report:
@@ -97,7 +98,8 @@ def generate_trend(
         "artifact_id": artifact_id,
         "baseline_report_id": baseline_entry.get("baseline_quality_report_id"),
         "trends": trends,
-        "gate_errors": gates.enforce_gates(artifact_id, quality_report, runtime_report, "release"),
+        "gate_errors": gates.enforce_gates(artifact_id, quality_report, runtime_report, "release",
+                                           target=target, provider=provider),
     }
 
 
@@ -131,6 +133,8 @@ def _markdown(trend: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate a trend report.")
     parser.add_argument("--artifact-id", required=True)
+    parser.add_argument("--target")
+    parser.add_argument("--provider")
     parser.add_argument("--quality-report", type=Path, default=None)
     parser.add_argument("--runtime-report", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=Path("trend.json"))
@@ -140,7 +144,7 @@ def main() -> int:
     quality = json.loads(args.quality_report.read_text()) if args.quality_report and args.quality_report.is_file() else None
     runtime = json.loads(args.runtime_report.read_text()) if args.runtime_report and args.runtime_report.is_file() else None
 
-    trend = generate_trend(args.artifact_id, quality, runtime)
+    trend = generate_trend(args.artifact_id, quality, runtime, target=args.target, provider=args.provider)
     args.output.write_text(json.dumps(trend, indent=2, sort_keys=True) + "\n")
     print(f"trend: {args.output}")
     if args.markdown:

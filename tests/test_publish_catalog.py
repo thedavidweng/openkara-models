@@ -160,7 +160,7 @@ class DryRunTests(unittest.TestCase):
                 ["--release", RELEASE_ID, "--execute"], gh,
             )
         self.assertEqual(code, 1)
-        self.assertIn("NOT FROZEN", err)
+        self.assertIn("quality_report", err)
         gh.assert_not_called()
 
     def test_dry_run_fails_for_nonexistent_release(self):
@@ -375,7 +375,7 @@ class ExecutePathTests(unittest.TestCase):
                     out = io.StringIO()
                     err = io.StringIO()
                     with redirect_stdout(out), redirect_stderr(err):
-                        with mock.patch.object(pub, "frozen_baseline_errors", return_value=[]):
+                        with mock.patch.object(pub, "qualify_release", return_value=[]):
                             code = pub.main()
         return code, out.getvalue(), err.getvalue()
 

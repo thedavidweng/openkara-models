@@ -11,9 +11,8 @@ for the artifact it replaces, checks that:
     the baseline on all measured metrics (it must improve at least one
     metric within budget).
 
-Fails (non-zero exit) if any gate fails. The publisher uses the shared frozen
-baseline prerequisite. Binding immutable candidate reports to every catalog
-model/runtime/provider edge remains required before release gates are complete.
+Fails (non-zero exit) if any gate fails. The publisher separately binds immutable reports and budgets to every catalog
+model/runtime/provider edge through validate_release_evidence.
 
 Usage::
 
@@ -125,6 +124,13 @@ def _check_budget(
         if key in budget and candidate_value > budget[key]:
             return f"{metric}: {candidate_value} > {key}={budget[key]}"
         return None
+    delta_key = f"{tier}_max_delta"
+    if delta_key in budget:
+        regression = (baseline_value - candidate_value if budget["direction"] == "higher-is-better"
+                      else candidate_value - baseline_value)
+        if regression > budget[delta_key]:
+            return f"{metric}: non-inferiority regression {regression} exceeds {budget[delta_key]}"
+        return None
     # Relative budget.
     factor_key = f"{tier}_max_factor"
     absolute_key = f"{tier}_max_absolute"
@@ -193,13 +199,13 @@ def _is_baseline_frozen(entry: dict[str, Any]) -> bool:
     if any(
         not isinstance(entry[field], str)
         for field in required
-        if field not in {"artifact_size_bytes", "baseline_metrics", "benchmark_environment"}
+        if field not in {"artifact_size_bytes", "runtime_size", "baseline_metrics", "benchmark_environment"}
     ):
         return False
-    for field in ("model_digest", "baseline_quality_report_digest", "baseline_runtime_report_digest"):
+    for field in ("model_digest", "runtime_digest", "baseline_quality_report_digest", "baseline_runtime_report_digest"):
         if not isinstance(entry[field], str) or not re.fullmatch(r"[0-9a-f]{64}", entry[field]):
             return False
-    if type(entry["artifact_size_bytes"]) is not int or entry["artifact_size_bytes"] <= 0:
+    if any(type(entry[f]) is not int or entry[f] <= 0 for f in ("artifact_size_bytes", "runtime_size")):
         return False
     for field in ("frozen_at", "generation_time"):
         try:
@@ -227,7 +233,8 @@ def frozen_baseline_errors(artifact_ids: list[str]) -> list[str]:
     errors = []
     for artifact_id in artifact_ids:
         matches = [entry for entry in entries if entry["artifact_id"] == artifact_id]
-        if len(matches) != 1 or not _is_baseline_frozen(matches[0]):
+        keys = [(b.get("runtime_id"), b.get("target"), b.get("provider")) for b in matches]
+        if not matches or len(set(keys)) != len(keys) or not all(_is_baseline_frozen(b) for b in matches):
             errors.append(f"baseline for {artifact_id} is missing, duplicate or NOT FROZEN")
     return errors
 
@@ -235,20 +242,21 @@ def frozen_baseline_errors(artifact_ids: list[str]) -> list[str]:
 def enforce_gates(
     artifact_id: str, quality_report: dict[str, Any] | None,
     runtime_report: dict[str, Any] | None, tier: str,
+    *, target: str | None = None, provider: str | None = None,
 ) -> list[str]:
     errors: list[str] = []
     baselines = _load_json(BASELINES_PATH)
     budgets_doc = _load_json(BUDGETS_PATH)
     budgets = budgets_doc["budgets"]
 
-    # Find baseline for this artifact.
-    baseline_entry = next(
-        (b for b in baselines["stable_baselines"] if b["artifact_id"] == artifact_id),
-        None,
-    )
-    if baseline_entry is None:
-        errors.append(f"no baseline found for artifact_id={artifact_id}")
+    # Never pick an arbitrary target/provider baseline when several exist.
+    matches = [b for b in baselines["stable_baselines"] if b["artifact_id"] == artifact_id
+               and (target is None or b["target"] == target)
+               and (provider is None or b["provider"] == provider)]
+    if len(matches) != 1:
+        errors.append(f"no baseline found or ambiguous baseline for artifact_id={artifact_id}; use the per-edge publisher qualification")
         return errors
+    baseline_entry = matches[0]
 
     frozen = _is_baseline_frozen(baseline_entry)
     if not frozen and tier == "release":
@@ -323,6 +331,8 @@ def main() -> int:
     parser.add_argument("--quality-report", type=Path, default=None)
     parser.add_argument("--runtime-report", type=Path, default=None)
     parser.add_argument("--tier", choices=["pr", "release"], default="release")
+    parser.add_argument("--target")
+    parser.add_argument("--provider")
     args = parser.parse_args()
 
     quality = _load_json(args.quality_report) if args.quality_report and args.quality_report.is_file() else None
@@ -332,7 +342,8 @@ def main() -> int:
         print("ERROR: provide at least one of --quality-report or --runtime-report", file=sys.stderr)
         return 1
 
-    errors = enforce_gates(args.artifact_id, quality, runtime, args.tier)
+    errors = enforce_gates(args.artifact_id, quality, runtime, args.tier,
+                           target=args.target, provider=args.provider)
     if errors:
         print(f"FAIL: {len(errors)} gate error(s) for {args.artifact_id}:", file=sys.stderr)
         for e in errors:

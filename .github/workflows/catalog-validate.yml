@@ -68,7 +68,7 @@ jobs:
         run: python scripts/verify_supply_chain.py --all
 
       - name: Catalog unit + generator + supply-chain + publish tests
-        run: python -m pytest tests/test_catalog_validation.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py -q
+        run: python -m pytest tests/test_catalog_validation.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py tests/test_release_evidence.py -q
 
       - name: Fixtures are fresh (regenerate + git diff)
         run: |

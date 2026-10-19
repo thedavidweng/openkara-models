@@ -190,12 +190,12 @@ manifest; channel pointers and release manifests are the only contract surfaces.
 publishes a catalog release as an immutable GitHub release and advances the
 stable pointer atomically:
 
-Stable execution requires one complete measured baseline per catalog model.
-Missing, duplicate, placeholder, incomplete or non-finite baseline entries
-stop execution before network writes. Candidate publication remains available
-for collecting evidence. This prerequisite does not yet bind immutable
-candidate reports to every model/runtime/provider compatibility edge; that
-release-evidence integration remains tracked in #21.
+Stable execution requires qualified, immutable per-edge evidence and one complete
+frozen current-default baseline per target/provider (see the envelope contract
+below). Missing, duplicate, placeholder, incomplete or non-finite entries stop
+execution before network writes. Candidate publication remains available for
+collecting evidence. `validate_release_evidence.py` enforces this prerequisite;
+measured reports remain tracked in #21.
 
 1. **Dry-run (default):** verifies the manifest validates, supply-chain records
    match local files, every referenced artifact asset URL resolves to an
@@ -268,3 +268,52 @@ adapter diagnostic; it neither proves hardware absence nor qualifies a release.
 Generic DML, missing kernel, driver and CoreML initialization errors remain failures.
 Native ORT builds run only through explicit `ORT source build` workflow dispatch;
 PR/push still run the lightweight lock, API, packaging and smoke unit checks.
+
+### Stable evidence envelope contract
+
+Stable `--execute` loads all three `gates` report refs before publication writes.
+Each ref binds URL, actual byte length, SHA-256, report ID and schema version;
+malformed, missing or changed bytes fail closed. Historical dry-run integrity
+checks do not authorize stable promotion. The real corpus and baseline remain
+unfrozen; contract unit fixtures are not release measurements.
+
+The three JSON envelopes use `schema_version: openkara.release-{quality,
+performance,compatibility}/v1`, `report_id`, exact `release_id`, `generation`,
+and `edges`. Each supported manifest compatibility edge must appear exactly
+once in each envelope (no extra rows). Every row has `identity` containing the
+four manifest edge fields plus `model_digest`, `model_size`, `runtime_digest`,
+`runtime_size`, matching the catalog artifact bytes exactly.
+
+- Quality row: `report` (existing release-tier quality schema), `corpus_sha256`
+  (exact reviewed `quality/corpus-manifest.json` bytes), `separation` results,
+  `baseline_quality_report` and `baseline_runtime_report` (immutable report refs).
+- Performance row: `report` (existing release-tier runtime schema),
+  `measurement_backend: native-c-api`, and the frozen `benchmark_environment`.
+  The old Python suite's ORT_RUNTIMES environment variable does not prove it
+  loaded an archive; wheel measurements cannot be labeled native evidence.
+- Compatibility row: `status: passed`, exact quality/performance envelope IDs,
+  and `native_smoke` with matching archive/model SHA-256 + size, target and a
+  successful strict requested-provider result. A diagnostic skip never passes.
+
+Both quality and runtime results must cover every reviewed corpus fixture
+exactly once, with matching category/tier and reviewed per-fixture budgets.
+The corpus must include licensed immutable real audio, not just synthetic data.
+Separation rows cover every real fixture and contain finite `si_sdr_db`,
+`sdr_db`, `leakage_db`, `mrstft_loss`, `transient_error`,
+`low_frequency_error_db`, `chunk_boundary_error`; worst-case non-inferiority
+is required for each metric. All existing correctness/runtime/size budgets
+apply; a target-specific candidate must improve size, cold load, warm latency,
+peak memory or separation quality, and cannot be Pareto dominated.
+
+`quality/baselines.json.default_artifact_id` selects the current-default
+comparison model. One complete baseline per target/provider is required.
+Baseline report documents carry their ref's ID/schema, exact model digest/size,
+runtime ID/digest/size, target/provider under `identity`, `corpus_sha256`,
+`benchmark_environment` and `metrics` equal to the frozen baseline values.
+Their downloaded bytes are verified too. This prevents substituting a different
+model, runner, corpus, provider or baseline summary.
+
+Read-only qualification: `python scripts/validate_release_evidence.py MANIFEST`.
+Reports must be produced by real measurement tooling and attached as immutable
+release assets before referencing them; there is no command to manufacture a
+passing report from absent hardware, reference stems or measurements.

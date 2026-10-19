@@ -208,18 +208,18 @@ def validation_failures(report: dict[str, Any], requested_provider: str,
             f"unexpected output_shape={report.get('output_shape')!r}, "
             f"expected {expected_output_shape!r}"
         )
-    if report.get("used_fallback") is True:
-        failures.append("whole-session CPU fallback was used")
+    if report.get("used_fallback") is not False:
+        failures.append("whole-session CPU fallback was used or not measured")
     if report.get("provider_assignment") != requested_provider:
         failures.append(
             "provider assignment mismatch: "
             f"requested={requested_provider!r}, assigned={report.get('provider_assignment')!r}"
         )
     provider_nodes = report.get("provider_node_count")
-    if not isinstance(provider_nodes, int) or provider_nodes <= 0:
+    if type(provider_nodes) is not int or provider_nodes <= 0:
         failures.append(f"provider_node_count must be > 0, got {provider_nodes!r}")
     total_nodes = report.get("total_node_count")
-    if not isinstance(total_nodes, int) or total_nodes <= 0:
+    if type(total_nodes) is not int or total_nodes <= 0:
         failures.append(f"total_node_count must be > 0, got {total_nodes!r}")
     return failures
 
@@ -277,6 +277,7 @@ def main() -> int:
 
         # Compute digests.
         runtime_size, runtime_sha = _sha256_file(lib_path)
+        archive_size, archive_sha = _sha256_file(args.runtime)
         model_size, model_sha = _sha256_file(args.model)
 
         # Run the harness.
@@ -289,6 +290,7 @@ def main() -> int:
     # Assemble the final report.
     report = {
         "schema_version": "openkara.native-smoke-report/v1",
+        "runtime_archive": {"sha256": archive_sha, "size": archive_size},
         "runtime_digest": {
             "sha256": runtime_sha,
             "size": runtime_size,
@@ -314,7 +316,7 @@ def main() -> int:
         "cpu_node_count": result.get("cpu_node_count"),
         "provider_node_count": result.get("provider_node_count"),
         "fallback_node_count": result.get("fallback_node_count"),
-        "used_fallback": result.get("used_fallback", False),
+        "used_fallback": result.get("used_fallback"),
         "harness_exit_code": result.get("harness_exit_code"),
     }
 
