@@ -27,8 +27,9 @@ the same (already published) release, which skips re-creating the GitHub
 release if the tag already exists and only advances the pointer.
 
 This script is a dry-run by default. Use ``--execute`` to actually create the
-GitHub release. Stable execution requires a complete frozen baseline for every
-model. In dry-run mode, it checks manifest integrity, supply-chain records,
+GitHub release. Stable execution requires immutable, identity-bound quality/performance/native
+compatibility evidence and a frozen current-default baseline for every supported
+model/runtime/target/provider edge. In dry-run mode, it checks manifest integrity, supply-chain records,
 asset URL resolution + SHA-256, and monotonicity; it does not qualify quality
 evidence or authorize promotion.
 
@@ -54,7 +55,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from validate_catalog import validate_document  # noqa: E402
-from enforce_quality_gates import frozen_baseline_errors  # noqa: E402
+from validate_release_evidence import qualify_release  # noqa: E402
 
 RELEASES_DIR = ROOT / "catalog" / "releases"
 CHANNELS_DIR = ROOT / "catalog" / "channels"
@@ -135,6 +136,22 @@ def _download_asset_sha256(repo: str, tag: str, asset_name: str) -> str | None:
         if r.returncode != 0 or not dest.is_file():
             return None
         return _sha256_file(dest)
+
+
+def _download_report(url: str) -> bytes:
+    import tempfile
+    parsed = _parse_release_url(url)
+    if parsed is None:
+        raise ValueError("report must be an immutable GitHub release asset URL")
+    repo, tag = parsed
+    name = url.rsplit("/", 1)[-1]
+    if not name or any(c in name for c in "*?[]\\") or name in {".", ".."}:
+        raise ValueError("report asset must be an exact filename")
+    with tempfile.TemporaryDirectory() as td:
+        result = _gh(["release", "download", tag, "--repo", repo, "--pattern", name, "--dir", td], check=False)
+        if result.returncode:
+            raise ValueError(f"report download failed: {url}")
+        return (Path(td) / name).read_bytes()
 
 
 def _verify_manifest(manifest: dict[str, Any]) -> list[str]:
@@ -328,11 +345,9 @@ def main() -> int:
             for error in result.schema_errors + result.invariant_errors:
                 print(f"  {error}", file=sys.stderr)
             return 1
-        errors = frozen_baseline_errors([
-            model["artifact_id"] for model in manifest["artifacts"]["models"]
-        ])
+        errors = qualify_release(manifest, _download_report)
         if errors:
-            print("ERROR: stable publication requires frozen measured baselines:", file=sys.stderr)
+            print("ERROR: stable publication requires qualified immutable evidence and frozen measured baselines:", file=sys.stderr)
             for error in errors:
                 print(f"  {error}", file=sys.stderr)
             return 1

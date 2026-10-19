@@ -105,6 +105,8 @@ def _frozen_baseline() -> dict:
         "model": "htdemucs",
         "model_digest": "a" * 64,
         "runtime_id": "ort.test",
+        "runtime_digest": "d" * 64,
+        "runtime_size": 200,
         "target": "aarch64-apple-darwin",
         "provider": "cpu",
         "frozen_at": "2026-07-21T00:00:00Z",
