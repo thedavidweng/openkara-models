@@ -388,6 +388,44 @@ class ExecutePathTests(unittest.TestCase):
         stable = json.loads((pub.CHANNELS_DIR / "stable.json").read_text())
         self.assertEqual(stable["release_id"], RELEASE_ID)
 
+    def test_publication_precedes_pointer_update(self):
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=None)
+        advance = pub._advance_channel_pointer
+
+        def checked_advance(*args):
+            self.assertTrue(gh.commands("release", "edit"))
+            return advance(*args)
+
+        with mock.patch.object(pub, "_advance_channel_pointer", side_effect=checked_advance):
+            code, _, err = self._run(gh, ["--channel", "candidate", "--execute"])
+        self.assertEqual(code, 0, err)
+
+    def test_undraft_failure_leaves_pointer_unchanged(self):
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=None)
+
+        def fail_undraft(args, **kwargs):
+            if args[:2] == ["release", "edit"]:
+                return subprocess.CompletedProcess(args, 1, "", "undraft failed")
+            return gh(args, **kwargs)
+
+        with mock.patch.object(pub, "_advance_channel_pointer") as advance:
+            code, _, err = self._run(fail_undraft, ["--channel", "candidate", "--execute"])
+        self.assertEqual(code, 1)
+        self.assertIn("undraft failed", err)
+        advance.assert_not_called()
+        self.assertFalse(gh.commands("release", "delete"))
+        self.assertFalse((pub.CHANNELS_DIR / "candidate.json").exists())
+
+    def test_pointer_failure_preserves_new_public_release(self):
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=None)
+        with mock.patch.object(pub, "_advance_channel_pointer", return_value=["write failed"]):
+            code, _, err = self._run(gh, ["--channel", "candidate", "--execute"])
+        self.assertEqual(code, 1)
+        self.assertIn("write failed", err)
+        self.assertTrue(gh.commands("release", "edit"))
+        self.assertFalse(gh.commands("release", "delete"))
+        self.assertFalse((pub.CHANNELS_DIR / "candidate.json").exists())
+
     def test_promotion_verification_failure_never_deletes_the_release(self):
         # Existing release is missing the pointer-referenced manifest asset:
         # verification must fail WITHOUT deleting the pre-existing release.

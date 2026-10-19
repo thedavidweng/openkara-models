@@ -200,11 +200,11 @@ stable pointer atomically:
    2. Uploads the manifest + supply-chain files as release assets.
    3. Downloads every uploaded asset and verifies its SHA-256 and size match
       the manifest.
-   4. Advances `catalog/channels/stable.json` to point at the new release
-      (only after every asset is verified).
-   5. Publishes (undrafts) the release.
-   On any failure before step 4, the release is deleted and the stable pointer
-   is not moved.
+   4. Publishes (undrafts) the verified release.
+   5. Advances `catalog/channels/stable.json` to point at the public release.
+   Verification failures delete only a draft created by this invocation.
+   A failed publication leaves the pointer unchanged and preserves the release
+   for retry. A pointer failure preserves the public release.
 
 `generate_catalog_release.py` writes the immutable manifest only. It does
 **not** advance the stable pointer — that is the sole responsibility of

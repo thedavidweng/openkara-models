@@ -15,12 +15,12 @@ Atomicity contract:
   2. Create a GitHub release tagged ``infra-<release-id>`` (draft).
   3. Upload the manifest and supply-chain files as release assets.
   4. Verify every uploaded asset's SHA-256 and size match the manifest.
-  5. Update ``catalog/channels/<channel>.json`` to point at the new release
-     (only after every asset is verified).
-  6. Publish the release (undraft).
+  5. Publish the release (undraft).
+  6. Update ``catalog/channels/<channel>.json`` to point at the public release.
 
-If any step fails, the release is deleted and the channel pointer is not
-moved. The pointer only advances after every referenced asset is verified.
+Verification failures delete only a draft created by this invocation.
+Publication failures leave the pointer unchanged. Once publication is
+attempted, the release is preserved for retry, including on pointer failure.
 Publishing to ``candidate`` never touches ``stable.json``; promoting a
 verified candidate to stable is a separate ``--channel stable`` run against
 the same (already published) release, which skips re-creating the GitHub
@@ -471,27 +471,22 @@ def main() -> int:
             _cleanup_release()
             return 1
 
-    # All uploaded assets verified. Now advance the channel pointer.
+    # Consumers must be able to download the release before the pointer moves.
+    r = _gh(["release", "edit", tag, "--repo", repo, "--draft=false"], check=False)
+    if r.returncode != 0:
+        print(f"ERROR: failed to publish release: {r.stderr}", file=sys.stderr)
+        print(
+            f"  The {args.channel} pointer is unchanged; release {tag} is preserved for retry.",
+            file=sys.stderr,
+        )
+        return 1
+
     errors = _advance_channel_pointer(manifest, manifest_path, args.channel)
     if errors:
         print(f"ERROR: failed to advance {args.channel} pointer:", file=sys.stderr)
         for e in errors:
             print(f"  {e}", file=sys.stderr)
-        _cleanup_release()
-        return 1
-
-    # Publish (undraft) the release (no-op when promoting an existing one).
-    r = _gh(["release", "edit", tag, "--repo", repo, "--draft=false"], check=False)
-    if r.returncode != 0:
-        print(f"ERROR: failed to publish release: {r.stderr}", file=sys.stderr)
-        # The pointer has already advanced; do NOT delete the release here.
-        # The release is verified and the pointer is correct; the only failure
-        # is undrafting, which can be retried manually.
-        print(
-            f"  The {args.channel} pointer has already advanced. Manually undraft "
-            f"the release with: gh release edit {tag} --repo {repo} --draft=false",
-            file=sys.stderr,
-        )
+        print(f"  Public release {tag} is preserved for retry.", file=sys.stderr)
         return 1
 
     print(f"OK: release {args.release} published as {tag}")
