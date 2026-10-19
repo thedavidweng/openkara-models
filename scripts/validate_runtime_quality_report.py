@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,12 @@ def validate_report(report: dict[str, Any]) -> list[str]:
         return errors
 
     threshold = report.get("rtf_threshold", float("inf"))
+    if not math.isfinite(threshold):
+        errors.append("rtf_threshold must be finite")
     for r in report.get("results", []):
+        for key, value in r.items():
+            if isinstance(value, float) and not math.isfinite(value):
+                errors.append(f"{r['fixture_id']}: {key} must be finite")
         if r.get("shape_errors"):
             errors.append(f"{r['fixture_id']}: shape errors: {r['shape_errors']}")
         if r.get("rtf_warm", 0) > threshold:

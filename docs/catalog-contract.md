@@ -190,10 +190,18 @@ manifest; channel pointers and release manifests are the only contract surfaces.
 publishes a catalog release as an immutable GitHub release and advances the
 stable pointer atomically:
 
+Stable execution requires one complete measured baseline per catalog model.
+Missing, duplicate, placeholder, incomplete or non-finite baseline entries
+stop execution before network writes. Candidate publication remains available
+for collecting evidence. This prerequisite does not yet bind immutable
+candidate reports to every model/runtime/provider compatibility edge; that
+release-evidence integration remains tracked in #21.
+
 1. **Dry-run (default):** verifies the manifest validates, supply-chain records
    match local files, every referenced artifact asset URL resolves to an
    existing GitHub release asset whose SHA-256 matches the manifest, and
-   generation is monotonic. Exits 0 if ready to publish. No `--skip-asset-check`
+   generation is monotonic. Exits 0 for valid integrity, without qualifying
+   release evidence. No `--skip-asset-check`
    escape hatch exists — every asset must be reachable and verifiable.
 2. **Execute (`--execute`):**
    1. Creates a draft GitHub release tagged `infra-<release-id>`.

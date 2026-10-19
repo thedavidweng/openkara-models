@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,12 @@ def validate_report(report: dict[str, Any]) -> list[str]:
         return errors
 
     threshold = report.get("mse_threshold", float("inf"))
+    if not math.isfinite(threshold):
+        errors.append("mse_threshold must be finite")
     for r in report.get("results", []):
+        for key, value in r.items():
+            if isinstance(value, float) and not math.isfinite(value):
+                errors.append(f"{r['fixture_id']}: {key} must be finite")
         if r.get("onnx_has_nan"):
             errors.append(f"{r['fixture_id']}: ONNX output has NaN")
         if r.get("onnx_has_inf"):

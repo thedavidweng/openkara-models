@@ -11,8 +11,9 @@ for the artifact it replaces, checks that:
     the baseline on all measured metrics (it must improve at least one
     metric within budget).
 
-Fails (non-zero exit) if any gate fails. This script is called by the
-catalog publish workflow before a stable artifact is promoted.
+Fails (non-zero exit) if any gate fails. The publisher uses the shared frozen
+baseline prerequisite. Binding immutable candidate reports to every catalog
+model/runtime/provider edge remains required before release gates are complete.
 
 Usage::
 
@@ -26,7 +27,10 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
+import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -108,13 +112,13 @@ def _check_budget(
     budget: dict[str, Any], tier: str,
 ) -> str | None:
     """Check a single metric against its budget. Returns error string or None."""
-    if candidate_value is None:
-        return f"{metric}: candidate value is None"
     if budget["direction"] == "equality":
         required = budget.get("required_value")
-        if required is not None and candidate_value != required:
+        if type(candidate_value) is not type(required) or candidate_value != required:
             return f"{metric}: expected {required}, got {candidate_value}"
         return None
+    if type(candidate_value) not in (int, float) or not math.isfinite(candidate_value):
+        return f"{metric}: candidate value must be finite"
     if baseline_value is None:
         # No baseline — use absolute threshold.
         key = f"{tier}_max_absolute"
@@ -170,21 +174,62 @@ def _check_pareto(
 
 
 def _is_baseline_frozen(entry: dict[str, Any]) -> bool:
-    """Check if a baseline entry has been frozen with real measured values.
+    """Require all declared freeze fields, including measured metric values."""
+    def populated(value: Any) -> bool:
+        if isinstance(value, str):
+            value = value.strip().lower()
+            return bool(value) and not value.startswith("pending") and value not in {
+                "not_run", "unavailable",
+            }
+        if isinstance(value, dict):
+            return bool(value) and all(populated(v) for v in value.values())
+        if isinstance(value, list):
+            return bool(value) and all(populated(v) for v in value)
+        return isinstance(value, (int, float)) and math.isfinite(value)
 
-    A baseline is frozen when ``frozen_at`` is a non-null timestamp and the
-    required report IDs are non-null. A ``pending-pr4-freeze`` or null
-    ``frozen_at`` means the baseline is NOT frozen.
-    """
-    if entry.get("frozen_at") is None:
+    required = _load_json(BASELINES_PATH)["required_fields_for_freeze"]
+    if not all(populated(entry.get(field)) for field in required):
         return False
-    if entry.get("frozen_at") == "pending":
+    if any(
+        not isinstance(entry[field], str)
+        for field in required
+        if field not in {"artifact_size_bytes", "baseline_metrics", "benchmark_environment"}
+    ):
         return False
-    if entry.get("baseline_quality_report_id") in (None, "pending-pr4-freeze"):
+    for field in ("model_digest", "baseline_quality_report_digest", "baseline_runtime_report_digest"):
+        if not isinstance(entry[field], str) or not re.fullmatch(r"[0-9a-f]{64}", entry[field]):
+            return False
+    if type(entry["artifact_size_bytes"]) is not int or entry["artifact_size_bytes"] <= 0:
         return False
-    if entry.get("baseline_runtime_report_id") in (None, "pending-pr4-freeze"):
+    for field in ("frozen_at", "generation_time"):
+        try:
+            timestamp = datetime.datetime.fromisoformat(entry[field].replace("Z", "+00:00"))
+        except (ValueError, TypeError, AttributeError):
+            return False
+        if timestamp.tzinfo is None:
+            return False
+    metrics = entry["baseline_metrics"]
+    if not isinstance(metrics, dict):
         return False
+    for budget in _load_json(BUDGETS_PATH)["budgets"]:
+        value = metrics.get(budget["metric"])
+        if budget["direction"] == "equality":
+            if type(value) is not bool or value != budget["required_value"]:
+                return False
+        elif type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            return False
     return True
+
+
+def frozen_baseline_errors(artifact_ids: list[str]) -> list[str]:
+    """Stable publication requires one complete baseline per shipping model."""
+    entries = _load_json(BASELINES_PATH)["stable_baselines"]
+    errors = []
+    for artifact_id in artifact_ids:
+        matches = [entry for entry in entries if entry["artifact_id"] == artifact_id]
+        if len(matches) != 1 or not _is_baseline_frozen(matches[0]):
+            errors.append(f"baseline for {artifact_id} is missing, duplicate or NOT FROZEN")
+    return errors
 
 
 def enforce_gates(
@@ -222,6 +267,22 @@ def enforce_gates(
     else:
         baseline_metrics = baseline_entry.get("baseline_metrics", {})
 
+    from validate_quality_report import validate_report as validate_quality
+    from validate_runtime_quality_report import validate_report as validate_runtime
+
+    for label, report, validate in (
+        ("quality", quality_report, validate_quality),
+        ("runtime", runtime_report, validate_runtime),
+    ):
+        if report is not None:
+            errors.extend(f"{label}: {error}" for error in validate(report))
+            if tier == "release" and report.get("tier") != "release":
+                errors.append(f"{label}: release-tier report required")
+        elif tier == "release":
+            errors.append(f"{label}: release-tier report required")
+    if errors:
+        return errors
+
     # Aggregate candidate metrics.
     candidate: dict[str, Any] = {}
     if quality_report:
@@ -238,6 +299,8 @@ def enforce_gates(
     for budget in budgets:
         metric = budget["metric"]
         if metric not in candidate:
+            if tier == "release":
+                errors.append(f"{metric}: missing release metric")
             continue
         err = _check_budget(
             metric, candidate[metric], baseline_metrics.get(metric), budget, tier,

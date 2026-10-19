@@ -95,11 +95,133 @@ def test_is_baseline_frozen_rejects_pending() -> None:
 def test_is_baseline_frozen_accepts_real() -> None:
     """_is_baseline_frozen returns True when all required fields are real."""
     import enforce_quality_gates as g
-    assert g._is_baseline_frozen({
+    assert g._is_baseline_frozen(_frozen_baseline()) is True
+
+
+def _frozen_baseline() -> dict:
+    budgets = json.loads((ROOT / "quality" / "budgets.json").read_text())["budgets"]
+    return {
+        "artifact_id": "htdemucs.spectral.fp32.onnx",
+        "model": "htdemucs",
+        "model_digest": "a" * 64,
+        "runtime_id": "ort.test",
+        "target": "aarch64-apple-darwin",
+        "provider": "cpu",
         "frozen_at": "2026-07-21T00:00:00Z",
+        "generation_time": "2026-07-21T00:00:00Z",
         "baseline_quality_report_id": "real-quality-id",
         "baseline_runtime_report_id": "real-runtime-id",
-    }) is True
+        "baseline_quality_report_digest": "b" * 64,
+        "baseline_runtime_report_digest": "c" * 64,
+        "artifact_size_bytes": 1000,
+        "benchmark_environment": {"os": "test", "threads": 2},
+        "baseline_metrics": {
+            b["metric"]: b["required_value"] if b["direction"] == "equality" else 1.0
+            for b in budgets
+        },
+    }
+
+
+def test_freeze_requires_every_declared_field_and_metric() -> None:
+    import enforce_quality_gates as g
+    fields = json.loads(g.BASELINES_PATH.read_text())["required_fields_for_freeze"]
+    for field in fields:
+        entry = _frozen_baseline()
+        del entry[field]
+        assert not g._is_baseline_frozen(entry), field
+    for metric in _frozen_baseline()["baseline_metrics"]:
+        entry = _frozen_baseline()
+        del entry["baseline_metrics"][metric]
+        assert not g._is_baseline_frozen(entry), metric
+
+
+def test_freeze_rejects_placeholder_invalid_digest_and_nonfinite_metrics() -> None:
+    import enforce_quality_gates as g
+    for field, value in (
+        ("model_digest", "not-a-digest"), ("runtime_id", "not_run"),
+        ("provider", "unavailable"), ("baseline_quality_report_id", "pending-pr4-freeze"),
+        ("runtime_id", 1),
+        ("frozen_at", "2026-07-21"), ("generation_time", "not-a-date"),
+        ("artifact_size_bytes", 0), ("artifact_size_bytes", True),
+        ("benchmark_environment", {}), ("baseline_metrics", {"mse": float("nan")}),
+    ):
+        entry = _frozen_baseline()
+        entry[field] = value
+        assert not g._is_baseline_frozen(entry), (field, value)
+
+
+def _install_frozen_baseline(monkeypatch, tmp_path) -> None:
+    import enforce_quality_gates as g
+    doc = json.loads(g.BASELINES_PATH.read_text())
+    doc["stable_baselines"] = [_frozen_baseline()]
+    path = tmp_path / "baselines.json"
+    path.write_text(json.dumps(doc))
+    monkeypatch.setattr(g, "BASELINES_PATH", path)
+
+
+def test_release_requires_both_release_tier_reports(monkeypatch, tmp_path) -> None:
+    import enforce_quality_gates as g
+    _install_frozen_baseline(monkeypatch, tmp_path)
+    quality, runtime = _quality_report(), _runtime_report()
+    errors = g.enforce_gates("htdemucs.spectral.fp32.onnx", quality, runtime, "release")
+    assert any("quality: release-tier" in e for e in errors)
+    assert any("runtime: release-tier" in e for e in errors)
+    quality["tier"] = "release"
+    errors = g.enforce_gates("htdemucs.spectral.fp32.onnx", quality, None, "release")
+    assert any("runtime: release-tier" in e for e in errors)
+
+
+def test_stable_baselines_require_exactly_one_complete_entry(monkeypatch, tmp_path) -> None:
+    import enforce_quality_gates as g
+    _install_frozen_baseline(monkeypatch, tmp_path)
+    assert not g.frozen_baseline_errors(["htdemucs.spectral.fp32.onnx"])
+    assert g.frozen_baseline_errors(["unknown"])
+    doc = json.loads(g.BASELINES_PATH.read_text())
+    doc["stable_baselines"] *= 2
+    g.BASELINES_PATH.write_text(json.dumps(doc))
+    assert g.frozen_baseline_errors(["htdemucs.spectral.fp32.onnx"])
+
+
+def test_complete_release_reports_pass_and_missing_metric_fails(monkeypatch, tmp_path) -> None:
+    import enforce_quality_gates as g
+    _install_frozen_baseline(monkeypatch, tmp_path)
+    quality, runtime = _quality_report(), _runtime_report()
+    for report in (quality, runtime):
+        report["tier"] = "release"
+        report["results"][0]["tier"] = "release"
+    doc = json.loads(g.BASELINES_PATH.read_text())
+    doc["stable_baselines"][0]["baseline_metrics"] = {
+        **g._aggregate_quality(quality), **g._aggregate_runtime(runtime),
+    }
+    g.BASELINES_PATH.write_text(json.dumps(doc))
+    assert g.enforce_gates("htdemucs.spectral.fp32.onnx", quality, runtime, "release") == []
+    del quality["results"][0]["mae"]
+    errors = g.enforce_gates("htdemucs.spectral.fp32.onnx", quality, runtime, "release")
+    assert any("mae" in e for e in errors)
+
+
+def test_gate_validates_schema_and_does_not_mask_quality_shape_failure() -> None:
+    import enforce_quality_gates as g
+    errors = g.enforce_gates(
+        "htdemucs.spectral.fp32.onnx", _quality_report(shape_match=False),
+        _runtime_report(), "pr",
+    )
+    assert any("shape mismatch" in e for e in errors)
+    quality = _quality_report()
+    del quality["results"][0]["onnx_has_nan"]
+    errors = g.enforce_gates("htdemucs.spectral.fp32.onnx", quality, None, "pr")
+    assert any("schema:" in e for e in errors)
+
+
+def test_nonfinite_fixture_cannot_hide_behind_finite_worst_case() -> None:
+    import enforce_quality_gates as g
+    quality = _quality_report()
+    quality["results"] += _quality_report(mse=float("nan"))["results"]
+    runtime = _runtime_report()
+    runtime["results"] += _runtime_report(rtf=float("nan"))["results"]
+    errors = g.enforce_gates("htdemucs.spectral.fp32.onnx", quality, runtime, "pr")
+    assert any("quality:" in e and "finite" in e for e in errors)
+    assert any("runtime:" in e and "finite" in e for e in errors)
 
 
 def test_enforce_gates_rejects_nan() -> None:
@@ -110,7 +232,7 @@ def test_enforce_gates_rejects_nan() -> None:
         None,
         tier="pr",
     )
-    assert any("onnx_has_nan" in e for e in errors)
+    assert any("NaN" in e for e in errors)
 
 
 def test_enforce_gates_rejects_shape_mismatch() -> None:
@@ -121,7 +243,7 @@ def test_enforce_gates_rejects_shape_mismatch() -> None:
         None,
         tier="pr",
     )
-    assert any("shape_match" in e for e in errors)
+    assert any("shape mismatch" in e for e in errors)
 
 
 def test_enforce_gates_rejects_high_mse() -> None:
@@ -132,7 +254,7 @@ def test_enforce_gates_rejects_high_mse() -> None:
         None,
         tier="pr",
     )
-    assert any("mse" in e for e in errors)
+    assert any("mse" in e.lower() for e in errors)
 
 
 def test_enforce_gates_rejects_unknown_artifact() -> None:
