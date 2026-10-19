@@ -103,8 +103,8 @@ class TestOrtCandidate:
         gr.write_text(json.dumps({"overall": "passed"}) + "\n", encoding="utf-8")
         rt_dir = tmp_path / "runtimes"
         rt_dir.mkdir()
-        for i in range(5):
-            (rt_dir / f"onnxruntime-target-{i}.tar.gz").write_bytes(b"x")
+        for suffix in g.RUNTIME_SUFFIXES:
+            (rt_dir / f"onnxruntime-1.31.0-openkara-{suffix}").write_bytes(b"x")
         status = g.generate_gate_status(
             "ort", q, r, gr, rt_dir,
         )
@@ -135,7 +135,7 @@ class TestOrtCandidate:
         for i in range(3):  # only 3 of 5
             (rt_dir / f"onnxruntime-target-{i}.tar.gz").write_bytes(b"x")
         status = g.generate_gate_status(
-            "ort", q, r, gr, rt_dir, expected_targets=5,
+            "ort", q, r, gr, rt_dir,
         )
         assert status["gates"]["runtime_builds"]["status"] == "failed"
         assert status["overall_status"] == "failed"
@@ -145,8 +145,8 @@ class TestOrtCandidate:
         import generate_gate_status as g
         rt_dir = tmp_path / "runtimes"
         rt_dir.mkdir()
-        for i in range(5):
-            (rt_dir / f"onnxruntime-target-{i}.tar.gz").write_bytes(b"x")
+        for suffix in g.RUNTIME_SUFFIXES:
+            (rt_dir / f"onnxruntime-1.31.0-openkara-{suffix}").write_bytes(b"x")
         status = g.generate_gate_status(
             "ort", None, None, None, rt_dir,
         )
@@ -164,8 +164,8 @@ class TestOrtCandidate:
         gr.write_text(json.dumps({"overall": "passed"}) + "\n", encoding="utf-8")
         rt_dir = tmp_path / "runtimes"
         rt_dir.mkdir()
-        for i in range(5):
-            (rt_dir / f"onnxruntime-target-{i}.tar.gz").write_bytes(b"x")
+        for suffix in g.RUNTIME_SUFFIXES:
+            (rt_dir / f"onnxruntime-1.31.0-openkara-{suffix}").write_bytes(b"x")
         status = g.generate_gate_status(
             "ort", q, r, gr, rt_dir,
         )
@@ -249,8 +249,8 @@ class TestMarkdownRendering:
         gr.write_text(json.dumps({"overall": "passed"}) + "\n", encoding="utf-8")
         rt_dir = tmp_path / "runtimes"
         rt_dir.mkdir()
-        for i in range(5):
-            (rt_dir / f"onnxruntime-target-{i}.tar.gz").write_bytes(b"x")
+        for suffix in g.RUNTIME_SUFFIXES:
+            (rt_dir / f"onnxruntime-1.31.0-openkara-{suffix}").write_bytes(b"x")
         status = g.generate_gate_status("ort", q, r, gr, rt_dir)
         md = g.render_markdown(status)
         assert "PASSED" in md
@@ -320,3 +320,29 @@ class TestCLI:
             capture_output=True, text=True,
         )
         assert r.returncode != 0
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "unknown", "reduced-linux"])
+def test_runtime_exact_target_set(tmp_path, mutation):
+    import generate_gate_status as g
+    for suffix in g.RUNTIME_SUFFIXES:
+        (tmp_path / f"onnxruntime-1.31.0-openkara-{suffix}").write_bytes(b"archive")
+    assert g._classify_runtime_artifacts(tmp_path) == "passed"
+    if mutation == "missing":
+        (tmp_path / f"onnxruntime-1.31.0-openkara-{g.RUNTIME_SUFFIXES[0]}").unlink()
+    elif mutation == "duplicate":
+        (tmp_path / f"onnxruntime-1.32.0-openkara-{g.RUNTIME_SUFFIXES[0]}").write_bytes(b"duplicate")
+    elif mutation == "unknown":
+        (tmp_path / "onnxruntime-unknown.zip").write_bytes(b"unknown")
+    else:
+        source = tmp_path / "onnxruntime-1.31.0-openkara-x86_64-unknown-linux-gnu.tar.gz"
+        source.rename(source.with_name(source.name.replace(".tar.gz", "-reduced.tar.gz")))
+    assert g._classify_runtime_artifacts(tmp_path) == "failed"
+
+
+def test_unknown_baseline_verdict_cannot_pass(tmp_path):
+    import generate_gate_status as g
+    comparison = tmp_path / "comparison.json"
+    comparison.write_text('{"verdict":"unknown"}')
+    result = g.generate_gate_status("model", None, None, None, None, baseline_comparison=comparison)
+    assert result["gates"]["baseline_comparison"]["status"] == "failed"

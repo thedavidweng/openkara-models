@@ -93,6 +93,8 @@ def update_ort_lock(tag: str, commit_sha: str) -> dict[str, Any]:
         url = modules[section]["url"]
         if not url.startswith("https://github.com/") or not url.endswith(".git"):
             raise ValueError(f"unsupported submodule URL: {url}")
+        if path not in gitlinks:
+            raise ValueError("ORT .gitmodules and source gitlinks disagree")
         submodules[path] = {
             "repo": url.removeprefix("https://github.com/").removesuffix(".git"),
             "expected_sha": gitlinks[path],
@@ -103,7 +105,10 @@ def update_ort_lock(tag: str, commit_sha: str) -> dict[str, Any]:
     for line in source_text("cmake/deps.txt").splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        name, url, sha1 = line.strip().split(";")
+        fields = line.strip().split(";")
+        if len(fields) != 3:
+            raise ValueError(f"invalid dependency pin: {line!r}")
+        name, url, sha1 = fields
         if name in deps or not re.fullmatch(r"[0-9a-f]{40}", sha1):
             raise ValueError(f"invalid dependency pin: {name}")
         deps[name] = {"url": url, "sha1": sha1}
@@ -141,7 +146,7 @@ def generate_candidate_summary(changes: dict[str, Any]) -> str:
             "",
             "### Required coupled changes",
             "",
-            "- [ ] Rebuild all 5 runtime targets (ort-publish.yml)",
+            "- [ ] Rebuild all 6 runtime targets (ort-build.yml; explicit build_native opt-in)",
             "- [ ] Re-convert affected ONNX models (convert.yml)",
             "- [ ] Generate runtime catalog entries (generate_runtime_catalog_entries.py)",
             "- [ ] Run quality suite (run_quality_suite.py --tier release)",
@@ -151,18 +156,17 @@ def generate_candidate_summary(changes: dict[str, Any]) -> str:
             "",
             "### Artifacts",
             "",
-            "The candidate build workflow uploads:",
-            "- Runtime archives (5 targets)",
-            "- Converted ONNX models",
-            "- Quality report + runtime quality report",
-            "- Trend report",
+            "Preparation is lightweight by default. With explicit native-build opt-in it uploads:",
+            "- Runtime archives (6 targets)",
+            "- Native smoke diagnostics (a skip is not qualification)",
+            "- Explicit not-run records for missing candidate quality measurements",
             "- SBOM + provenance (per runtime archive)",
             "",
             "### Review checklist",
             "",
             "- [ ] Quality gates pass (no regressions beyond budget)",
             "- [ ] Pareto: candidate is not dominated by baseline",
-            "- [ ] Runtime archives load on all 5 targets",
+            "- [ ] Runtime archives load on all 6 targets",
             "- [ ] Catalog entries are correct",
             "- [ ] No stable pointer changed",
         ])

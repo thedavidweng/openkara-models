@@ -76,8 +76,8 @@ def _classify_report(report_path: Path, script_path: Path) -> str:
     status = report.get("status")
     if status == "passed":
         return "passed"
-    if status == "failed":
-        return "failed"
+    if status in {"failed", "not_run", "unavailable"}:
+        return status
     # Fall back to inspecting results: if any result entry exists and none
     # have errors, treat as passed; otherwise failed.
     results = report.get("results", [])
@@ -90,17 +90,26 @@ def _classify_report(report_path: Path, script_path: Path) -> str:
     return "not_run"
 
 
+# Exact deliverable shapes shared with ort-build.yml (Linux x64 ships full).
+RUNTIME_SUFFIXES = (
+    "aarch64-apple-darwin-reduced.tar.gz",
+    "x86_64-apple-darwin-reduced.tar.gz",
+    "x86_64-unknown-linux-gnu.tar.gz",
+    "aarch64-unknown-linux-gnu-reduced.tar.gz",
+    "x86_64-pc-windows-msvc-reduced.zip",
+    "x86_64-pc-windows-msvc-cpu-reduced.zip",
+)
+
+
 def _classify_runtime_artifacts(artifacts_dir: Path) -> str:
-    """Classify the runtime-builds gate for ORT candidates."""
-    if not artifacts_dir.exists():
+    """Require exactly one archive per target, not a count of arbitrary files."""
+    archives = [p for p in artifacts_dir.rglob("onnxruntime-*")
+                if p.is_file() and (p.name.endswith(".tar.gz") or p.suffix == ".zip")]
+    if not archives:
         return "not_run"
-    files = [f for f in artifacts_dir.rglob("*") if f.is_file()]
-    if not files:
-        return "not_run"
-    # ORT updates require all 5 targets. We check for at least one archive
-    # per known target suffix pattern. A stricter count check is done by
-    # the caller via --expected-targets.
-    return "passed"
+    matches = [[p for p in archives if p.name.endswith("-" + suffix)]
+               for suffix in RUNTIME_SUFFIXES]
+    return "passed" if len(archives) == len(matches) and all(len(m) == 1 for m in matches) else "failed"
 
 
 def _classify_gate_result(gate_result_path: Path, script_path: Path) -> str:
@@ -147,7 +156,6 @@ def generate_gate_status(
     runtime_artifacts_dir: Path | None,
     converted_model: Path | None = None,
     baseline_comparison: Path | None = None,
-    expected_targets: int = 5,
 ) -> dict[str, Any]:
     """Generate the gate status structure.
 
@@ -158,25 +166,10 @@ def generate_gate_status(
     # --- Runtime builds (ORT only) ---
     if candidate_type == "ort":
         rt_status = _classify_runtime_artifacts(runtime_artifacts_dir) if runtime_artifacts_dir else "not_run"
-        # If artifacts exist, verify target count.
-        if rt_status == "passed" and runtime_artifacts_dir:
-            archives = [f for f in runtime_artifacts_dir.rglob("*") if f.is_file() and "onnxruntime" in f.name]
-            if len(archives) < expected_targets:
-                rt_status = "failed"
-                gates["runtime_builds"] = {
-                    "status": rt_status,
-                    "detail": f"only {len(archives)} of {expected_targets} runtime targets produced",
-                }
-            else:
-                gates["runtime_builds"] = {
-                    "status": rt_status,
-                    "detail": f"{len(archives)} runtime targets produced",
-                }
-        else:
-            gates["runtime_builds"] = {
-                "status": rt_status,
-                "detail": "no runtime artifacts directory" if not runtime_artifacts_dir else "directory empty",
-            }
+        gates["runtime_builds"] = {
+            "status": rt_status,
+            "detail": "requires one archive for each of the six exact release targets",
+        }
 
     # --- Model conversion (model-weight only) ---
     if candidate_type == "model":
@@ -213,7 +206,7 @@ def generate_gate_status(
             try:
                 comp = json.loads(baseline_comparison.read_text(encoding="utf-8"))
                 gates["baseline_comparison"] = {
-                    "status": "passed" if comp.get("verdict") != "regressed" else "failed",
+                    "status": "passed" if comp.get("verdict") == "no_regression" else "failed",
                     "detail": comp.get("verdict", "unknown"),
                 }
             except (OSError, json.JSONDecodeError):
@@ -299,8 +292,6 @@ def main() -> int:
                         help="Path to the converted ONNX model (model-weight candidates).")
     parser.add_argument("--baseline-comparison", type=Path, default=None,
                         help="Path to the baseline comparison JSON (model-weight candidates).")
-    parser.add_argument("--expected-targets", type=int, default=5,
-                        help="Expected number of runtime targets (ORT candidates).")
     parser.add_argument("--output", type=Path, default=Path("gate-status.json"),
                         help="Output JSON status path.")
     parser.add_argument("--markdown", type=Path, default=None,
@@ -315,7 +306,6 @@ def main() -> int:
         runtime_artifacts_dir=args.runtime_artifacts_dir,
         converted_model=args.converted_model,
         baseline_comparison=args.baseline_comparison,
-        expected_targets=args.expected_targets,
     )
 
     args.output.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
