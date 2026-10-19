@@ -259,3 +259,12 @@ releases and back-fills existing ones:
 
 A release that omits a completion field is still a valid v1 manifest; a release
 that omits an identity/integrity field is rejected.
+
+### Native qualification vs diagnostics
+
+`validation_failures` rejects every skipped provider, including DirectML/CoreML.
+`--allow-skip-no-gpu` only records the observed DirectML C0262002 invalid display
+adapter diagnostic; it neither proves hardware absence nor qualifies a release.
+Generic DML, missing kernel, driver and CoreML initialization errors remain failures.
+Native ORT builds run only through explicit `ORT source build` workflow dispatch;
+PR/push still run the lightweight lock, API, packaging and smoke unit checks.

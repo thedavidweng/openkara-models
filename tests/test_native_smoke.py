@@ -107,9 +107,8 @@ def test_strict_smoke_gate_rejects_zero_provider_nodes() -> None:
     assert any("provider_node_count" in failure for failure in failures)
 
 
-def test_strict_smoke_gate_accepts_skipped_for_hardware_provider() -> None:
-    """A 'skipped' session_creation is accepted for hardware-dependent
-    providers (directml, coreml) when the hardware is absent."""
+def test_strict_smoke_gate_rejects_skipped_for_hardware_provider() -> None:
+    """Hardware absence cannot qualify a release."""
     for provider in ("directml", "coreml"):
         report = {
             "requested_provider": provider,
@@ -123,7 +122,7 @@ def test_strict_smoke_gate_accepts_skipped_for_hardware_provider() -> None:
             "provider_node_count": None,
             "total_node_count": None,
         }
-        assert run_native_smoke.validation_failures(report, provider) == []
+        assert run_native_smoke.validation_failures(report, provider)
 
 
 def test_strict_smoke_gate_rejects_skipped_for_cpu() -> None:
@@ -260,3 +259,11 @@ def test_benchmark_catalog_resolves_model_artifact_id(tmp_path: Path) -> None:
     # Should fail at download (fake URL), not at model resolution.
     assert r.returncode != 0
     assert "not found in catalog" not in r.stderr
+
+
+def test_hardware_skip_only_matches_exact_directml_no_adapter_hresult():
+    assert run_native_smoke.hardware_unavailable("directml", "C0262002 Specified display adapter handle is invalid.")
+    for error in ("DML failed", "DmlExecutionProvider invalid graph", "not available",
+                  "No suitable kernel", "display adapter driver failure"):
+        assert not run_native_smoke.hardware_unavailable("directml", error)
+    assert not run_native_smoke.hardware_unavailable("coreml", "C0262002")
