@@ -24,12 +24,14 @@ def case(tmp_path, monkeypatch):
     identity.update(model_digest="a" * 64, model_size=100, runtime_digest="b" * 64, runtime_size=200)
     performance["runtime_archive"].update(sha256="b" * 64, size=200)
     corpus = {"schema_version": "openkara.corpus-manifest/v1", "fixtures": [{"fixture_id": "real-test", "kind": "real-audio", "tier": "release",
-                           "category": "male-vocals", "license": "CC0-1.0", "channels": 2, "sample_rate": 44100, "frames": 343980, "generator": {"type": "fetch", "sha256": "c" * 64}}]}
+                           "category": "male-vocals", "license": "CC0-1.0", "channels": 2, "sample_rate": 44100, "frames": 343980, "generator": {"type": "fetch", "sha256": "c" * 64, "size": 1000, "url": "https://example.test/references.npz"}, "reference_stems": {"format": "npz-float32-v1", "order": ["drums", "bass", "other", "vocals"]}}]}
     (tmp_path / "quality").mkdir()
     (tmp_path / "quality/corpus-manifest.json").write_text(json.dumps(corpus))
     monkeypatch.setattr(evidence, "ROOT", tmp_path)
     raw_corpus = (tmp_path / "quality/corpus-manifest.json").read_bytes()
     separation = {m: 1.0 for m in evidence.SEPARATION_DIRECTIONS}
+    separation_row = separation | {"fixture_id": "real-test", "reference_bundle": {"sha256": "c" * 64, "size": 1000}}
+    quality["separation"] = [separation_row]
     baseline = _frozen_baseline()
     baseline.update(artifact_id="default", target="target", provider="cpu")
     baseline["baseline_metrics"] = gates._aggregate_quality(quality) | gates._aggregate_runtime(performance) | separation
@@ -60,7 +62,7 @@ def case(tmp_path, monkeypatch):
              "runtime_archive": {"sha256": "b" * 64, "size": 200}}
     payloads = {
         "quality": {"report": quality, "corpus_sha256": hashlib.sha256(raw_corpus).hexdigest(),
-                    "separation": [separation | {"fixture_id": "real-test"}], **baseline_refs},
+                    "separation": [separation_row], **baseline_refs},
         "performance": {"report": performance, "measurement_backend": "native-c-api", "benchmark_environment": baseline["benchmark_environment"]},
         "compatibility": {"native_smoke": native, "status": "passed", "quality_report_id": "quality", "performance_report_id": "performance"},
     }

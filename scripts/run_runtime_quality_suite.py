@@ -76,8 +76,10 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 def _load_corpus(tier: str | None) -> list[dict[str, Any]]:
     manifest = json.loads(CORPUS_MANIFEST.read_text(encoding="utf-8"))
+    import jsonschema
+    jsonschema.validate(manifest, json.loads((ROOT / "quality/corpus-manifest-v1.json").read_text()))
     fixtures = manifest["fixtures"]
-    if tier:
+    if tier and tier != "release":
         fixtures = [f for f in fixtures if f["tier"] == tier]
     return fixtures
 

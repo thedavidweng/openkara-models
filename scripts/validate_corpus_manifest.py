@@ -7,7 +7,7 @@ Checks:
   - Every synthetic fixture's generator function exists in synthetic_fixtures.py.
   - Every fixture has a unique fixture_id.
   - PR-tier fixtures are synthetic (real-audio fixtures are release-tier only
-    until the fetch infrastructure is added in a later PR).
+    and must be explicitly provisioned as hash-bound reference bundles).
   - Every fixture's expected_output_shape is consistent with its channels/frames
     for the Demucs 4-stem output format [1, 4, channels, frames].
 

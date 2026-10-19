@@ -53,8 +53,10 @@ MSE_RELEASE_MAX = 1e-5
 
 def _load_corpus(tier: str | None) -> list[dict[str, Any]]:
     manifest = json.loads(CORPUS_MANIFEST.read_text(encoding="utf-8"))
+    import jsonschema
+    jsonschema.validate(manifest, json.loads((ROOT / "quality/corpus-manifest-v1.json").read_text()))
     fixtures = manifest["fixtures"]
-    if tier:
+    if tier and tier != "release":
         fixtures = [f for f in fixtures if f["tier"] == tier]
     return fixtures
 
@@ -220,14 +222,17 @@ def _correctness_metrics(pytorch_out: np.ndarray, onnx_out: np.ndarray,
     return metrics
 
 
-def run_fixture(fixture: dict[str, Any], model_name: str, onnx_path: str) -> dict[str, Any]:
+def run_fixture(fixture: dict[str, Any], model_name: str, onnx_path: str,
+                corpus_dir: Path | None = None) -> dict[str, Any]:
     """Run one fixture through PyTorch + ONNX and return metrics."""
-    import synthetic_fixtures as sf
-    inp = sf.generate_fixture(fixture)
+    from corpus_audio import load_fixture, separation_result
+    inp, reference_stems = load_fixture(fixture, corpus_dir)
     print(f"  {fixture['fixture_id']}: {inp.shape} ...", end=" ", flush=True)
     pytorch_out = _compute_pytorch_reference(model_name, inp)
     onnx_out = _compute_onnx_output(onnx_path, inp)
     metrics = _correctness_metrics(pytorch_out, onnx_out, fixture.get("expected_output_shape"))
+    if reference_stems is not None:
+        metrics["separation"] = separation_result(fixture, reference_stems, onnx_out, SEGMENT_FRAMES)
     metrics["fixture_id"] = fixture["fixture_id"]
     metrics["category"] = fixture["category"]
     metrics["tier"] = fixture["tier"]
@@ -245,6 +250,7 @@ def main() -> int:
                         help="PyTorch model name (default: htdemucs).")
     parser.add_argument("--onnx", required=True, type=Path,
                         help="ONNX model path.")
+    parser.add_argument("--corpus-dir", type=Path, help="Explicitly provisioned <sha256>.npz reference bundles (no downloads).")
     parser.add_argument("--report", type=Path, default=Path("quality-report.json"),
                         help="Output report JSON path.")
     args = parser.parse_args()
@@ -261,8 +267,11 @@ def main() -> int:
     print(f"Running {len(fixtures)} {args.tier}-tier fixture(s) through {args.model} + {args.onnx.name}...")
     mse_threshold = MSE_PR_MAX if args.tier == "pr" else MSE_RELEASE_MAX
     results: list[dict[str, Any]] = []
+    separation = []
     for fixture in fixtures:
-        result = run_fixture(fixture, args.model, str(args.onnx))
+        result = run_fixture(fixture, args.model, str(args.onnx), args.corpus_dir)
+        if "separation" in result:
+            separation.append(result.pop("separation"))
         # A fixture may carry its own measured MSE budget (e.g. the impulse
         # fixture, whose budget is calibrated against the shipped stable
         # artifact — see the manifest's mse_budget_note). The effective
@@ -278,8 +287,9 @@ def main() -> int:
         "tier": args.tier,
         "mse_threshold": mse_threshold,
         "results": results,
+        "separation": separation,
     }
-    args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    args.report.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
     print(f"\nreport: {args.report}")
 
     # Gate: fail on NaN/Inf, shape mismatch (onnx vs pytorch or vs expected),
