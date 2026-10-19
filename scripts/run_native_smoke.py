@@ -33,11 +33,10 @@ Usage::
 The runtime archive is extracted with archive_utils.safe_extract. The harness
 binary is built into ``ort/smoke/build/`` via CMake.
 
-For hardware-dependent providers (directml, coreml), pass
+For DirectML diagnostics, pass
 ``--allow-skip-no-gpu`` to gracefully skip when the provider cannot initialize
 due to missing hardware (e.g. DirectML on a GPU-less CI runner). The report
-will contain ``session_creation: "skipped"`` and the script exits 0. CPU is
-never skippable.
+will contain ``session_creation: "skipped"`` and the script exits 0. This is not release qualification; all other errors fail.
 """
 
 from __future__ import annotations
@@ -92,7 +91,7 @@ def _build_harness(ort_source: Path, build_dir: Path) -> Path:
     if r.returncode != 0:
         raise RuntimeError(f"cmake configure failed:\n{r.stderr}")
     build = ["cmake", "--build", str(build_dir), "--config", "Release",
-             "--parallel", str(os.cpu_count() or 4)]
+             "--parallel", str(min(2, os.cpu_count() or 1))]
     r = subprocess.run(build, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"cmake build failed:\n{r.stderr}")
@@ -170,6 +169,12 @@ def run_smoke(
 HARDWARE_PROVIDERS = {"directml", "coreml"}
 
 
+def hardware_unavailable(provider: str, error: str) -> bool:
+    """Recognize the observed invalid display-adapter diagnostic, not all DML errors."""
+    return (provider == "directml" and "c0262002" in error.lower()
+            and "specified display adapter handle is invalid" in error.lower())
+
+
 def validation_failures(report: dict[str, Any], requested_provider: str,
                         expected_output_shape: str = SPECTRAL_OUTPUT_SHAPE) -> list[str]:
     """Return strict native-smoke gate failures.
@@ -181,10 +186,7 @@ def validation_failures(report: dict[str, Any], requested_provider: str,
     ``expected_output_shape`` is the semicolon-joined per-output shape string
     for the spectral-core model (``spectral_out`` then ``time_out``).
 
-    For hardware-dependent providers (directml, coreml), a ``"skipped"``
-    session_creation status is accepted when the hardware is absent — the
-    report is still uploaded for traceability, but the gate does not fail.
-    CPU is never skippable.
+    Hardware skips are diagnostic only and never qualify a release.
     """
     failures: list[str] = []
     if report.get("requested_provider") != requested_provider:
@@ -193,14 +195,6 @@ def validation_failures(report: dict[str, Any], requested_provider: str,
             f"report={report.get('requested_provider')!r}, expected={requested_provider!r}"
         )
     session_status = report.get("session_creation")
-    is_skipped = session_status == "skipped"
-    can_skip = requested_provider in HARDWARE_PROVIDERS
-
-    if is_skipped and can_skip:
-        # Hardware-dependent provider was skipped due to missing hardware.
-        # Accept this as a pass — the remaining fields are informational.
-        return failures
-
     if report.get("harness_exit_code") != 0:
         failures.append(f"harness_exit_code={report.get('harness_exit_code')}")
     if session_status != "ok":
@@ -250,10 +244,10 @@ def main() -> int:
     parser.add_argument("--report", required=True, type=Path,
                         help="Output JSON report path.")
     parser.add_argument("--allow-skip-no-gpu", action="store_true",
-                        help="For hardware-dependent providers (directml, coreml), "
+                        help="For DirectML diagnostics, "
                              "gracefully skip when the provider cannot initialize due "
                              "to missing hardware. Emits a 'skipped' report and exits 0. "
-                             "CPU is never skippable.")
+                             "Never qualifies a release.")
     args = parser.parse_args()
 
     if not args.runtime.is_file():
@@ -332,19 +326,13 @@ def main() -> int:
             and report.get("session_creation") == "failed"
             and report.get("session_creation_error")):
         err = report["session_creation_error"]
-        # Match known "no GPU" error patterns from DirectML and CoreML.
-        no_gpu_patterns = [
-            "display adapter",          # DirectML C0262002
-            "DmlExecutionProvider",     # DML factory error
-            "DML",                      # generic DML init failure
-            "No suitable",              # CoreML: no Neural Engine/GPU
-            "not available",            # generic hardware unavailable
-        ]
-        if any(p.lower() in err.lower() for p in no_gpu_patterns):
+        if hardware_unavailable(args.provider, err):
             report["session_creation"] = "skipped"
             report["inference"] = "skipped"
-            report["skip_reason"] = "hardware not available on this runner"
+            report["skip_reason"] = "DirectML display adapter handle invalid (C0262002); hardware absence not proven"
 
+    failures = validation_failures(report, args.provider, expect_output_shape)
+    report["release_qualified"] = not failures
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(f"report: {args.report}")
@@ -353,7 +341,9 @@ def main() -> int:
     print(f"  finite_output: {report['finite_output']}")
     print(f"  provider_assignment: {report['provider_assignment']}")
 
-    failures = validation_failures(report, args.provider, expect_output_shape)
+    if report.get("session_creation") == "skipped":
+        print("SKIP: diagnostic only; NOT release qualified")
+        return 0
     if failures:
         print("FAIL: native smoke harness detected errors", file=sys.stderr)
         if report.get("session_creation_error"):

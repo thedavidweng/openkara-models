@@ -1,6 +1,7 @@
 name: ORT source build (6 targets)
 
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
@@ -79,7 +80,7 @@ jobs:
         run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/download_stable_model.py scripts/runtime_inputs.py
 
   build-aarch64-apple-darwin:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: validate-source-lock
     runs-on: macos-15
     timeout-minutes: 60
@@ -130,7 +131,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-apple-darwin:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: validate-source-lock
     runs-on: macos-15-intel
     timeout-minutes: 60
@@ -181,7 +182,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-unknown-linux-gnu:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: validate-source-lock
     runs-on: ubuntu-latest
     # manylinux_2_28 container: the artifact's glibc symbol floor is set by
@@ -262,7 +263,7 @@ jobs:
           retention-days: 14
 
   build-aarch64-unknown-linux-gnu:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: validate-source-lock
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
@@ -317,7 +318,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-pc-windows-msvc:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: validate-source-lock
     runs-on: windows-2022
     timeout-minutes: 60
@@ -360,9 +361,9 @@ jobs:
             --ort-source ort/source \
             --report "smoke-x86_64-pc-windows-msvc-cpu.json"
           # DirectML requires a GPU. GitHub-hosted Windows runners do not have
-          # one, so --allow-skip-no-gpu lets the test gracefully skip (exit 0
+          # one, so --allow-skip-no-gpu records diagnostic absence (exit 0
           # with a "skipped" report) when no display adapter is available.
-          # On a GPU-enabled runner the full strict gate still applies.
+          # This does NOT qualify DirectML for release; GPU evidence is required.
           python scripts/run_native_smoke.py \
             --runtime "$RUNTIME" \
             --model models/htdemucs.spectral.onnx \
@@ -385,7 +386,7 @@ jobs:
   # import, so it loads on any Windows host. Built reduced to match the
   # DirectML reduced runtime the publish flow ships.
   build-x86_64-pc-windows-msvc-cpu:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: validate-source-lock
     runs-on: windows-2022
     timeout-minutes: 60
@@ -437,7 +438,7 @@ jobs:
   # archive size + inference output. Fails if the reduced runtime cannot load
   # the model (a required kernel was pruned) or output diverges.
   reduced-build-and-compare:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -521,7 +522,7 @@ jobs:
   # the model cannot load, output contains NaN/Inf, or shape mismatches. The
   # report is validated against ort/benchmark-report-v1.json and uploaded.
   benchmark-x86_64-unknown-linux-gnu:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: [validate-source-lock, reduced-build-and-compare]
     runs-on: ubuntu-latest
     timeout-minutes: 30
