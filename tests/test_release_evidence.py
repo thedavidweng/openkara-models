@@ -135,8 +135,47 @@ def test_baseline_bytes_and_identity_cannot_be_substituted(case, field):
     ref = q["baseline_quality_report"]
     old = json.loads(blobs[ref["url"]])
     old["identity"][field] = "wrong"
-    blobs[ref["url"]] = json.dumps(old).encode()
-    assert run()
+    raw = json.dumps(old).encode()
+    blobs[ref["url"]] = raw
+    ref.update(sha256=hashlib.sha256(raw).hexdigest(), size=len(raw))
+    baseline = json.loads(gates.BASELINES_PATH.read_text())
+    baseline["stable_baselines"][0]["baseline_quality_report_digest"] = ref["sha256"]
+    gates.BASELINES_PATH.write_text(json.dumps(baseline))
+    assert any("baseline model/runtime/target/provider mismatch" in e for e in run())
+
+
+@pytest.mark.parametrize("field,message", [
+    ("corpus_sha256", "baseline corpus differs"),
+    ("benchmark_environment", "baseline report environment mismatch"),
+    ("metrics", "baseline report metrics differ"),
+])
+def test_baseline_measurements_are_bound(case, field, message):
+    _, docs, blobs, run = case
+    ref = docs["quality"]["edges"][0]["baseline_quality_report"]
+    old = json.loads(blobs[ref["url"]])
+    old[field] = "wrong"
+    raw = json.dumps(old).encode()
+    blobs[ref["url"]] = raw
+    ref.update(sha256=hashlib.sha256(raw).hexdigest(), size=len(raw))
+    baseline = json.loads(gates.BASELINES_PATH.read_text())
+    baseline["stable_baselines"][0]["baseline_quality_report_digest"] = ref["sha256"]
+    gates.BASELINES_PATH.write_text(json.dumps(baseline))
+    assert any(message in e for e in run())
+
+
+def test_default_remeasurement_need_not_beat_itself(case):
+    manifest, docs, _, run = case
+    baseline = json.loads(gates.BASELINES_PATH.read_text())
+    baseline["default_artifact_id"] = "model"
+    baseline["stable_baselines"][0]["artifact_id"] = "model"
+    gates.BASELINES_PATH.write_text(json.dumps(baseline))
+    docs["performance"]["edges"][0]["report"]["runtime_archive"]["installed_size"] *= 1.1
+    assert run() == []
+
+
+def test_missing_no_fallback_declaration_fails(case):
+    del case[1]["compatibility"]["edges"][0]["native_smoke"]["used_fallback"]
+    assert any("strict native provider qualification failed" in e for e in case[3]())
 
 
 def test_rejects_environment_mismatch(case):

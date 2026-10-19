@@ -213,7 +213,7 @@ def qualify_release(manifest: dict, download: Callable[[str], bytes]) -> list[st
                 pareto = gates._check_pareto(candidate, baseline["baseline_metrics"], budgets)
                 if pareto:
                     problems.append(pareto)
-                if not any(candidate[m] < baseline["baseline_metrics"][m] for m in
+                if key[0] != default_id and not any(candidate[m] < baseline["baseline_metrics"][m] for m in
                            ("installed_size", "cold_load_s", "warm_median_s", "peak_rss_kb")) and not any(
                     (candidate[m] > baseline["baseline_metrics"][m] if d == "higher-is-better"
                      else candidate[m] < baseline["baseline_metrics"][m]) for m, d in SEPARATION_DIRECTIONS.items()

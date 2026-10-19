@@ -316,7 +316,7 @@ def main() -> int:
         "cpu_node_count": result.get("cpu_node_count"),
         "provider_node_count": result.get("provider_node_count"),
         "fallback_node_count": result.get("fallback_node_count"),
-        "used_fallback": result.get("used_fallback", False),
+        "used_fallback": result.get("used_fallback"),
         "harness_exit_code": result.get("harness_exit_code"),
     }
 

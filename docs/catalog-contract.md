@@ -190,12 +190,12 @@ manifest; channel pointers and release manifests are the only contract surfaces.
 publishes a catalog release as an immutable GitHub release and advances the
 stable pointer atomically:
 
-Stable execution requires one complete measured baseline per catalog model.
-Missing, duplicate, placeholder, incomplete or non-finite baseline entries
-stop execution before network writes. Candidate publication remains available
-for collecting evidence. This prerequisite does not yet bind immutable
-candidate reports to every model/runtime/provider compatibility edge; that
-Stable evidence integration is enforced by `validate_release_evidence.py`; measured reports remain tracked in #21.
+Stable execution requires qualified, immutable per-edge evidence and one complete
+frozen current-default baseline per target/provider (see the envelope contract
+below). Missing, duplicate, placeholder, incomplete or non-finite entries stop
+execution before network writes. Candidate publication remains available for
+collecting evidence. `validate_release_evidence.py` enforces this prerequisite;
+measured reports remain tracked in #21.
 
 1. **Dry-run (default):** verifies the manifest validates, supply-chain records
    match local files, every referenced artifact asset URL resolves to an

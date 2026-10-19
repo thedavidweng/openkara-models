@@ -242,6 +242,7 @@ def frozen_baseline_errors(artifact_ids: list[str]) -> list[str]:
 def enforce_gates(
     artifact_id: str, quality_report: dict[str, Any] | None,
     runtime_report: dict[str, Any] | None, tier: str,
+    *, target: str | None = None, provider: str | None = None,
 ) -> list[str]:
     errors: list[str] = []
     baselines = _load_json(BASELINES_PATH)
@@ -249,7 +250,9 @@ def enforce_gates(
     budgets = budgets_doc["budgets"]
 
     # Never pick an arbitrary target/provider baseline when several exist.
-    matches = [b for b in baselines["stable_baselines"] if b["artifact_id"] == artifact_id]
+    matches = [b for b in baselines["stable_baselines"] if b["artifact_id"] == artifact_id
+               and (target is None or b["target"] == target)
+               and (provider is None or b["provider"] == provider)]
     if len(matches) != 1:
         errors.append(f"no baseline found or ambiguous baseline for artifact_id={artifact_id}; use the per-edge publisher qualification")
         return errors
@@ -328,6 +331,8 @@ def main() -> int:
     parser.add_argument("--quality-report", type=Path, default=None)
     parser.add_argument("--runtime-report", type=Path, default=None)
     parser.add_argument("--tier", choices=["pr", "release"], default="release")
+    parser.add_argument("--target")
+    parser.add_argument("--provider")
     args = parser.parse_args()
 
     quality = _load_json(args.quality_report) if args.quality_report and args.quality_report.is_file() else None
@@ -337,7 +342,8 @@ def main() -> int:
         print("ERROR: provide at least one of --quality-report or --runtime-report", file=sys.stderr)
         return 1
 
-    errors = enforce_gates(args.artifact_id, quality, runtime, args.tier)
+    errors = enforce_gates(args.artifact_id, quality, runtime, args.tier,
+                           target=args.target, provider=args.provider)
     if errors:
         print(f"FAIL: {len(errors)} gate error(s) for {args.artifact_id}:", file=sys.stderr)
         for e in errors:
