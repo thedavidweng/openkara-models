@@ -93,3 +93,10 @@ The health monitor maintains a single canonical issue titled
 in place, creates one only if none exists, and closes it when healthy.
 A newer stable ORT remains stale and actionable until the lock is upgraded;
 there is no update hold or alert suppression.
+
+ORT candidates resolve the tag to the requested commit and refresh every
+submodule gitlink and `cmake/deps.txt` archive pin from that exact commit before
+writing the lock. A mismatched tag, incomplete tree, or invalid dependency list
+fails without changing the lock. This preparation is not native compatibility
+or release evidence: supported C API validation, all six runtime builds,
+strict provider reports, and quality gates must still pass before promotion.

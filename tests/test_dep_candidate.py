@@ -6,6 +6,9 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -108,3 +111,56 @@ def test_update_model_lock_unknown_model(tmp_path) -> None:
             g.update_model_lock("nonexistent", "a" * 40)
     finally:
         g.MODEL_LOCK_PATH = original
+
+
+def test_update_ort_lock_refreshes_coupled_pins(tmp_path, monkeypatch) -> None:
+    import base64
+    import generate_dep_candidate as g
+    import detect_ort_release as d
+
+    work = tmp_path / "source-lock.json"
+    work.write_bytes(g.LOCK_PATH.read_bytes())
+    before = json.loads(work.read_text())
+    monkeypatch.setattr(g, "LOCK_PATH", work)
+    commit = "a" * 40
+    texts = {
+        ".gitmodules": '[submodule "new"]\npath = cmake/external/new\nurl = https://github.com/owner/new.git\n',
+        "cmake/deps.txt": "#Name;Url;SHA1\nnew;https://example.com/new.zip;" + "b" * 40,
+    }
+    tree = {"truncated": False, "tree": [
+        {"path": "cmake/external/new", "mode": "160000", "sha": "c" * 40},
+    ]}
+
+    def github_get(url, token):
+        assert commit in url
+        if "/git/trees/" in url:
+            return tree
+        path = url.split("/contents/")[1].split("?")[0]
+        return {"content": base64.b64encode(texts[path].encode()).decode()}
+
+    with mock.patch.object(d, "_tag_commit_sha", return_value=commit), \
+         mock.patch.object(d, "_github_get", side_effect=github_get):
+        changes = g.update_ort_lock("v1.31.0", commit)
+    updated = json.loads(work.read_text())
+    assert updated["submodules"] == {
+        "cmake/external/new": {"repo": "owner/new", "expected_sha": "c" * 40},
+    }
+    assert updated["deps"]["entries"] == {
+        "new": {"url": "https://example.com/new.zip", "sha1": "b" * 40},
+    }
+    assert updated["targets"] == before["targets"]
+    assert changes["old_tag"] == before["upstream"]["tag"]
+    assert changes["new_commit"] == commit
+
+    saved = work.read_bytes()
+    for malformed in ("new;url;bad", "", "new;url;" + "b" * 40 + "\nnew;url;" + "b" * 40):
+        texts["cmake/deps.txt"] = malformed
+        with mock.patch.object(d, "_tag_commit_sha", return_value=commit), \
+             mock.patch.object(d, "_github_get", side_effect=github_get):
+            with pytest.raises(ValueError):
+                g.update_ort_lock("v1.31.0", commit)
+        assert work.read_bytes() == saved
+    with mock.patch.object(d, "_tag_commit_sha", return_value="d" * 40):
+        with pytest.raises(ValueError, match="tag"):
+            g.update_ort_lock("v1.31.0", commit)
+    assert work.read_bytes() == saved

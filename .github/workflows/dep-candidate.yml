@@ -65,6 +65,7 @@ jobs:
           echo "Branch: $BRANCH"
       - name: Prepare lock update
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORT_TAG: ${{ inputs.ort_tag }}
           ORT_COMMIT: ${{ inputs.ort_commit }}
           MODEL: ${{ inputs.model }}

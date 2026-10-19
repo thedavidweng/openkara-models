@@ -26,7 +26,11 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import base64
+import configparser
 import json
+import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -55,13 +59,66 @@ def update_model_lock(model: str, commit_sha: str) -> dict[str, Any]:
 
 
 def update_ort_lock(tag: str, commit_sha: str) -> dict[str, Any]:
-    """Update the ORT source lock with a new tag + commit SHA."""
+    """Refresh coupled source pins before writing a candidate lock."""
+    from detect_ort_release import _github_get, _tag_commit_sha
+    from validate_source_lock import validate_lock
+
     lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    repo = lock["upstream"]["repo"]
+    token = os.environ.get("GITHUB_TOKEN")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
+        raise ValueError("ORT commit must be a full lowercase SHA")
+    if _tag_commit_sha(repo, tag, token) != commit_sha:
+        raise ValueError("ORT tag does not resolve to the requested commit")
+
+    def source_text(path: str) -> str:
+        data = _github_get(
+            f"https://api.github.com/repos/{repo}/contents/{path}?ref={commit_sha}",
+            token,
+        )
+        return base64.b64decode(data["content"]).decode("utf-8")
+
+    tree = _github_get(
+        f"https://api.github.com/repos/{repo}/git/trees/{commit_sha}?recursive=1",
+        token,
+    )
+    if tree["truncated"]:
+        raise ValueError("ORT source tree is truncated")
+    gitlinks = {e["path"]: e["sha"] for e in tree["tree"] if e["mode"] == "160000"}
+    modules = configparser.ConfigParser()
+    modules.read_string(source_text(".gitmodules"))
+    submodules = {}
+    for section in modules.sections():
+        path = modules[section]["path"]
+        url = modules[section]["url"]
+        if not url.startswith("https://github.com/") or not url.endswith(".git"):
+            raise ValueError(f"unsupported submodule URL: {url}")
+        submodules[path] = {
+            "repo": url.removeprefix("https://github.com/").removesuffix(".git"),
+            "expected_sha": gitlinks[path],
+        }
+    if set(submodules) != set(gitlinks):
+        raise ValueError("ORT .gitmodules and source gitlinks disagree")
+    deps = {}
+    for line in source_text("cmake/deps.txt").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        name, url, sha1 = line.strip().split(";")
+        if name in deps or not re.fullmatch(r"[0-9a-f]{40}", sha1):
+            raise ValueError(f"invalid dependency pin: {name}")
+        deps[name] = {"url": url, "sha1": sha1}
+    if not deps:
+        raise ValueError("ORT dependency list is empty")
     old_tag = lock["upstream"]["tag"]
     old_commit = lock["upstream"]["commit_sha"]
     lock["upstream"]["tag"] = tag
     lock["upstream"]["commit_sha"] = commit_sha
     lock["upstream"]["release_url"] = f"https://github.com/microsoft/onnxruntime/releases/tag/{tag}"
+    lock["submodules"] = submodules
+    lock["deps"]["entries"] = deps
+    errors = validate_lock(lock)
+    if errors:
+        raise ValueError("; ".join(errors))
     LOCK_PATH.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {
         "type": "ort",
