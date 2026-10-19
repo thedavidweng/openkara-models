@@ -202,8 +202,10 @@ def test_missing_evidence_stops_before_download():
 def test_producer_report_must_match_native_edge(case, kind, fault):
     _, docs, _, run = case
     raw = docs[kind]['edges'][0]['report']
-    if fault == 'backend': raw['measurement_backend'] = 'python-wheel'
+    if fault == 'backend': raw['measurement_backend'] = 'python-wheel-conversion-only'
     elif fault == 'archive': raw['runtime_archive']['size'] += 1
     elif fault == 'model': raw['model_digest']['sha256'] = 'f' * 64
     else: raw[fault] = 'other'
-    assert run()
+    expected = {'archive': 'producer runtime archive mismatch', 'model': 'producer model bytes mismatch'}.get(
+        fault, 'native producer backend/target/provider identity mismatch')
+    assert any(expected in error for error in run())

@@ -42,6 +42,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -106,7 +108,6 @@ def inference_comparison(
     target: str | None = None, provider: str = "cpu", source: Path | None = None,
 ) -> dict[str, Any]:
     """Measure the actual two archives and compare every raw output tensor."""
-    import math
     import numpy as np
     from native_quality import NativeRuntime
     from run_runtime_benchmarks import _detect_target
@@ -160,6 +161,8 @@ def main() -> int:
     parser.add_argument("--ort-source", type=Path, help="Optional source header cross-check.")
     args = parser.parse_args()
 
+    if args.frames != 343980 or args.warmup < 0 or args.iters < 1 or not math.isfinite(args.tolerance) or args.tolerance < 0:
+        parser.error("requires frames=343980, warmup >= 0, iters >= 1 and finite tolerance >= 0")
     if not args.full.is_file() or not args.reduced.is_file():
         print("ERROR: archive not found", file=sys.stderr)
         return 1
@@ -180,12 +183,18 @@ def main() -> int:
             print(f"ERROR: model not found: {args.model}", file=sys.stderr)
             return 1
         print("Running inference comparison...")
-        report["inference"] = inference_comparison(
-            args.full, args.reduced, args.model, args.frames,
-            args.warmup, args.iters, args.tolerance, args.target, args.provider, args.ort_source,
-        )
+        try:
+            report["inference"] = inference_comparison(
+                args.full, args.reduced, args.model, args.frames,
+                args.warmup, args.iters, args.tolerance, args.target, args.provider, args.ort_source,
+            )
+        except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            report["inference"] = {"passed": False, "error": str(exc)}
         inf = report["inference"]
-        print(f"  output max-abs: {inf['output_max_abs']} (tolerance {inf['tolerance']})")
+        if "error" in inf:
+            print(f"FAIL: native comparison: {inf['error']}", file=sys.stderr)
+        else:
+            print(f"  output max-abs: {inf['output_max_abs']} (tolerance {inf['tolerance']})")
         if not inf["passed"]:
             print("FAIL: reduced runtime output diverges beyond tolerance", file=sys.stderr)
             args.report.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
