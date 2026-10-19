@@ -12,6 +12,7 @@ on:
       - "scripts/detect_ort_release.py"
       - "scripts/validate_model_source_lock.py"
       - "scripts/generate_dep_candidate.py"
+      - "scripts/dispatch_dep_candidate.py"
       - "tests/test_dep_detection.py"
       - "tests/test_dep_candidate.py"
       - ".github/workflows/dep-detection.yml"
@@ -51,9 +52,9 @@ jobs:
 
   detect-ort:
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
+      contents: read
+      pull-requests: read
+      actions: write
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name != 'pull_request') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -66,6 +67,8 @@ jobs:
           python-version: "3.11"
       - name: Detect ORT release
         id: detect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           python scripts/detect_ort_release.py --json > /tmp/ort-detection.json
@@ -83,6 +86,14 @@ jobs:
             echo "API failure (exit $EXIT_CODE)"
             exit 1
           fi
+      - name: Dispatch new ORT candidate (prepare only)
+        if: steps.detect.outputs.update_available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORT_TAG: ${{ steps.detect.outputs.latest_tag }}
+          ORT_COMMIT: ${{ steps.detect.outputs.latest_commit }}
+        run: |
+          python scripts/dispatch_dep_candidate.py --ort-tag "$ORT_TAG" --ort-commit "$ORT_COMMIT"
       - name: Detection tests
         run: |
           pip install "pytest>=8.0"
@@ -90,13 +101,14 @@ jobs:
 
   detect-model-weights:
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
+      contents: read
+      pull-requests: read
+      actions: write
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name != 'pull_request') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
+      max-parallel: 2
       matrix:
         model: [htdemucs, htdemucs_ft]
     steps:
@@ -108,6 +120,8 @@ jobs:
           python-version: "3.11"
       - name: Detect ${{ matrix.model }} weight revision
         id: detect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
           python scripts/detect_model_weight_revision.py --model ${{ matrix.model }} --lock models/source-lock.json --json > /tmp/model-detection.json
@@ -124,3 +138,11 @@ jobs:
             echo "API failure or missing lock (exit $EXIT_CODE)"
             exit 1
           fi
+      - name: Dispatch new model candidate (prepare only)
+        if: steps.detect.outputs.update_available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL: ${{ matrix.model }}
+          MODEL_COMMIT: ${{ steps.detect.outputs.latest_commit }}
+        run: |
+          python scripts/dispatch_dep_candidate.py --model "$MODEL" --model-commit "$MODEL_COMMIT"

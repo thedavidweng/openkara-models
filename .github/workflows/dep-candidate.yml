@@ -3,6 +3,11 @@ name: Dependency candidate orchestration
 on:
   workflow_dispatch:
     inputs:
+      build_native:
+        description: "Explicitly opt into six native builds; default is lightweight preparation only. Does not qualify a release."
+        required: false
+        type: boolean
+        default: false
       ort_tag:
         description: "New ORT release tag (e.g. v1.28.0). Leave empty for model-weight-only updates."
         required: false
@@ -52,7 +57,7 @@ jobs:
           MODEL_COMMIT: ${{ inputs.model_commit }}
         run: |
           if [ -n "$ORT_TAG" ]; then
-            BRANCH="deps/candidate-ort-$ORT_TAG"
+            BRANCH="deps/candidate-ort-$ORT_TAG-$ORT_COMMIT"
             echo "is_ort_update=true" >> "$GITHUB_OUTPUT"
           elif [ -n "$MODEL" ]; then
             BRANCH="deps/candidate-$MODEL-$MODEL_COMMIT"
@@ -99,93 +104,17 @@ jobs:
             ort/source-lock.json
             models/source-lock.json
 
-  # Build all 5 runtime targets (only for ORT updates).
   build-runtimes:
-    permissions:
-      contents: read
-    needs: prepare
-    if: inputs.ort_tag != ''
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            runner: macos-14
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
-          - target: x86_64-pc-windows-msvc
-            runner: windows-latest
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: candidate-summary
-      - name: Apply lock update
-        run: |
-          # The downloaded candidate-summary artifact includes ort/source-lock.json
-          # (overwriting the checked-out version). Verify it is present before building.
-          if [ ! -f ort/source-lock.json ]; then
-            echo "ERROR: candidate ort/source-lock.json not found in downloaded artifact"
-            exit 1
-          fi
-          echo "Applied candidate source-lock.json"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.11"
-      - name: Install build deps (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
-      - name: Install Python deps (onnx for required-operator config)
-        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
-      # Reduced build: derive the operator set from the spectral stable model,
-      # then prune every other kernel (matches ort-publish.yml, so the candidate
-      # runtimes are the same reduced archives publish ships).
-      - name: Download stable model from catalog
-        run: >
-          python scripts/download_stable_model.py
-          --catalog catalog/releases/2026-07-25-005.json
-          --artifact htdemucs.spectral.fp32.onnx
-          --dest models/htdemucs.spectral.onnx
-      - name: Generate required-operator config
-        run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
-      - name: Build reduced ORT for ${{ matrix.target }}
-        run: python scripts/build_runtime.py --target ${{ matrix.target }} --reduced
-      - name: Generate supply-chain
-        run: python scripts/generate_runtime_supply_chain.py --all
-      - name: Verify package
-        run: python scripts/verify_runtime_package.py --all
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: runtime-${{ matrix.target }}
-          path: ort/packages/onnxruntime-*-${{ matrix.target }}-reduced.*
+    needs: [prepare, quality-gates]
+    if: inputs.build_native && inputs.ort_tag != ''
+    uses: ./.github/workflows/ort-build.yml
+    with:
+      candidate_lock_artifact: candidate-summary
 
-  # Run quality gates (for both ORT and model-weight updates).
-  #
-  # Each gate is classified as one of:
-  #   passed      — ran and succeeded.
-  #   failed      — ran and failed (non-zero exit or error in report).
-  #   not_run     — skipped (e.g. model file missing).
-  #   unavailable — the tooling/script is not present in this checkout.
-  #
-  # The job itself always completes (so artifacts are uploaded) but
-  # individual suite steps record their outcome in the report files.
-  # The gate-status generator (generate_gate_status.py) reads those
-  # reports and produces the final classification used in the PR body.
   quality-gates:
-    permissions:
-      contents: read
-    needs: [prepare, build-runtimes]
-    if: always() && needs.prepare.result == 'success'
+    needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -193,100 +122,21 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - name: Install deps
-        run: |
-          pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
-          pip install -r requirements.txt
-      - name: Run detection + candidate tests
+      - run: pip install "pytest>=8.0"
+      - name: Lightweight candidate tests (not model quality evidence)
         run: python -m pytest tests/test_dep_detection.py tests/test_dep_candidate.py tests/test_gate_status.py -q
-      - name: Run model quality suite
-        id: model_quality
-        continue-on-error: true
+      - name: Record missing candidate measurements honestly
         run: |
-          set +e
-          if [ ! -f scripts/run_quality_suite.py ]; then
-            echo "status=unavailable" >> "$GITHUB_OUTPUT"
-            echo "Model quality suite script not present in this checkout"
-            exit 0
-          fi
-          # Fetch the stable spectral artifact so the gate runs against the
-          # thing that actually ships (matches the artifact-id used by the gate
-          # enforcer below).
-          python scripts/download_stable_model.py \
-            --catalog catalog/releases/2026-07-25-005.json \
-            --artifact htdemucs.spectral.fp32.onnx \
-            --dest models/htdemucs.spectral.onnx
-          if [ ! -f models/htdemucs.spectral.onnx ]; then
-            echo "status=not_run" >> "$GITHUB_OUTPUT"
-            echo "Stable spectral model unavailable; quality suite not run"
-            exit 0
-          fi
-          python scripts/run_quality_suite.py --tier pr --onnx models/htdemucs.spectral.onnx --report quality-report.json
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            printf '{"status": "failed", "error": "quality suite exited with code %s"}\n' "$EXIT_CODE" > quality-report.json
-            echo "Model quality suite FAILED (exit code $EXIT_CODE)"
-            exit 0
-          fi
-          echo "status=passed" >> "$GITHUB_OUTPUT"
-      - name: Run runtime quality suite
-        id: runtime_quality
-        continue-on-error: true
-        run: |
-          set +e
-          if [ ! -f scripts/run_runtime_quality_suite.py ]; then
-            echo "status=unavailable" >> "$GITHUB_OUTPUT"
-            echo "Runtime quality suite script not present in this checkout"
-            exit 0
-          fi
-          python scripts/run_runtime_quality_suite.py --tier pr --report runtime-quality-report.json
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            printf '{"status": "failed", "error": "runtime quality suite exited with code %s"}\n' "$EXIT_CODE" > runtime-quality-report.json
-            echo "Runtime quality suite FAILED (exit code $EXIT_CODE)"
-            exit 0
-          fi
-          echo "status=passed" >> "$GITHUB_OUTPUT"
-      - name: Run gate enforcement
-        id: gate_enforcement
-        continue-on-error: true
-        run: |
-          set +e
-          if [ ! -f scripts/enforce_quality_gates.py ]; then
-            echo "status=unavailable" >> "$GITHUB_OUTPUT"
-            echo "Gate enforcer script not present in this checkout"
-            exit 0
-          fi
-          if [ ! -f quality-report.json ] || [ ! -f runtime-quality-report.json ]; then
-            echo "status=not_run" >> "$GITHUB_OUTPUT"
-            echo "Required reports missing; gate enforcement not run"
-            exit 0
-          fi
-          python scripts/enforce_quality_gates.py \
-            --artifact-id htdemucs.spectral.fp32.onnx \
-            --quality-report quality-report.json \
-            --runtime-report runtime-quality-report.json \
-            --tier pr
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -eq 0 ]; then
-            printf '{"overall": "passed", "exit_code": 0}\n' > gate-result.json
-            echo "status=passed" >> "$GITHUB_OUTPUT"
-          else
-            printf '{"overall": "failed", "exit_code": %s}\n' "$EXIT_CODE" > gate-result.json
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            echo "Gate enforcement FAILED (exit code $EXIT_CODE)"
-          fi
+          printf '%s\n' '{"status":"not_run","reason":"Candidate conversion, licensed reference stems and native archive measurements must be supplied; stable models and Python wheels are not candidate evidence."}' > quality-report.json
+          cp quality-report.json runtime-quality-report.json
+          printf '%s\n' '{"overall":"not_run"}' > gate-result.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
         with:
           name: quality-reports
           path: |
             quality-report.json
             runtime-quality-report.json
             gate-result.json
-            candidate-summary.md
 
   # Create the candidate PR with the summary and verification artifacts.
   # The PR is always created (even if gates failed) so it can serve as a
@@ -317,7 +167,7 @@ jobs:
         continue-on-error: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: runtime-*
+          pattern: ort-*
           path: artifacts/runtimes
           merge-multiple: true
         if: needs.build-runtimes.result == 'success'
@@ -438,7 +288,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Create or switch to the candidate branch.
-          git checkout -b "$BRANCH_NAME" 2>/dev/null || git checkout "$BRANCH_NAME"
+          git checkout -b "$BRANCH_NAME"
           # Stage only the relevant lock file: ort/source-lock.json for ORT
           # updates, models/source-lock.json for model-weight updates.
           # NEVER stage catalog/channels/stable.json — the stable pointer is
@@ -458,28 +308,12 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "deps: candidate update"
           fi
-          # Push the branch (force-with-lease to replace stale candidates).
-          git push --force-with-lease origin "$BRANCH_NAME"
-          # Create PR or update existing PR body. gh pr create exits non-zero
-          # when a PR already exists for the head branch; distinguish that from
-          # other failures by inspecting the output.
-          # gh pr create returns exit 1 when a PR already exists; any other
-          # failure (permissions, network, invalid label) should re-raise.
-          if PR_CREATE_OUTPUT=$(gh pr create \
-            --title "deps: candidate update ($BRANCH_NAME)" \
-            --body-file pr-body.md \
-            --head "$BRANCH_NAME" \
-            --base main \
-            --label "dependencies" 2>&1); then
-            echo "Created new candidate PR"
-            echo "$PR_CREATE_OUTPUT"
+          # Never overwrite an existing candidate branch.
+          git push origin "$BRANCH_NAME"
+          PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr edit "$PR_NUMBER" --body-file pr-body.md
           else
-            if echo "$PR_CREATE_OUTPUT" | grep -qi "already exists"; then
-              echo "PR already exists, updating body"
-              gh pr edit "$BRANCH_NAME" --body-file pr-body.md
-            else
-              echo "ERROR: gh pr create failed:" >&2
-              echo "$PR_CREATE_OUTPUT" >&2
-              exit 1
-            fi
+            gh pr create --title "deps: candidate update ($BRANCH_NAME)" \
+              --body-file pr-body.md --head "$BRANCH_NAME" --base main --label dependencies
           fi

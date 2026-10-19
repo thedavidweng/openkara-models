@@ -1,6 +1,11 @@
 name: ORT source build (6 targets)
 
 on:
+  workflow_call:
+    inputs:
+      candidate_lock_artifact:
+        required: true
+        type: string
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
@@ -54,7 +59,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-ort-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -66,6 +71,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.candidate_lock_artifact != ''
+        with:
+          name: ${{ inputs.candidate_lock_artifact }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -80,7 +89,7 @@ jobs:
         run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/download_stable_model.py scripts/runtime_inputs.py
 
   build-aarch64-apple-darwin:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     needs: validate-source-lock
     runs-on: macos-15
     timeout-minutes: 60
@@ -88,6 +97,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.candidate_lock_artifact != ''
+        with:
+          name: ${{ inputs.candidate_lock_artifact }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -105,7 +118,7 @@ jobs:
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
       - name: Build reduced ORT for aarch64-apple-darwin
-        run: python scripts/build_runtime.py --target aarch64-apple-darwin --reduced
+        run: python scripts/build_runtime.py --locked --target aarch64-apple-darwin --reduced
       - name: Generate supply-chain records (SBOM + provenance)
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
@@ -131,7 +144,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-apple-darwin:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     needs: validate-source-lock
     runs-on: macos-15-intel
     timeout-minutes: 60
@@ -139,6 +152,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.candidate_lock_artifact != ''
+        with:
+          name: ${{ inputs.candidate_lock_artifact }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -156,7 +173,7 @@ jobs:
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
       - name: Build reduced ORT for x86_64-apple-darwin
-        run: python scripts/build_runtime.py --target x86_64-apple-darwin --reduced
+        run: python scripts/build_runtime.py --locked --target x86_64-apple-darwin --reduced
       - name: Generate supply-chain records (SBOM + provenance)
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
@@ -182,8 +199,8 @@ jobs:
           retention-days: 14
 
   build-x86_64-unknown-linux-gnu:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: validate-source-lock
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]
     runs-on: ubuntu-latest
     # manylinux_2_28 container: the artifact's glibc symbol floor is set by
     # the build environment, and OpenKara's Linux release baseline is
@@ -199,6 +216,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.candidate_lock_artifact != ''
+        with:
+          name: ${{ inputs.candidate_lock_artifact }}
       - name: Install build deps (gcc-toolset-13 + cmake + python 3.11)
         run: |
           dnf -y install gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils
@@ -215,7 +236,7 @@ jobs:
           python --version
           ldd --version | head -1
       - name: Build ORT for x86_64-unknown-linux-gnu
-        run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu
+        run: python scripts/build_runtime.py --locked --target x86_64-unknown-linux-gnu
       - name: Verify ABI floor against the release baseline
         run: |
           RUNTIME=""
@@ -263,14 +284,18 @@ jobs:
           retention-days: 14
 
   build-aarch64-unknown-linux-gnu:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: validate-source-lock
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.candidate_lock_artifact != ''
+        with:
+          name: ${{ inputs.candidate_lock_artifact }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -292,7 +317,7 @@ jobs:
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
       - name: Build reduced ORT for aarch64-unknown-linux-gnu
-        run: python scripts/build_runtime.py --target aarch64-unknown-linux-gnu --reduced
+        run: python scripts/build_runtime.py --locked --target aarch64-unknown-linux-gnu --reduced
       - name: Generate supply-chain records (SBOM + provenance)
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
@@ -318,14 +343,18 @@ jobs:
           retention-days: 14
 
   build-x86_64-pc-windows-msvc:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: validate-source-lock
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.candidate_lock_artifact != ''
+        with:
+          name: ${{ inputs.candidate_lock_artifact }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -343,7 +372,7 @@ jobs:
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
       - name: Build reduced ORT for x86_64-pc-windows-msvc
-        run: python scripts/build_runtime.py --target x86_64-pc-windows-msvc --reduced
+        run: python scripts/build_runtime.py --locked --target x86_64-pc-windows-msvc --reduced
       - name: Generate supply-chain records (SBOM + provenance)
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
@@ -386,14 +415,18 @@ jobs:
   # import, so it loads on any Windows host. Built reduced to match the
   # DirectML reduced runtime the publish flow ships.
   build-x86_64-pc-windows-msvc-cpu:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: validate-source-lock
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: inputs.candidate_lock_artifact != ''
+        with:
+          name: ${{ inputs.candidate_lock_artifact }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -408,7 +441,7 @@ jobs:
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
       - name: Build reduced CPU-only ORT for x86_64-pc-windows-msvc-cpu
-        run: python scripts/build_runtime.py --target x86_64-pc-windows-msvc-cpu --reduced
+        run: python scripts/build_runtime.py --locked --target x86_64-pc-windows-msvc-cpu --reduced
       - name: Generate supply-chain records (SBOM + provenance)
         run: python scripts/generate_runtime_supply_chain.py --all
       - name: Verify package (incl. supply-chain)
@@ -438,7 +471,7 @@ jobs:
   # archive size + inference output. Fails if the reduced runtime cannot load
   # the model (a required kernel was pruned) or output diverges.
   reduced-build-and-compare:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -522,7 +555,7 @@ jobs:
   # the model cannot load, output contains NaN/Inf, or shape mismatches. The
   # report is validated against ort/benchmark-report-v1.json and uploaded.
   benchmark-x86_64-unknown-linux-gnu:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' }}
     needs: [validate-source-lock, reduced-build-and-compare]
     runs-on: ubuntu-latest
     timeout-minutes: 30

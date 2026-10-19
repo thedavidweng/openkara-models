@@ -29,7 +29,7 @@ def test_generate_candidate_summary_ort() -> None:
     assert "ONNX Runtime source update" in summary
     assert "v1.27.1" in summary
     assert "v1.28.0" in summary
-    assert "Rebuild all 5 runtime targets" in summary
+    assert "Rebuild all 6 runtime targets" in summary
     assert "Quality gates pass" in summary
 
 
@@ -153,14 +153,54 @@ def test_update_ort_lock_refreshes_coupled_pins(tmp_path, monkeypatch) -> None:
     assert changes["new_commit"] == commit
 
     saved = work.read_bytes()
-    for malformed in ("new;url;bad", "", "new;url;" + "b" * 40 + "\nnew;url;" + "b" * 40):
+    for malformed in ("new;url", "new;url;sha;extra", "new;url;bad", "", "new;url;" + "b" * 40 + "\nnew;url;" + "b" * 40):
         texts["cmake/deps.txt"] = malformed
         with mock.patch.object(d, "_tag_commit_sha", return_value=commit), \
              mock.patch.object(d, "_github_get", side_effect=github_get):
             with pytest.raises(ValueError):
                 g.update_ort_lock("v1.31.0", commit)
         assert work.read_bytes() == saved
+    texts[".gitmodules"] = texts[".gitmodules"].replace("cmake/external/new", "cmake/external/missing")
+    with mock.patch.object(d, "_tag_commit_sha", return_value=commit), \
+         mock.patch.object(d, "_github_get", side_effect=github_get):
+        with pytest.raises(ValueError, match="gitlinks disagree"):
+            g.update_ort_lock("v1.31.0", commit)
+    assert work.read_bytes() == saved
     with mock.patch.object(d, "_tag_commit_sha", return_value="d" * 40):
         with pytest.raises(ValueError, match="tag"):
             g.update_ort_lock("v1.31.0", commit)
     assert work.read_bytes() == saved
+
+
+def test_dispatch_candidate_is_lightweight_and_deduplicated():
+    from dispatch_dep_candidate import dispatch
+    inputs = {"ort_tag": "v1.31.0", "ort_commit": "a" * 40}
+    with mock.patch("dispatch_dep_candidate.subprocess.run") as run:
+        run.return_value.stdout = "[]"
+        assert dispatch(inputs, "owner/repo") is True
+        command = run.call_args.args[0]
+        assert "build_native=false" in command
+        assert "ort_commit=" + "a" * 40 in command
+        run.reset_mock()
+        run.return_value.stdout = '[{"number": 1}]'
+        assert dispatch(inputs, "owner/repo") is False
+        assert run.call_count == 1
+    with pytest.raises(ValueError, match="SHA"):
+        dispatch({"model": "htdemucs", "model_commit": "main"}, "owner/repo")
+
+
+def test_candidate_reuses_exact_native_pipeline():
+    candidate = (ROOT / ".github/workflows/dep-candidate.yml").read_text()
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    lock = json.loads((ROOT / "ort/source-lock.json").read_text())
+    assert "uses: ./.github/workflows/ort-build.yml" in candidate
+    assert "python scripts/build_runtime.py" not in candidate
+    assert "if: inputs.build_native && inputs.ort_tag != ''" in candidate
+    assert 'default: false' in candidate
+    for target in lock["targets"]:
+        assert f"  build-{target}:" in native
+        assert f"python scripts/build_runtime.py --locked --target {target}" in native
+    # Native work is scheduled in three pairs; no six-way runner burst.
+    assert "needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]" in native
+    assert "inputs.candidate_lock_artifact == ''" in native
+    assert "git push --force" not in candidate
