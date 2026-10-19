@@ -7,6 +7,11 @@
   "additionalProperties": false,
   "required": ["schema_version", "runtime_archive", "onnx_path", "tier", "rtf_threshold", "results"],
   "properties": {
+    "measurement_backend": {"enum": ["native-c-api", "python-wheel-conversion-only"], "type": "string"},
+    "measurement_scope": {"type": "string"},
+    "model_digest": {"additionalProperties": false, "properties": {"sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "size": {"minimum": 1, "type": "integer"}}, "required": ["sha256", "size"], "type": "object"},
+    "provider": {"type": "string"},
+    "target": {"type": "string"},
     "schema_version": {"type": "string", "const": "openkara.runtime-quality-report/v1"},
     "runtime_archive": {
       "type": "object",
@@ -32,6 +37,7 @@
                       "warm_iters", "rtf_first", "rtf_warm", "peak_rss_kb",
                       "rss_delta_kb", "providers", "output_shape", "shape_errors"],
         "properties": {
+          "end_to_end_s": {"minimum": 0, "type": "number"},
           "fixture_id": {"type": "string"},
           "category": {"type": "string"},
           "tier": {"type": "string"},

@@ -86,6 +86,7 @@ def test_find_lib(tmp_path: Path) -> None:
     assert cmp._find_lib({"libonnxruntime.dylib": b"y"}) == "libonnxruntime.dylib"
     assert cmp._find_lib({"onnxruntime.dll": b"y"}) == "onnxruntime.dll"
     assert cmp._find_lib({"readme.txt": b"y"}) is None
+    assert cmp._find_lib({"onnxruntime_providers_shared.dll": b"y"}) is None
 
 
 def test_compare_cli_size_only(tmp_path: Path) -> None:
@@ -103,3 +104,23 @@ def test_compare_cli_size_only(tmp_path: Path) -> None:
     data = json.loads(report.read_text())
     assert data["sizes"]["installed_size_delta_bytes"] == -40
     assert "inference" not in data
+
+
+def test_inference_uses_both_archives_and_all_raw_outputs(tmp_path, monkeypatch):
+    import numpy as np
+    import native_quality
+    import compare_runtime_builds as cmp
+    calls = []
+    class Native:
+        def __init__(self, archive, source, target, provider, work):
+            calls.append(archive.name)
+            self.archive = {'name': archive.name}
+            self.raw_outputs = [np.zeros((1,), np.float32), np.array([1 if archive.name == 'red' else 0], np.float32)]
+        def measure(self, *args):
+            return np.zeros(1), {'fallback_node_count': 0}
+    monkeypatch.setattr(native_quality, 'NativeRuntime', Native)
+    report = cmp.inference_comparison(Path('full'), Path('red'), Path('candidate'), 343980, 0, 1, 0)
+    assert calls == ['full', 'red']
+    assert not report['passed']
+    assert report['output_max_abs'] == 1
+    assert report['output_mse'] == 0.5

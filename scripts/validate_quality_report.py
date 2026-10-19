@@ -54,6 +54,8 @@ def validate_report(report: dict[str, Any]) -> list[str]:
             errors.append(f"{r['fixture_id']}: ONNX output has NaN")
         if r.get("onnx_has_inf"):
             errors.append(f"{r['fixture_id']}: ONNX output has Inf")
+        if r["pytorch_has_nan"] or r["pytorch_has_inf"]:
+            errors.append(f"{r['fixture_id']}: PyTorch reference has NaN/Inf")
         if r.get("shape_match") is False:
             errors.append(f"{r['fixture_id']}: shape mismatch (onnx vs pytorch)")
         if r.get("expected_shape_match") is False:

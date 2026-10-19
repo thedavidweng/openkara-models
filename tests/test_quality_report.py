@@ -129,6 +129,8 @@ def test_gate_failures_on_shape_mismatch_without_expected_shape() -> None:
     import run_quality_suite as q
     results = [{
         "fixture_id": "fx",
+        "pytorch_has_nan": False,
+        "pytorch_has_inf": False,
         "onnx_has_nan": False,
         "onnx_has_inf": False,
         "shape_match": False,  # onnx vs pytorch mismatch
@@ -143,6 +145,8 @@ def test_gate_failures_on_expected_shape_mismatch() -> None:
     import run_quality_suite as q
     results = [{
         "fixture_id": "fx",
+        "pytorch_has_nan": False,
+        "pytorch_has_inf": False,
         "onnx_has_nan": False,
         "onnx_has_inf": False,
         "shape_match": True,
@@ -157,6 +161,8 @@ def test_gate_failures_clean() -> None:
     import run_quality_suite as q
     results = [{
         "fixture_id": "fx",
+        "pytorch_has_nan": False,
+        "pytorch_has_inf": False,
         "onnx_has_nan": False,
         "onnx_has_inf": False,
         "shape_match": True,
@@ -198,3 +204,13 @@ def test_quality_suite_help() -> None:
     assert r.returncode == 0
     assert "--tier" in r.stdout
     assert "--onnx" in r.stdout
+
+
+@pytest.mark.parametrize('flag', ['pytorch_has_nan', 'pytorch_has_inf'])
+def test_pytorch_nonfinite_rejected_by_runner_and_validator(flag):
+    import run_quality_suite as q
+    import validate_quality_report as v
+    report = _valid_report()
+    report['results'][0][flag] = True
+    assert q.gate_failures(report['results'], report['mse_threshold'])
+    assert v.validate_report(report)

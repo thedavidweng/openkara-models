@@ -24,7 +24,7 @@ def pinned_header(monkeypatch):
 
 def _make_archive(path: Path, files: dict[str, bytes]) -> None:
     if "build-manifest.json" in files:
-        header = b"#define ORT_API_VERSION 27\n"
+        header = files.get("onnxruntime_c_api.h", b"#define ORT_API_VERSION 27\n")
         files["onnxruntime_c_api.h"] = header
         manifest = json.loads(files["build-manifest.json"])
         manifest["files"]["onnxruntime_c_api.h"] = {"size": len(header), "sha256": hashlib.sha256(header).hexdigest()}
@@ -225,3 +225,16 @@ def test_verify_header_fetch_failure_is_not_a_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(ort_api_version, 'pinned_header', fail)
     lock = json.loads((ROOT / 'ort/source-lock.json').read_text())
     assert any('cannot verify pinned upstream' in e for e in verifier.verify_archive(archive, lock))
+
+
+def test_ep_header_must_match_pinned_bytes_and_have_digest(tmp_path, monkeypatch):
+    import ort_api_version
+    import verify_runtime_package as verifier
+    header = b'#define ORT_API_VERSION 27\n#include "onnxruntime_ep_c_api.h"\n'
+    monkeypatch.setattr(ort_api_version, 'pinned_header', lambda upstream, name='onnxruntime_c_api.h': header if name == 'onnxruntime_c_api.h' else b'actual ep header')
+    archive = tmp_path / 'onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz'
+    _make_archive(archive, {'onnxruntime_c_api.h': header, 'onnxruntime_ep_c_api.h': b'wrong header',
+                          'build-manifest.json': json.dumps(_make_build_manifest()).encode()})
+    errors = verifier.verify_archive(archive, json.loads((ROOT / 'ort/source-lock.json').read_text()))
+    assert any('packaged onnxruntime_ep_c_api.h differs' in e for e in errors)
+    assert any('missing onnxruntime_ep_c_api.h digest' in e for e in errors)

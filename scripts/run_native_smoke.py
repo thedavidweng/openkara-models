@@ -71,11 +71,11 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 
 def _find_lib(dest: Path) -> Path:
-    for p in dest.rglob("*"):
-        low = p.name.lower()
-        if low.endswith((".so", ".dylib", ".dll")) and "onnxruntime" in low:
-            return p
-    raise FileNotFoundError(f"no onnxruntime shared library found in extracted runtime")
+    libraries = [p for p in dest.rglob("*") if p.is_file() and p.name.lower() in
+                 {"libonnxruntime.so", "libonnxruntime.dylib", "onnxruntime.dll"}]
+    if len(libraries) != 1:
+        raise ValueError("runtime archive must contain exactly one ORT runtime library")
+    return libraries[0]
 
 
 def _build_harness(ort_source: Path, build_dir: Path) -> Path:

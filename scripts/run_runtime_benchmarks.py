@@ -56,7 +56,6 @@ import gc
 import hashlib
 import json
 import os
-import resource
 import statistics
 import sys
 import tempfile
@@ -81,22 +80,6 @@ def _sha256_file(path: Path) -> tuple[int, str]:
             h.update(chunk)
             size += len(chunk)
     return size, h.hexdigest()
-
-
-def _extract_runtime(archive: Path, dest: Path) -> Path:
-    """Extract the runtime archive and return the directory containing the lib.
-
-    Uses archive_utils.safe_extract which rejects unsafe members (absolute
-    paths, traversal, symlink/hardlink escapes, duplicate paths, excessive
-    counts/sizes).
-    """
-    archive_utils.safe_extract(archive, dest)
-    # Find the shared library.
-    for p in dest.rglob("*"):
-        low = p.name.lower()
-        if low.endswith((".so", ".dylib", ".dll")) and "onnxruntime" in low:
-            return p
-    raise FileNotFoundError(f"no onnxruntime shared library found in {archive}")
 
 
 def _resolve_model_from_catalog(manifest_path: Path, download_dir: Path,
@@ -140,16 +123,10 @@ def _download_model(art: dict[str, Any], download_dir: Path) -> Path:
 
 
 def _load_session(lib_path: Path | None, model_path: str, enable_profiling: bool = False):
-    """Load the ORT shared library and create an InferenceSession.
-
-    When ``lib_path`` is ``None`` (local mode), the installed onnxruntime
-    wheel's bundled library is used unchanged; otherwise the built runtime is
-    swapped in via the ``ORT_RUNTIMES`` env var (semicolon-separated list of
-    paths that ORT's Python wheel honours).
-    """
-    import onnxruntime as ort
+    """Installed-wheel diagnostics only; native archives use NativeRuntime."""
     if lib_path is not None:
-        os.environ["ORT_RUNTIMES"] = str(lib_path)
+        raise ValueError("Python wheel cannot qualify a supplied native runtime archive")
+    import onnxruntime as ort
     so = ort.SessionOptions()
     if enable_profiling:
         so.enable_profiling = True
@@ -190,7 +167,7 @@ def _installed_runtime_record() -> dict[str, Any]:
 
 def benchmark_model(
     lib_path: Path | None, model_path: Path, frames: int,
-    warmup: int, iters: int,
+    warmup: int, iters: int, native=None,
 ) -> dict[str, Any]:
     """Run the benchmark for one spectral-core model. Returns a metrics dict.
 
@@ -200,7 +177,17 @@ def benchmark_model(
     """
     import numpy as np
 
+    if native is not None:
+        rng = np.random.default_rng(42)
+        mix = rng.normal(0, 0.01, (2, frames)).astype(np.float32)
+        _, result = native.measure(model_path, mix, 44100, warmup, iters)
+        for key in ("audio_duration_s", "rtf_first", "rtf_warm", "end_to_end_s"):
+            result.pop(key)
+        result["output_shape"] = [list(o.shape) for o in native.raw_outputs]
+        return result | {"interface": "spectral"}
+
     # Cold load.
+    import resource
     gc.collect()
     rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     import time
@@ -249,6 +236,9 @@ def benchmark_model(
         latencies.append(time.perf_counter() - t)
 
     rss_after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform == "darwin":
+        rss_before //= 1024
+        rss_after //= 1024
 
     # Provider assignment + fallback node count from profiler.
     providers = sess.get_providers()
@@ -305,6 +295,8 @@ def main() -> int:
                              "If omitted, all compatible models are benchmarked.")
     parser.add_argument("--target", type=str, default=None,
                         help="Target triple for catalog compatibility filtering.")
+    parser.add_argument("--provider", choices=["cpu", "coreml", "xnnpack", "directml"], default="cpu")
+    parser.add_argument("--ort-source", type=Path, help="Optional source header cross-check; uses packaged headers.")
     parser.add_argument("--frames", type=int, default=343980,
                         help="Input frame count (default 343980 = full window).")
     parser.add_argument("--warmup", type=int, default=3)
@@ -316,15 +308,31 @@ def main() -> int:
                         help="Baseline report to compare fallback node count against.")
     args = parser.parse_args()
 
+    if args.warmup < 0 or args.iters < 1 or args.frames < 1:
+        parser.error("warmup >= 0, iters >= 1 and frames >= 1 required")
+
     if args.runtime is not None and not args.runtime.is_file():
         print(f"ERROR: runtime archive not found: {args.runtime}", file=sys.stderr)
         return 1
 
+    arts = []
+    if args.catalog and not args.model:
+        arts = _resolve_model_from_catalog(args.catalog, args.download_dir, args.target)
+        if args.model_artifact_id:
+            arts = [a for a in arts if a.get("artifact_id") == args.model_artifact_id]
+            if not arts:
+                print(f"ERROR: --model-artifact-id {args.model_artifact_id!r} not "
+                      f"found in catalog {args.catalog}", file=sys.stderr)
+                return 1
+
     # Extract the runtime archive (if given), else use the installed wheel.
     with contextlib.ExitStack() as stack:
+        native = None
         if args.runtime is not None:
+            from native_quality import NativeRuntime
             tmpd = stack.enter_context(tempfile.TemporaryDirectory())
-            lib_path: Path | None = _extract_runtime(args.runtime, Path(tmpd))
+            native = NativeRuntime(args.runtime, args.ort_source, args.target or _detect_target(), args.provider, Path(tmpd))
+            lib_path = native.lib
             print(f"runtime library: {lib_path}")
             archive_size, archive_sha = _sha256_file(args.runtime)
             archive_name = args.runtime.name
@@ -341,13 +349,6 @@ def main() -> int:
         if args.model:
             models.append((args.model.name, args.model, None))
         elif args.catalog:
-            arts = _resolve_model_from_catalog(args.catalog, args.download_dir, args.target)
-            if args.model_artifact_id:
-                arts = [a for a in arts if a.get("artifact_id") == args.model_artifact_id]
-                if not arts:
-                    print(f"ERROR: --model-artifact-id {args.model_artifact_id!r} not "
-                          f"found in catalog {args.catalog}", file=sys.stderr)
-                    return 1
             for art in arts:
                 p = _download_model(art, args.download_dir)
                 models.append((art["artifact_id"], p, art))
@@ -365,9 +366,12 @@ def main() -> int:
             print(f"\nBenchmarking {name}...")
             metrics = benchmark_model(
                 lib_path, model_path, args.frames, args.warmup, args.iters,
+                native=native,
             )
             metrics["model"] = name
             metrics["model_artifact_id"] = art["artifact_id"] if art else None
+            model_size, model_sha = _sha256_file(model_path)
+            metrics["model_digest"] = {"sha256": model_sha, "size": model_size}
             results.append(metrics)
             if metrics["shape_errors"]:
                 print("  FAIL: shape/finite errors:")
@@ -376,6 +380,8 @@ def main() -> int:
 
         report = {
             "schema_version": GENERATOR_VERSION,
+            "measurement_backend": "native-c-api" if native is not None else "installed-wheel-diagnostic",
+            "provider": args.provider if native is not None else "cpu",
             "runtime_archive": {
                 "name": archive_name,
                 "sha256": archive_sha,
@@ -402,7 +408,7 @@ def main() -> int:
                             "actual": r["fallback_node_count"],
                         }
 
-        args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        args.report.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
         print(f"\nreport: {args.report}")
 
         # Fail on shape errors or fallback mismatches.

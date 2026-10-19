@@ -17,6 +17,8 @@ on:
       - "scripts/generate_required_operators.py"
       - "scripts/compare_runtime_builds.py"
       - "scripts/generate_runtime_supply_chain.py"
+      - "scripts/native_quality.py"
+      - "tests/test_native_quality.py"
       - "scripts/run_runtime_benchmarks.py"
       - "scripts/validate_benchmark_report.py"
       - "scripts/generate_runtime_catalog_entries.py"
@@ -46,6 +48,8 @@ on:
       - "scripts/generate_required_operators.py"
       - "scripts/compare_runtime_builds.py"
       - "scripts/generate_runtime_supply_chain.py"
+      - "scripts/native_quality.py"
+      - "tests/test_native_quality.py"
       - "scripts/run_runtime_benchmarks.py"
       - "scripts/validate_benchmark_report.py"
       - "scripts/generate_runtime_catalog_entries.py"
@@ -84,9 +88,9 @@ jobs:
         run: python scripts/validate_source_lock.py
       - name: Source lock + required-operator + comparison + supply-chain + benchmark + catalog-entry + archive + api-version + smoke + profile-parser tests
         run: |
-          python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_compare_runtime_builds.py tests/test_runtime_supply_chain.py tests/test_benchmark_report.py tests/test_runtime_catalog_entries.py tests/test_archive_utils.py tests/test_ort_api_version.py tests/test_native_smoke.py tests/test_profile_parser.py -q
+          python -m pytest tests/test_source_lock.py tests/test_required_operators.py tests/test_native_quality.py tests/test_compare_runtime_builds.py tests/test_runtime_supply_chain.py tests/test_benchmark_report.py tests/test_runtime_catalog_entries.py tests/test_archive_utils.py tests/test_ort_api_version.py tests/test_native_smoke.py tests/test_profile_parser.py -q
       - name: Syntax check build scripts
-        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/download_stable_model.py scripts/runtime_inputs.py
+        run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/native_quality.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/download_stable_model.py scripts/runtime_inputs.py
 
   build-aarch64-apple-darwin:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
@@ -489,7 +493,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
 
       - name: Install Python deps
-        run: pip install "onnx>=1.22.0" "onnxruntime>=1.27.0,<2" "numpy>=1.24"
+        run: pip install "numpy>=1.24"
 
       - name: Download full build artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -570,7 +574,7 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Install Python deps
-        run: pip install "onnx>=1.22.0" "onnxruntime>=1.27.0,<2" "numpy>=1.24" "jsonschema>=4.20"
+        run: pip install "numpy>=1.24" "jsonschema>=4.20"
 
       # upload-artifact roots the archive at the least common ancestor of the
       # matched files; this artifact holds a single file from ort/packages, so

@@ -50,11 +50,18 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-
-// Platform dynamic loading.
+#include <chrono>
+#include <stdexcept>
+#include <climits>
 #if defined(_WIN32)
 #  include <windows.h>
+#  include <psapi.h>
 #else
+#  include <sys/resource.h>
+#endif
+
+// Platform dynamic loading.
+#if !defined(_WIN32)
 #  include <dlfcn.h>
 #endif
 
@@ -194,6 +201,24 @@ void stderr_logger(void* /*param*/, OrtLoggingLevel severity,
     fprintf(stderr, "[ort][%s][%s][%s] %s\n", sev, category, logid, message);
 }
 
+long long native_peak_rss_kb() {
+    long long peak_rss_kb = 0;
+#if defined(_WIN32)
+        PROCESS_MEMORY_COUNTERS memory{};
+        if (!K32GetProcessMemoryInfo(GetCurrentProcess(), &memory, sizeof(memory))) throw std::runtime_error("cannot measure native peak RSS");
+        peak_rss_kb = static_cast<long long>(memory.PeakWorkingSetSize / 1024);
+#else
+        struct rusage usage{};
+        if (getrusage(RUSAGE_SELF, &usage) != 0) throw std::runtime_error("cannot measure native peak RSS");
+#  if defined(__APPLE__)
+        peak_rss_kb = usage.ru_maxrss / 1024;
+#  else
+        peak_rss_kb = usage.ru_maxrss;
+#  endif
+#endif
+    return peak_rss_kb;
+}
+
 void print_json_field(const char* key, const std::string& value, bool last) {
     printf("  \"%s\": \"%s\"%s\n", key, json_escape(value).c_str(), last ? "" : ",");
 }
@@ -241,6 +266,14 @@ int main(int argc, char** argv) {
     // that forgot the flag would have silently gated on a shape no current
     // model produces.
     std::string expect_output_shape;
+    std::string input_dir, output_dir;
+    int warmup = 0, iters = 1;
+    auto parse_count = [](const char* value) {
+        char* end = nullptr;
+        long n = std::strtol(value, &end, 10);
+        if (!*value || *end || n < 0 || n > INT_MAX) throw std::invalid_argument("invalid iteration count");
+        return static_cast<int>(n);
+    };
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -249,6 +282,14 @@ int main(int argc, char** argv) {
         else if (a == "--provider" && i + 1 < argc) provider = argv[++i];
         else if (a == "--target" && i + 1 < argc) target = argv[++i];
         else if (a == "--expect-output-shape" && i + 1 < argc) expect_output_shape = argv[++i];
+        else if (a == "--input-dir" && i + 1 < argc) input_dir = argv[++i];
+        else if (a == "--output-dir" && i + 1 < argc) output_dir = argv[++i];
+        else if (a == "--warmup" && i + 1 < argc) {
+            try { warmup = parse_count(argv[++i]); } catch (...) { return 2; }
+        }
+        else if (a == "--iters" && i + 1 < argc) {
+            try { iters = parse_count(argv[++i]); } catch (...) { return 2; }
+        }
         else if (a == "--help") {
             fprintf(stderr, "usage: ort_smoke --lib <lib> --model <onnx> "
                             "--expect-output-shape <str> "
@@ -257,7 +298,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (lib_path.empty() || model_path.empty() || expect_output_shape.empty()) {
+    if (lib_path.empty() || model_path.empty() || expect_output_shape.empty() || (iters == 0 && warmup != 0) || input_dir.empty() != output_dir.empty()) {
         fprintf(stderr, "ERROR: --lib, --model, and --expect-output-shape are required\n");
         return 2;
     }
@@ -464,6 +505,14 @@ int main(int argc, char** argv) {
             // we still proceed (fallback_node_count will be -1 / null).
             api->ReleaseStatus(st);
         }
+        st = api->SetIntraOpNumThreads(o, 2);
+        if (!st) st = api->SetInterOpNumThreads(o, 1);
+        if (st) {
+            last_session_error = std::string("Set thread count: ") + api->GetErrorMessage(st);
+            api->ReleaseStatus(st);
+            api->ReleaseSessionOptions(o);
+            return nullptr;
+        }
         OrtSession* sess = nullptr;
         st = api->CreateSessionFromArray(
             env, model_bytes.data(), model_bytes.size(), o, &sess);
@@ -477,7 +526,11 @@ int main(int argc, char** argv) {
         return sess;
     };
 
+    using Clock = std::chrono::steady_clock;
+    auto rss_before = native_peak_rss_kb();
+    auto session_start = Clock::now();
     OrtSession* session = try_create_session(provider);
+    double cold_load_s = std::chrono::duration<double>(Clock::now() - session_start).count();
     if (session) {
         provider_assigned = provider;
     }
@@ -551,6 +604,14 @@ int main(int argc, char** argv) {
             api->ReleaseTypeInfo(in_type_info);
             break;
         }
+        ONNXTensorElementDataType input_type;
+        ti_st = api->GetTensorElementType(in_tensor_info, &input_type);
+        if (ti_st || input_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+            input_build_error = "native harness requires float32 input tensors";
+            if (ti_st) api->ReleaseStatus(ti_st);
+            api->ReleaseTypeInfo(in_type_info);
+            break;
+        }
         size_t ndims = 0;
         api->GetDimensionsCount(in_tensor_info, &ndims);
         std::vector<int64_t> dims(ndims, 0);
@@ -570,6 +631,24 @@ int main(int argc, char** argv) {
             break;
         }
         input_buffers[i].assign(static_cast<size_t>(count), 0.0f);
+        if (!input_dir.empty()) {
+            std::string name(input_names_c[i]);
+            if (name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string::npos) {
+                input_build_error = "unsafe input tensor name";
+                break;
+            }
+            std::string error;
+            auto bytes = read_file(input_dir + "/" + name + ".f32", error);
+            if (!error.empty() || bytes.size() != static_cast<size_t>(count) * sizeof(float)) {
+                input_build_error = "input tensor byte size mismatch: " + name + "; " + error;
+                break;
+            }
+            std::memcpy(input_buffers[i].data(), bytes.data(), bytes.size());
+            if (!all_finite(input_buffers[i].data(), static_cast<size_t>(count))) {
+                input_build_error = "nonfinite input tensor: " + name;
+                break;
+            }
+        }
         OrtStatus* ct_st = api->CreateTensorWithDataAsOrtValue(
             mem_info, input_buffers[i].data(),
             static_cast<size_t>(count) * sizeof(float),
@@ -615,10 +694,43 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < n_outputs; ++i) output_names_c[i] = output_names[i];
 
     std::vector<OrtValue*> outputs(n_outputs, nullptr);
+    auto outputs_finite = [&]() {
+        for (auto output : outputs) {
+            OrtTensorTypeAndShapeInfo* info = nullptr;
+            OrtStatus* error = api->GetTensorTypeAndShape(output, &info);
+            size_t count = 0;
+            ONNXTensorElementDataType type;
+            if (!error) error = api->GetTensorElementType(info, &type);
+            if (!error) error = api->GetTensorShapeElementCount(info, &count);
+            if (info) api->ReleaseTensorTypeAndShapeInfo(info);
+            float* data = nullptr;
+            if (!error) error = api->GetTensorMutableData(output, reinterpret_cast<void**>(&data));
+            if (error) { api->ReleaseStatus(error); return false; }
+            if (type != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT || !data || !count || !all_finite(data, count)) return false;
+        }
+        return true;
+    };
+    auto first_start = Clock::now();
     OrtStatus* st = api->Run(session, nullptr,
                              input_names_c.data(), input_tensors.data(), n_inputs,
                              output_names_c.data(), n_outputs, outputs.data());
 
+    double first_window_s = std::chrono::duration<double>(Clock::now() - first_start).count();
+    bool finite_runs = !st && outputs_finite();
+    std::vector<double> latencies;
+    if (!st && finite_runs && !input_dir.empty()) {
+        for (int64_t iteration = 0; iteration < static_cast<int64_t>(warmup) + iters; ++iteration) {
+            for (auto& output : outputs) { api->ReleaseValue(output); output = nullptr; }
+            auto start = Clock::now();
+            st = api->Run(session, nullptr, input_names_c.data(), input_tensors.data(), n_inputs,
+                          output_names_c.data(), n_outputs, outputs.data());
+            double seconds = std::chrono::duration<double>(Clock::now() - start).count();
+            if (st) break;
+            finite_runs = outputs_finite();
+            if (!finite_runs) break;
+            if (iteration >= warmup) latencies.push_back(seconds);
+        }
+    }
     if (st) {
         print_json_field("inference", "failed", false);
         print_json_field("inference_error", api->GetErrorMessage(st), false);
@@ -639,7 +751,7 @@ int main(int argc, char** argv) {
 
     // Inspect output shape and finiteness.
     std::string shape_str;
-    bool finite = true;
+    bool finite = finite_runs;
     for (size_t i = 0; i < n_outputs; ++i) {
         OrtTypeInfo* type_info = nullptr;
         api->GetTypeInfo(outputs[i], &type_info);
@@ -666,6 +778,16 @@ int main(int argc, char** argv) {
             for (size_t d = 0; d < ndims; ++d) elem_count *= static_cast<size_t>(dims[d]);
             if (out_data && elem_count > 0) {
                 if (!all_finite(out_data, elem_count)) finite = false;
+                if (!output_dir.empty()) {
+                    std::string path = output_dir + "/output_" + std::to_string(i) + ".f32";
+                    FILE* file = fopen(path.c_str(), "wb");
+                    bool written = file != nullptr;
+                    if (file) {
+                        written = fwrite(out_data, sizeof(float), elem_count, file) == elem_count;
+                        if (fclose(file) != 0) written = false;
+                    }
+                    if (!written) finite = false;
+                }
             }
             // NOTE: Do NOT call ReleaseTensorTypeAndShapeInfo on tensor_info.
             // CastTypeInfoToTensorInfo returns a non-owning cast pointer
@@ -718,6 +840,16 @@ int main(int argc, char** argv) {
     if (!profile_json.empty() && requested_profile_provider != nullptr) {
         provider_node_count = ort_smoke::count_nodes(
             profile_json, requested_profile_provider);
+    }
+    if (!input_dir.empty()) {
+        long long peak_rss_kb = native_peak_rss_kb();
+        printf("  \"cold_load_s\": %.9f,\n", cold_load_s);
+        printf("  \"first_window_s\": %.9f,\n", first_window_s);
+        printf("  \"peak_rss_kb\": %lld,\n", peak_rss_kb);
+        printf("  \"rss_delta_kb\": %lld,\n", peak_rss_kb - rss_before);
+        printf("  \"warm_latencies_s\": [");
+        for (size_t i = 0; i < latencies.size(); ++i) printf("%s%.9f", i ? "," : "", latencies[i]);
+        printf("],\n");
     }
     print_json_trailer(
         cpu_node_count, used_fallback, total_node_count, provider_node_count);

@@ -202,3 +202,14 @@ def test_warmup_negative_rejected(tmp_path: Path) -> None:
     )
     assert r.returncode != 0
     assert "--warmup must be >= 0" in r.stderr
+
+
+def test_native_timing_must_be_consistent():
+    import validate_runtime_quality_report as v
+    report = _valid_report()
+    report['measurement_backend'] = 'native-c-api'
+    assert any('timing' in e for e in v.validate_report(report))
+    row = report['results'][0]
+    row['end_to_end_s'] = row['rtf_first'] * row['audio_duration_s']
+    row['rtf_warm'] = row['warm_median_s'] / row['audio_duration_s']
+    assert v.validate_report(report) == []
