@@ -103,6 +103,32 @@ def test_provider_companion_is_not_runtime_library(tmp_path):
     assert native._find_lib(tmp_path).name == 'onnxruntime.dll'
 
 
+def test_native_window_transfers_input_and_composes_both_raw_outputs(tmp_path, monkeypatch):
+    import spectral_reference as sr
+    monkeypatch.setattr(sr, 'spec', lambda mix: mix * 2)
+    monkeypatch.setattr(sr, 'ispec', lambda spectrum, frames: spectrum)
+    rt = object.__new__(native.NativeRuntime)
+    rt.work, rt.harness, rt.lib = tmp_path, Path('/harness'), Path('/exact-runtime')
+    rt.target, rt.provider, rt.windows = 'target', 'cpu', []
+    chunk = np.arange(8, dtype=np.float32).reshape(2, 4)
+    def run(command, **kwargs):
+        directory = Path(command[command.index('--input-dir') + 1])
+        assert command[command.index('--lib') + 1] == '/exact-runtime'
+        np.testing.assert_array_equal(np.fromfile(directory / 'mix.f32', dtype=np.float32), chunk.ravel())
+        np.testing.assert_array_equal(np.fromfile(directory / 'spectral.f32', dtype=np.float32), (chunk * 2).ravel())
+        for i in range(2):
+            np.full((1, 4, 2, 4), i + 2, np.float32).tofile(directory / f'output_{i}.f32')
+        return SimpleNamespace(returncode=0, stderr='', stdout=json.dumps({
+            'output_shape': '[1,4,2,4];[1,4,2,4]', 'warm_latencies_s': [0.1],
+            'cold_load_s': 0.2, 'first_window_s': 0.3, 'peak_rss_kb': 10, 'rss_delta_kb': 1}))
+    monkeypatch.setattr(native.subprocess, 'run', run)
+    monkeypatch.setattr(native, 'validation_failures', lambda report, provider: [])
+    output = rt._window(Path('candidate'), chunk, 0, 1)
+    np.testing.assert_array_equal(output, np.full((1, 4, 2, 4), 5, np.float32))
+    assert len(rt.raw_outputs) == 2
+    assert rt.windows[0]['warm_latencies_s'] == [0.1]
+
+
 def test_benchmark_routes_archive_to_native_measurement(tmp_path, monkeypatch):
     import run_runtime_benchmarks as bench
     class Measured:
