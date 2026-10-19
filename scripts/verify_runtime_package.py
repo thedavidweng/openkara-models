@@ -28,7 +28,6 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
 PACKAGES_DIR = ROOT / "ort" / "packages"
-SOURCE_DIR = ROOT / "ort" / "source"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 import ort_api_version  # noqa: E402
@@ -117,51 +116,19 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
             f"lock={lock['upstream']['tag']}"
         )
 
-    # Verify C API level: parse the pinned source header and compare it to
-    # the value recorded in the package build manifest. The source lock no
-    # longer carries a manually maintained ort_api_version; the header is the
-    # source of truth.
-    manifest_api = manifest.get("c_api_level", {}).get("ort_api_version")
-    tag = lock["upstream"]["tag"]
-    if SOURCE_DIR.is_dir():
-        try:
-            header_api = ort_api_version.parse_ort_api_version(SOURCE_DIR)
-        except (FileNotFoundError, ValueError) as e:
-            errors.append(f"failed to parse ORT_API_VERSION from pinned source header: {e}")
-            header_api = None
-        if header_api is not None:
-            try:
-                required = ort_api_version.required_api_version_for_tag(tag)
-            except ValueError as e:
-                errors.append(str(e))
-                required = None
-            if required is not None and header_api != required:
-                errors.append(
-                    f"pinned source ORT_API_VERSION={header_api} but required "
-                    f"{required} for {tag}"
-                )
-            if manifest_api is not None and manifest_api != header_api:
-                errors.append(
-                    f"C API level mismatch: manifest ort_api_version={manifest_api} "
-                    f"but pinned source header ORT_API_VERSION={header_api}"
-                )
-            if manifest_api is None:
-                errors.append("build manifest missing c_api_level.ort_api_version")
-    else:
-        # Source not checked out locally (e.g. CI verify step on a different
-        # runner). Fall back to the required value for the tag and require the
-        # manifest to match it.
-        try:
-            required = ort_api_version.required_api_version_for_tag(tag)
-        except ValueError as e:
-            errors.append(str(e))
-            required = None
-        if required is not None and manifest_api != required:
-            errors.append(
-                f"C API level mismatch: manifest ort_api_version={manifest_api} "
-                f"but required {required} for {tag} (pinned source not available "
-                f"to parse header)"
-            )
+    # Always verify against the exact locked upstream header; never trust a
+    # mutable local checkout or a package's self-reported API level.
+    try:
+        header = ort_api_version.pinned_header(lock["upstream"])
+        header_api = ort_api_version.parse_header(header.decode("utf-8"))
+        if manifest.get("c_api_level", {}).get("ort_api_version") != header_api:
+            errors.append(f"C API level mismatch: expected pinned header API {header_api}")
+        if files.get("onnxruntime_c_api.h") != header:
+            errors.append("packaged C API header differs from pinned upstream commit")
+        if "onnxruntime_c_api.h" not in manifest.get("files", {}):
+            errors.append("build manifest missing C API header digest")
+    except (OSError, ValueError) as e:
+        errors.append(f"cannot verify pinned upstream C API header: {e}")
 
     # Verify all files in manifest have correct digests.
     for rel, expected in manifest.get("files", {}).items():

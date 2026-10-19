@@ -143,7 +143,7 @@ class ReproducibilityTests(unittest.TestCase):
         }
         with mock.patch.object(br, "_run"):
             with mock.patch.object(br, "_assert_toolchain"):
-                with mock.patch.object(br.ort_api_version, "assert_api_version", return_value=27):
+                with mock.patch.object(br.ort_api_version, "parse_ort_api_version", return_value=27):
                     with mock.patch.object(br, "_get_submodule_state", return_value={}):
                         with mock.patch.object(br.os, "cpu_count", return_value=4):
                             platform_mock = mock.MagicMock()

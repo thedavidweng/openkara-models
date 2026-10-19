@@ -66,29 +66,22 @@ typedef struct OrtApi OrtApi;
                 ort_api_version.parse_ort_api_version(sd)
 
 
-class RequiredApiVersionTests(unittest.TestCase):
-    def test_v1_27_1_requires_27(self):
-        self.assertEqual(ort_api_version.required_api_version_for_tag("v1.27.1"), 27)
+class PinnedHeaderTests(unittest.TestCase):
+    def test_future_api_needs_no_tag_map(self):
+        self.assertEqual(ort_api_version.parse_header("#define ORT_API_VERSION 31\n"), 31)
 
-    def test_unknown_tag_raises(self):
+    def test_fetches_exact_commit(self):
+        from unittest.mock import patch, MagicMock
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b"header"
+        with patch("urllib.request.urlopen", return_value=response) as fetch:
+            result = ort_api_version.pinned_header({"repo": "microsoft/onnxruntime", "commit_sha": "a" * 40})
+        self.assertEqual(result, b"header")
+        self.assertIn("/" + "a" * 40 + "/", fetch.call_args.args[0])
+
+    def test_rejects_mutable_revision(self):
         with self.assertRaises(ValueError):
-            ort_api_version.required_api_version_for_tag("v9.99.9")
-
-
-class AssertApiVersionTests(unittest.TestCase):
-    def test_assert_passes_on_match(self):
-        with tempfile.TemporaryDirectory() as td:
-            sd = Path(td)
-            _write_header(sd, "#define ORT_API_VERSION 27\n")
-            v = ort_api_version.assert_api_version(sd, "v1.27.1")
-            self.assertEqual(v, 27)
-
-    def test_assert_exits_on_mismatch(self):
-        with tempfile.TemporaryDirectory() as td:
-            sd = Path(td)
-            _write_header(sd, "#define ORT_API_VERSION 21\n")
-            with self.assertRaises(SystemExit):
-                ort_api_version.assert_api_version(sd, "v1.27.1")
+            ort_api_version.pinned_header({"repo": "microsoft/onnxruntime", "commit_sha": "main"})
 
 
 if __name__ == "__main__":

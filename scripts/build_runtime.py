@@ -277,14 +277,8 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
     # Assert the toolchain matches the source lock before building.
     _assert_toolchain(lock, target)
 
-    # Derive the ORT C API version from the pinned source header. This
-    # replaces the manually maintained c_api_level.ort_api_version value that
-    # used to live in source-lock.json. For v1.27.1 the parsed value must be
-    # 27; ort_api_version.assert_api_version exits non-zero on mismatch.
-    tag = lock["upstream"]["tag"]
-    ort_api_version_value = ort_api_version.assert_api_version(
-        source_dir, tag, label=f"build:{target}",
-    )
+    # The source header, not the release tag, defines the API level.
+    ort_api_version_value = ort_api_version.parse_ort_api_version(source_dir)
 
     # Set SOURCE_DATE_EPOCH for reproducible builds. This environment
     # variable is respected by many build tools (cmake, gcc, clang, etc.)
@@ -320,7 +314,7 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
               str(config_path)], env=env)
 
     # Build.
-    nproc = os.cpu_count() or 4
+    nproc = min(os.cpu_count() or 1, 2)
     build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release",
                  "--parallel", str(nproc)]
     _run(build_cmd, env=env)
@@ -363,6 +357,8 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
+
+    shutil.copy2(source_dir / ort_api_version.HEADER_REL, staging / "onnxruntime_c_api.h")
 
     # Copy runtime library.
     shutil.copy2(lib_path, staging / lib_path.name)
