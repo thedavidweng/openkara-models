@@ -151,7 +151,17 @@ class DryRunTests(unittest.TestCase):
                         code = pub.main()
         self.assertEqual(code, 0, err.getvalue())
         self.assertIn("DRY-RUN", out.getvalue())
-        self.assertIn("ready to publish", out.getvalue())
+        self.assertIn("integrity verified", out.getvalue())
+        self.assertIn("does not qualify release evidence", out.getvalue())
+
+    def test_stable_execute_rejects_unfrozen_baselines_before_network_or_writes(self):
+        with mock.patch.object(pub, "_gh") as gh:
+            code, _, err = _run_main_in_process(
+                ["--release", RELEASE_ID, "--execute"], gh,
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("NOT FROZEN", err)
+        gh.assert_not_called()
 
     def test_dry_run_fails_for_nonexistent_release(self):
         with mock.patch.object(sys, "argv", ["publish_catalog_release.py", "--release", "9999-99-99-999"]):
@@ -365,7 +375,8 @@ class ExecutePathTests(unittest.TestCase):
                     out = io.StringIO()
                     err = io.StringIO()
                     with redirect_stdout(out), redirect_stderr(err):
-                        code = pub.main()
+                        with mock.patch.object(pub, "frozen_baseline_errors", return_value=[]):
+                            code = pub.main()
         return code, out.getvalue(), err.getvalue()
 
     def test_execute_creates_release_and_advances_candidate_pointer(self):

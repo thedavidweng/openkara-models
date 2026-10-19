@@ -27,9 +27,10 @@ the same (already published) release, which skips re-creating the GitHub
 release if the tag already exists and only advances the pointer.
 
 This script is a dry-run by default. Use ``--execute`` to actually create the
-GitHub release. In dry-run mode, it performs every pre-publication check that
-does not require write access: manifest validation, supply-chain verification,
-asset URL resolution + SHA-256 verification, and monotonicity.
+GitHub release. Stable execution requires a complete frozen baseline for every
+model. In dry-run mode, it checks manifest integrity, supply-chain records,
+asset URL resolution + SHA-256, and monotonicity; it does not qualify quality
+evidence or authorize promotion.
 
 Usage::
 
@@ -53,6 +54,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from validate_catalog import validate_document  # noqa: E402
+from enforce_quality_gates import frozen_baseline_errors  # noqa: E402
 
 RELEASES_DIR = ROOT / "catalog" / "releases"
 CHANNELS_DIR = ROOT / "catalog" / "channels"
@@ -319,6 +321,22 @@ def main() -> int:
 
     manifest = _load(manifest_path)
 
+    if args.execute and args.channel == "stable":
+        result = validate_document(manifest, schema="release")
+        if not result.ok:
+            print("ERROR: invalid release manifest:", file=sys.stderr)
+            for error in result.schema_errors + result.invariant_errors:
+                print(f"  {error}", file=sys.stderr)
+            return 1
+        errors = frozen_baseline_errors([
+            model["artifact_id"] for model in manifest["artifacts"]["models"]
+        ])
+        if errors:
+            print("ERROR: stable publication requires frozen measured baselines:", file=sys.stderr)
+            for error in errors:
+                print(f"  {error}", file=sys.stderr)
+            return 1
+
     # Step 1: pre-publication verification (manifest, supply-chain, assets, monotonicity).
     errors = _verify_manifest(manifest)
     if errors:
@@ -335,12 +353,12 @@ def main() -> int:
         return 1
 
     if not args.execute:
-        print(f"DRY-RUN: release {args.release} is ready to publish to {args.channel}.")
+        print(f"DRY-RUN: release {args.release} integrity verified for {args.channel}.")
         print(f"  manifest: {manifest_path}")
         print(f"  supply-chain files: {SC_DIR / args.release}")
         n_artifacts = sum(len(manifest['artifacts'].get(k, [])) for k in ('models', 'runtimes', 'bundles'))
         print(f"  artifacts: {n_artifacts} (all asset URLs verified, SHA-256 matches)")
-        print(f"  Run with --execute to create the GitHub release and advance the {args.channel} pointer.")
+        print("  This integrity check does not qualify release evidence or stable promotion.")
         return 0
 
     # Execute mode: create the GitHub release, upload, verify, advance pointer.

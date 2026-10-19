@@ -91,6 +91,6 @@
       "A precision/quantization variant that is slower or fails quality limits is not published, and its shipping code is deleted."
     ],
     "pareto_requirement": "Every new format, precision, provider, or student model must include a Pareto comparison against the current default. A candidate that is dominated by the default on all measured metrics is not published.",
-    "no_bypass": "Maintainers cannot bypass a failed gate by editing release notes. The gate is enforced by the catalog publish workflow."
+    "no_bypass": "Stable execution rejects incomplete or unfrozen baselines. Candidate report identity, full target/provider coverage and budget-result binding in the publisher remain required by #21; the standalone budget checker alone does not qualify publication."
   }
 }
