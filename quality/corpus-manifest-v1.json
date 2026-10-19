@@ -2,6 +2,60 @@
   "$defs": {
     "fixture": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "not": {
+              "required": [
+                "reference_stems"
+              ]
+            }
+          },
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "real-audio"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "generator": {
+                "properties": {
+                  "type": {
+                    "const": "fetch"
+                  },
+                  "url": {
+                    "pattern": "^https://",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url",
+                  "sha256",
+                  "size"
+                ]
+              },
+              "license": {
+                "minLength": 1,
+                "not": {
+                  "enum": [
+                    "generated",
+                    "pending",
+                    "unknown"
+                  ]
+                }
+              },
+              "tier": {
+                "const": "release"
+              }
+            },
+            "required": [
+              "reference_stems"
+            ]
+          }
+        }
+      ],
       "dependentRequired": {
         "mse_budget": [
           "mse_budget_note"
@@ -76,6 +130,10 @@
               "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             },
+            "size": {
+              "minimum": 1,
+              "type": "integer"
+            },
             "type": {
               "enum": [
                 "deterministic",
@@ -124,6 +182,27 @@
         },
         "notes": {
           "type": "string"
+        },
+        "reference_stems": {
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "const": "npz-float32-v1"
+            },
+            "order": {
+              "const": [
+                "drums",
+                "bass",
+                "other",
+                "vocals"
+              ]
+            }
+          },
+          "required": [
+            "format",
+            "order"
+          ],
+          "type": "object"
         },
         "sample_rate": {
           "minimum": 1,

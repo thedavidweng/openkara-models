@@ -89,13 +89,17 @@ def _fixture_coverage(report: dict, fixtures: dict) -> None:
                 raise ValueError("unreviewed per-fixture MSE budget")
 
 
-def _separation(rows: list[dict], real_ids: set[str]) -> dict:
+def _separation(rows: list[dict], fixtures: dict) -> dict:
     if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
         raise ValueError("measured reference-stem separation results required")
+    real_ids = {fid for fid, f in fixtures.items() if f["kind"] == "real-audio"}
     ids = [r.get("fixture_id") for r in rows]
     if len(ids) != len(set(ids)) or set(ids) != real_ids:
         raise ValueError("separation reference-stem corpus coverage mismatch")
     for row in rows:
+        source = fixtures[row["fixture_id"]]["generator"]
+        if row.get("reference_bundle") != {"sha256": source["sha256"], "size": source["size"]}:
+            raise ValueError("measured separation reference bundle identity mismatch")
         for metric in SEPARATION_DIRECTIONS:
             value = row.get(metric)
             if type(value) not in (int, float) or not math.isfinite(value):
@@ -196,7 +200,9 @@ def qualify_release(manifest: dict, download: Callable[[str], bytes]) -> list[st
                     if old.get("metrics") != baseline["baseline_metrics"]:
                         raise ValueError("baseline report metrics differ from frozen measurements")
                 candidate = gates._aggregate_quality(quality) | gates._aggregate_runtime(performance)
-                candidate.update(_separation(q["separation"], real_ids))
+                if q["separation"] != quality.get("separation"):
+                    raise ValueError("quality/separation producer report mismatch")
+                candidate.update(_separation(q["separation"], fixtures))
                 problems = gates._per_fixture_budget_violations(quality)
                 budgets = gates._load_json(gates.BUDGETS_PATH)["budgets"] + [
                     {"metric": m, "direction": d, "release_max_delta": 0}

@@ -119,6 +119,68 @@
       "const": "openkara.quality-report/v1",
       "type": "string"
     },
+    "separation": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "chunk_boundary_error": {
+            "type": "number"
+          },
+          "fixture_id": {
+            "type": "string"
+          },
+          "leakage_db": {
+            "type": "number"
+          },
+          "low_frequency_error_db": {
+            "type": "number"
+          },
+          "mrstft_loss": {
+            "type": "number"
+          },
+          "reference_bundle": {
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "size": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "sha256",
+              "size"
+            ],
+            "type": "object"
+          },
+          "sdr_db": {
+            "type": "number"
+          },
+          "si_sdr_db": {
+            "type": "number"
+          },
+          "transient_error": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "fixture_id",
+          "reference_bundle",
+          "si_sdr_db",
+          "sdr_db",
+          "leakage_db",
+          "mrstft_loss",
+          "transient_error",
+          "low_frequency_error_db",
+          "chunk_boundary_error"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "tier": {
       "enum": [
         "pr",

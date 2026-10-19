@@ -37,6 +37,12 @@ def validate_report(report: dict[str, Any]) -> list[str]:
         errors.append(f"schema: {e.message} at {list(e.absolute_path)}")
         return errors
 
+    ids = [row["fixture_id"] for row in report.get("separation", [])]
+    if len(ids) != len(set(ids)):
+        errors.append("duplicate separation fixtures")
+    for row in report.get("separation", []):
+        if any(isinstance(v, (int, float)) and not math.isfinite(v) for v in row.values()):
+            errors.append(f"{row['fixture_id']}: separation metrics must be finite")
     threshold = report.get("mse_threshold", float("inf"))
     if not math.isfinite(threshold):
         errors.append("mse_threshold must be finite")

@@ -16,8 +16,8 @@ metrics, independently tested with synthetic known-answer cases in
 All functions take float arrays shaped ``[channels, samples]`` (mono
 ``[samples]`` is accepted and broadcast to one channel) and are
 deterministic. They are consumed by the release tier of
-``run_quality_suite.py`` once the licensed reference-stem corpus
-(issue #21, step 2) provides ground-truth stems; the PR tier has no
+``run_quality_suite.py`` when explicitly provisioned, hash-bound licensed
+reference bundles provide ground-truth stems; the PR tier has no
 ground truth and keeps its correctness metrics.
 
 Self-check::
