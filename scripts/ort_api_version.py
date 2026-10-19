@@ -23,6 +23,14 @@ from pathlib import Path
 # The header path relative to the ORT source root.
 HEADER_REL = "include/onnxruntime/core/session/onnxruntime_c_api.h"
 
+
+def required_headers(header: bytes) -> list[str]:
+    """The main API header includes the EP API header on newer ORT versions."""
+    names = ["onnxruntime_c_api.h"]
+    if re.search(rb'^\s*#\s*include\s*"onnxruntime_ep_c_api.h"', header, re.MULTILINE):
+        names.append("onnxruntime_ep_c_api.h")
+    return names
+
 # Regex matching:  #define ORT_API_VERSION 27
 _API_VERSION_RE = re.compile(
     r"^\s*#\s*define\s+ORT_API_VERSION\s+(\d+)\s*$",
@@ -61,7 +69,7 @@ def parse_header(text: str) -> int:
 
 
 
-def pinned_header(upstream: dict) -> bytes:
+def pinned_header(upstream: dict, name: str = "onnxruntime_c_api.h") -> bytes:
     """Fetch only the small C header at the exact locked upstream commit."""
     from urllib.request import urlopen
 
@@ -70,7 +78,10 @@ def pinned_header(upstream: dict) -> bytes:
         raise ValueError("upstream commit_sha must be a full immutable commit")
     if upstream["repo"] != "microsoft/onnxruntime":
         raise ValueError("unexpected ORT upstream repository")
-    url = f"https://raw.githubusercontent.com/microsoft/onnxruntime/{commit}/{HEADER_REL}"
+    if name not in ("onnxruntime_c_api.h", "onnxruntime_ep_c_api.h"):
+        raise ValueError("unexpected ORT API header")
+    rel = str(Path(HEADER_REL).with_name(name)).replace("\\", "/")
+    url = f"https://raw.githubusercontent.com/microsoft/onnxruntime/{commit}/{rel}"
     with urlopen(url, timeout=30) as response:
         return response.read()
 

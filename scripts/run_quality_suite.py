@@ -32,6 +32,7 @@ import gc
 import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -208,7 +209,7 @@ def _correctness_metrics(pytorch_out: np.ndarray, onnx_out: np.ndarray,
         metrics["expected_shape"] = expected_shape
         metrics["expected_shape_match"] = list(onnx_out.shape) == expected_shape
     # Numerical comparison.
-    if metrics["shape_match"] and not metrics["onnx_has_nan"] and not metrics["onnx_has_inf"]:
+    if metrics["shape_match"] and not metrics["onnx_has_nan"] and not metrics["onnx_has_inf"] and not metrics["pytorch_has_nan"] and not metrics["pytorch_has_inf"]:
         diff = np.abs(onnx_out.astype(np.float64) - pytorch_out.astype(np.float64))
         metrics["mse"] = float((diff ** 2).mean())
         metrics["mae"] = float(diff.mean())
@@ -223,13 +224,13 @@ def _correctness_metrics(pytorch_out: np.ndarray, onnx_out: np.ndarray,
 
 
 def run_fixture(fixture: dict[str, Any], model_name: str, onnx_path: str,
-                corpus_dir: Path | None = None) -> dict[str, Any]:
+                corpus_dir: Path | None = None, native=None) -> dict[str, Any]:
     """Run one fixture through PyTorch + ONNX and return metrics."""
     from corpus_audio import load_fixture, separation_result
     inp, reference_stems = load_fixture(fixture, corpus_dir)
     print(f"  {fixture['fixture_id']}: {inp.shape} ...", end=" ", flush=True)
     pytorch_out = _compute_pytorch_reference(model_name, inp)
-    onnx_out = _compute_onnx_output(onnx_path, inp)
+    onnx_out = native.separate(Path(onnx_path), inp) if native is not None else _compute_onnx_output(onnx_path, inp)
     metrics = _correctness_metrics(pytorch_out, onnx_out, fixture.get("expected_output_shape"))
     if reference_stems is not None:
         metrics["separation"] = separation_result(fixture, reference_stems, onnx_out, SEGMENT_FRAMES)
@@ -250,6 +251,10 @@ def main() -> int:
                         help="PyTorch model name (default: htdemucs).")
     parser.add_argument("--onnx", required=True, type=Path,
                         help="ONNX model path.")
+    parser.add_argument("--runtime", type=Path, help="Exact candidate runtime archive; required for release tier.")
+    parser.add_argument("--target", default=None)
+    parser.add_argument("--provider", choices=["cpu", "coreml", "xnnpack", "directml"], default="cpu")
+    parser.add_argument("--ort-source", type=Path, help="Optional source header cross-check; uses packaged headers.")
     parser.add_argument("--corpus-dir", type=Path, help="Explicitly provisioned <sha256>.npz reference bundles (no downloads).")
     parser.add_argument("--report", type=Path, default=Path("quality-report.json"),
                         help="Output report JSON path.")
@@ -259,6 +264,18 @@ def main() -> int:
         print(f"ERROR: ONNX model not found: {args.onnx}", file=sys.stderr)
         return 1
 
+    if args.tier == "release" and args.runtime is None:
+        parser.error("release quality requires --runtime; a Python wheel is not candidate archive evidence")
+    with tempfile.TemporaryDirectory() as directory:
+        native = None
+        if args.runtime is not None:
+            from native_quality import NativeRuntime
+            from run_runtime_benchmarks import _detect_target
+            native = NativeRuntime(args.runtime, args.ort_source, args.target or _detect_target(), args.provider, Path(directory))
+        return run_suite(args, native)
+
+
+def run_suite(args, native=None) -> int:
     fixtures = _load_corpus(args.tier)
     if not fixtures:
         print(f"ERROR: no {args.tier} fixtures in corpus manifest", file=sys.stderr)
@@ -269,7 +286,11 @@ def main() -> int:
     results: list[dict[str, Any]] = []
     separation = []
     for fixture in fixtures:
-        result = run_fixture(fixture, args.model, str(args.onnx), args.corpus_dir)
+        try:
+            result = run_fixture(fixture, args.model, str(args.onnx), args.corpus_dir, native)
+        except (ValueError, OSError) as exc:
+            print(f"FAIL: {fixture['fixture_id']}: {exc}", file=sys.stderr)
+            return 2
         if "separation" in result:
             separation.append(result.pop("separation"))
         # A fixture may carry its own measured MSE budget (e.g. the impulse
@@ -282,6 +303,7 @@ def main() -> int:
         results.append(result)
     report = {
         "schema_version": GENERATOR_VERSION,
+        "measurement_backend": "native-c-api" if native else "python-wheel-conversion-only",
         "model": args.model,
         "onnx_path": str(args.onnx),
         "tier": args.tier,
@@ -289,6 +311,11 @@ def main() -> int:
         "results": results,
         "separation": separation,
     }
+    if native:
+        from run_native_smoke import _sha256_file
+        size, sha = _sha256_file(args.onnx)
+        report.update(runtime_archive=native.archive, target=native.target, provider=native.provider)
+        report["model_digest"] = {"sha256": sha, "size": size}
     args.report.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
     print(f"\nreport: {args.report}")
 
@@ -313,7 +340,7 @@ def gate_failures(results: list[dict[str, Any]], mse_threshold: float) -> list[s
     failures: list[str] = []
     for r in results:
         fid = r["fixture_id"]
-        if r["onnx_has_nan"] or r["onnx_has_inf"]:
+        if r["onnx_has_nan"] or r["onnx_has_inf"] or r["pytorch_has_nan"] or r["pytorch_has_inf"]:
             failures.append(f"{fid}: NaN/Inf in output")
         if r.get("shape_match") is False:
             failures.append(f"{fid}: ONNX vs PyTorch shape mismatch")

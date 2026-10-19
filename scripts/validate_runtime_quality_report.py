@@ -36,6 +36,12 @@ def validate_report(report: dict[str, Any]) -> list[str]:
             errors.append(f"{r['fixture_id']}: shape errors: {r['shape_errors']}")
         if r.get("rtf_warm", 0) > threshold:
             errors.append(f"{r['fixture_id']}: RTF {r['rtf_warm']} > threshold {threshold}")
+        if report.get("measurement_backend") == "native-c-api":
+            duration = r["audio_duration_s"]
+            if not duration or not math.isclose(r["rtf_first"] * duration, r.get("end_to_end_s", -1), rel_tol=1e-9):
+                errors.append(f"{r['fixture_id']}: inconsistent native end-to-end timing")
+            if not duration or not math.isclose(r["rtf_warm"] * duration, r["warm_median_s"], rel_tol=1e-9):
+                errors.append(f"{r['fixture_id']}: inconsistent native warm timing")
     return errors
 
 

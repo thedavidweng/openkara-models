@@ -4,6 +4,11 @@
   "additionalProperties": false,
   "description": "Schema for the model correctness + quality report produced by scripts/run_quality_suite.py.",
   "properties": {
+    "measurement_backend": {"enum": ["native-c-api", "python-wheel-conversion-only"], "type": "string"},
+    "model_digest": {"additionalProperties": false, "properties": {"sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "size": {"minimum": 1, "type": "integer"}}, "required": ["sha256", "size"], "type": "object"},
+    "provider": {"type": "string"},
+    "runtime_archive": {"additionalProperties": false, "properties": {"installed_size": {"minimum": 0, "type": "integer"}, "name": {"type": "string"}, "sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "size": {"minimum": 0, "type": "integer"}}, "required": ["name", "sha256", "size", "installed_size"], "type": "object"},
+    "target": {"type": "string"},
     "model": {
       "type": "string"
     },

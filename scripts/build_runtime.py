@@ -358,7 +358,9 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
 
-    shutil.copy2(source_dir / ort_api_version.HEADER_REL, staging / "onnxruntime_c_api.h")
+    header = source_dir / ort_api_version.HEADER_REL
+    for name in ort_api_version.required_headers(header.read_bytes()):
+        shutil.copy2(header.with_name(name), staging / name)
 
     # Copy runtime library.
     shutil.copy2(lib_path, staging / lib_path.name)

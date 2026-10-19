@@ -36,12 +36,8 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import gc
 import hashlib
 import json
-import os
-import resource
-import statistics
 import sys
 import tempfile
 from pathlib import Path
@@ -84,119 +80,20 @@ def _load_corpus(tier: str | None) -> list[dict[str, Any]]:
     return fixtures
 
 
-def _extract_runtime(archive: Path, dest: Path) -> Path:
-    dest.mkdir(parents=True, exist_ok=True)
-    archive_utils.safe_extract(archive, dest)
-    for p in dest.rglob("*"):
-        low = p.name.lower()
-        if low.endswith((".so", ".dylib", ".dll")) and "onnxruntime" in low:
-            return p
-    raise FileNotFoundError(f"no onnxruntime shared library found in {archive}")
-
-
-def _load_session(lib_path: Path, model_path: str):
-    import onnxruntime as ort
-    os.environ["ORT_RUNTIMES"] = str(lib_path)
-    so = ort.SessionOptions()
-    so.enable_profiling = True
-    return ort.InferenceSession(model_path, so, providers=["CPUExecutionProvider"])
-
-
 def _installed_size(archive: Path) -> int:
     """Sum of extracted file bytes."""
     return archive_utils.installed_size(archive)
 
 
-def run_fixture(
-    lib_path: Path, fixture: dict[str, Any], onnx_path: str,
-    warmup: int, iters: int,
-) -> dict[str, Any]:
-    """Run one fixture through the runtime and return metrics."""
-    import synthetic_fixtures as sf
-    import time
-    inp = sf.generate_fixture(fixture)
-    # Add batch dimension for the model.
-    batched = inp[np.newaxis, ...]
-    audio_duration = fixture["frames"] / fixture["sample_rate"]
-
-    gc.collect()
-    rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-
-    t0 = time.perf_counter()
-    sess = _load_session(lib_path, onnx_path)
-    cold_load = time.perf_counter() - t0
-
-    input_name = sess.get_inputs()[0].name
-
-    # First window.
-    t0 = time.perf_counter()
-    out = sess.run(None, {input_name: batched})
-    first_window = time.perf_counter() - t0
-    rtf_first = first_window / audio_duration
-
-    # Shape + finiteness.
-    shape_errors: list[str] = []
-    for i, o in enumerate(out):
-        if not np.all(np.isfinite(o)):
-            shape_errors.append(f"output[{i}] contains NaN or Inf")
-        expected = fixture.get("expected_output_shape")
-        if expected is not None and list(o.shape) != expected:
-            shape_errors.append(f"output[{i}] shape {list(o.shape)} != expected {expected}")
-
-    # Warm up.
-    for _ in range(warmup):
-        sess.run(None, {input_name: batched})
-
-    # Measure.
-    latencies: list[float] = []
-    for _ in range(iters):
-        t = time.perf_counter()
-        sess.run(None, {input_name: batched})
-        latencies.append(time.perf_counter() - t)
-
-    rss_after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    warm_median = statistics.median(latencies)
-    warm_p95 = sorted(latencies)[int(0.95 * len(latencies))]
-    rtf_warm = warm_median / audio_duration
-
-    # Provider + fallback from profiler.
-    providers = sess.get_providers()
-    fallback_nodes: int | None = None
-    try:
-        prof_path = sess.end_profiling()
-        prof = json.loads(Path(prof_path).read_text())
-        cpu_nodes = sum(
-            1 for ev in prof.get("traceEvents", [])
-            if ev.get("cat") == "Node" and ev.get("args", {}).get("provider") == "CPUExecutionProvider"
-        )
-        fallback_nodes = cpu_nodes
-        Path(prof_path).unlink(missing_ok=True)
-    except Exception:
-        pass
-
-    del sess
-    gc.collect()
-
-    return {
-        "fixture_id": fixture["fixture_id"],
-        "category": fixture["category"],
-        "tier": fixture["tier"],
-        "frames": fixture["frames"],
-        "audio_duration_s": audio_duration,
-        "cold_load_s": cold_load,
-        "first_window_s": first_window,
-        "warm_median_s": warm_median,
-        "warm_p95_s": warm_p95,
-        "warm_iters": iters,
-        "rtf_first": rtf_first,
-        "rtf_warm": rtf_warm,
-        "peak_rss_kb": rss_after,
-        "rss_delta_kb": rss_after - rss_before,
-        "providers": providers,
-        "fallback_node_count": fallback_nodes,
-        "output_shape": [list(o.shape) for o in out],
-        "shape_errors": shape_errors,
-    }
+def run_fixture(native, fixture: dict[str, Any], onnx_path: str,
+                warmup: int, iters: int, corpus_dir: Path | None = None) -> dict[str, Any]:
+    from corpus_audio import load_fixture
+    inp, _ = load_fixture(fixture, corpus_dir)
+    output, metrics = native.measure(Path(onnx_path), inp, fixture["sample_rate"], warmup, iters)
+    expected = fixture.get("expected_output_shape")
+    if expected is not None and list(output.shape) != expected:
+        metrics["shape_errors"].append("native waveform output differs from expected shape")
+    return metrics | {"fixture_id": fixture["fixture_id"], "category": fixture["category"], "tier": fixture["tier"]}
 
 
 def _markdown_summary(report: dict[str, Any]) -> str:
@@ -225,6 +122,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the runtime quality suite.")
     parser.add_argument("--runtime", required=True, type=Path, help="Runtime archive.")
     parser.add_argument("--onnx", required=True, type=Path, help="ONNX model path.")
+    parser.add_argument("--target", default=None, help="Target triple (default: native host).")
+    parser.add_argument("--provider", choices=["cpu", "coreml", "xnnpack", "directml"], default="cpu")
+    parser.add_argument("--ort-source", type=Path, help="Optional source header cross-check; uses packaged headers.")
+    parser.add_argument("--corpus-dir", type=Path)
     parser.add_argument("--tier", choices=["pr", "release"], default="pr")
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)
@@ -259,18 +160,25 @@ def main() -> int:
     rtf_threshold = RTF_PR_MAX if args.tier == "pr" else RTF_RELEASE_MAX
 
     with tempfile.TemporaryDirectory() as tmpd:
-        lib_path = _extract_runtime(args.runtime, Path(tmpd))
-        print(f"runtime library: {lib_path}")
+        from native_quality import NativeRuntime
+        from run_runtime_benchmarks import _detect_target
+        native = NativeRuntime(args.runtime, args.ort_source, args.target or _detect_target(), args.provider, Path(tmpd))
         print(f"Running {len(fixtures)} {args.tier}-tier fixture(s)...")
         results: list[dict[str, Any]] = []
         for fixture in fixtures:
             print(f"  {fixture['fixture_id']}...", end=" ", flush=True)
-            r = run_fixture(lib_path, fixture, str(args.onnx), args.warmup, args.iters)
+            r = run_fixture(native, fixture, str(args.onnx), args.warmup, args.iters, args.corpus_dir)
             results.append(r)
             print(f"rtf_warm={r['rtf_warm']:.2f}")
 
+    model_size, model_sha = _sha256_file(args.onnx)
     report = {
         "schema_version": GENERATOR_VERSION,
+        "measurement_backend": "native-c-api",
+        "measurement_scope": "native-per-window-warm; end-to-end-first-including-process-io-dsp",
+        "target": args.target or _detect_target(),
+        "provider": args.provider,
+        "model_digest": {"sha256": model_sha, "size": model_size},
         "runtime_archive": {
             "name": args.runtime.name,
             "sha256": archive_sha,
@@ -282,7 +190,7 @@ def main() -> int:
         "rtf_threshold": rtf_threshold,
         "results": results,
     }
-    args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    args.report.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
     print(f"\nreport: {args.report}")
 
     if args.summary:

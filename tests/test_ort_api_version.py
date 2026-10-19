@@ -86,3 +86,8 @@ class PinnedHeaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_api_header_dependency_is_explicit():
+    assert ort_api_version.required_headers(b'#define ORT_API_VERSION 27\n') == ['onnxruntime_c_api.h']
+    assert ort_api_version.required_headers(b'#include "onnxruntime_ep_c_api.h"\n') == ['onnxruntime_c_api.h', 'onnxruntime_ep_c_api.h']

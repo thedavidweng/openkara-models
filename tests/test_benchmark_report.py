@@ -16,6 +16,7 @@ SCRIPTS = ROOT / "scripts"
 def _valid_report() -> dict:
     return {
         "schema_version": "openkara.runtime-benchmark/v1",
+        "measurement_backend": "native-c-api",
         "runtime_archive": {
             "name": "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz",
             "sha256": "a" * 64,
@@ -52,6 +53,7 @@ def _valid_spectral_report() -> dict:
     optional interface tag."""
     return {
         "schema_version": "openkara.runtime-benchmark/v1",
+        "measurement_backend": "native-c-api",
         "runtime_archive": {
             "name": "onnxruntime-1.27.1-openkara-x86_64-unknown-linux-gnu.tar.gz",
             "sha256": "b" * 64,
@@ -178,3 +180,10 @@ def test_benchmark_script_help() -> None:
     assert r.returncode == 0
     assert "--frames" in r.stdout
     assert "--runtime" in r.stdout
+
+
+def test_release_rejects_installed_wheel():
+    import validate_benchmark_report as v
+    report = _valid_report()
+    report['measurement_backend'] = 'installed-wheel-diagnostic'
+    assert any('native-c-api' in e for e in v.validate_report(report, tier='release'))

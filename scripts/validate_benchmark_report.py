@@ -59,6 +59,8 @@ def validate_report(report: dict[str, Any], tier: str = "pr") -> list[str]:
 
     # Release tier: must be full window.
     if tier == "release":
+        if report.get("measurement_backend") != "native-c-api":
+            errors.append("release benchmark requires native-c-api, not an installed wheel")
         if report.get("frames") != FULL_WINDOW_FRAMES:
             errors.append(
                 f"release-tier report must use frames={FULL_WINDOW_FRAMES}, "

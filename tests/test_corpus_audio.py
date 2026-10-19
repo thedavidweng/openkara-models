@@ -82,3 +82,16 @@ def test_quality_producer_uses_real_reference(tmp_path, monkeypatch):
     assert result["mse"] == 0
     assert result["separation"]["sdr_db"] > 10
     assert result["separation"]["reference_bundle"]["size"] == fixture["generator"]["size"]
+
+
+def test_boundary_metric_known_answer_uses_actual_segment(tmp_path):
+    fixture = bundle(tmp_path)
+    _, stems = load_fixture(fixture, tmp_path)
+    estimate = stems[None].astype(np.float64).copy()
+    # Actual 4096-sample segment => hop 2048, radius 512, five disjoint regions.
+    near = np.zeros(fixture['frames'], dtype=bool)
+    for boundary in range(2048, fixture['frames'], 2048):
+        near[boundary - 512:boundary + 512] = True
+    estimate[..., near] += 0.01
+    result = separation_result(fixture, stems, estimate, 4096)
+    assert result['chunk_boundary_error'] == pytest.approx(0.0001, rel=1e-10)

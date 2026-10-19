@@ -16,7 +16,7 @@ Produces a structured comparison report covering:
 
 The size/file comparison runs without a model or runtime. The inference
 comparison requires ``--model`` (an ONNX model) and loads each runtime archive's
-shared library via ``onnxruntime`` with ``ORT dynamic library loading``. On CI
+shared library directly through the native C API (not a Python wheel). On CI
 this runs on the native runner for each target.
 
 Fails (non-zero exit) if:
@@ -40,19 +40,18 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import gc
 import hashlib
 import json
-import statistics
+import math
+import subprocess
 import sys
-import time
+import tempfile
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import archive_utils  # noqa: E402
-import runtime_inputs  # noqa: E402
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -67,7 +66,7 @@ def _find_lib(files: dict[str, bytes]) -> str | None:
     """Return the archive member name of the runtime shared library."""
     for name in sorted(files):
         low = name.lower()
-        if low.endswith((".so", ".dylib", ".dll")) and "onnxruntime" in low:
+        if Path(low).name in {"libonnxruntime.so", "libonnxruntime.dylib", "onnxruntime.dll"}:
             return name
     return None
 
@@ -103,128 +102,44 @@ def size_comparison(full: Path, reduced: Path) -> dict[str, Any]:
     }
 
 
-def _load_session_with_lib(lib_bytes: bytes, lib_suffix: str, model_path: str):
-    """Load the runtime shared library from bytes and create an ORT session.
-
-    Writes the library to a temp file, sets ``onnxruntime`` to load it via
-    ``ort.SetCustomOpManager`` / dynamic loading, then creates an
-    ``InferenceSession``. Returns the session.
-    """
-    import onnxruntime as ort
-    import tempfile, os
-    tmp = tempfile.NamedTemporaryFile(suffix=lib_suffix, delete=False)
-    tmp.write(lib_bytes)
-    tmp.close()
-    # ORT supports loading a custom runtime via the C API; the Python helper
-    # is ort.get_available_providers() after setting the library path. For a
-    # fully custom build we use the shared library override env var.
-    os.environ["ORT_RUNTIMES"] = tmp.name
-    so = ort.SessionOptions()
-    try:
-        sess = ort.InferenceSession(model_path, so, providers=["CPUExecutionProvider"])
-    finally:
-        os.unlink(tmp.name)
-    return sess
-
-
 def inference_comparison(
     full: Path, reduced: Path, model_path: Path, frames: int,
     warmup: int, iters: int, tolerance: float,
+    target: str | None = None, provider: str = "cpu", source: Path | None = None,
 ) -> dict[str, Any]:
-    """Run the model through both runtimes and compare.
-
-    Returns a report dict. Raises RuntimeError if the reduced runtime cannot
-    load the model or output diverges beyond tolerance.
-    """
+    """Measure the actual two archives and compare every raw output tensor."""
     import numpy as np
+    from native_quality import NativeRuntime
+    from run_runtime_benchmarks import _detect_target
 
-    full_files = _extract_archive(full)
-    red_files = _extract_archive(reduced)
-    full_lib = _find_lib(full_files)
-    red_lib = _find_lib(red_files)
-    if not full_lib or not red_lib:
-        raise RuntimeError("could not locate runtime library in one of the archives")
-
-    report: dict[str, Any] = {}
-
-    # Load full runtime. The spectral-core feed (spectral + mix) is synthesized
-    # from a deterministic waveform; both runtimes are fed the same tensors so
-    # the numerical comparison is meaningful.
-    t0 = time.perf_counter()
-    full_sess = _load_session_with_lib(full_files[full_lib], Path(full_lib).suffix, str(model_path))
-    full_cold_load = time.perf_counter() - t0
-    feed = runtime_inputs.build_feed(full_sess, frames)
-    full_sess.run(None, feed)
-
-    # Load reduced runtime.
-    t0 = time.perf_counter()
-    try:
-        red_sess = _load_session_with_lib(red_files[red_lib], Path(red_lib).suffix, str(model_path))
-    except Exception as e:
-        report["reduced_load_error"] = str(e)
-        report["reduced_load_failed"] = True
-        return report
-    red_cold_load = time.perf_counter() - t0
-
-    # Warm up + measure.
-    def _bench(sess) -> dict[str, Any]:
-        bench_feed = runtime_inputs.build_feed(sess, frames)
-        for _ in range(warmup):
-            sess.run(None, bench_feed)
-        import resource
-        latencies: list[float] = []
-        for _ in range(iters):
-            t = time.perf_counter()
-            sess.run(None, bench_feed)
-            latencies.append(time.perf_counter() - t)
-        peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if frames != 343980 or warmup < 0 or iters < 1 or not math.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("comparison requires one full 343980-frame window, positive iters and finite non-negative warmup/tolerance")
+    mix = np.random.default_rng(42).normal(0, 0.01, (2, frames)).astype(np.float32)
+    with tempfile.TemporaryDirectory() as directory:
+        runtimes = [NativeRuntime(archive, source, target or _detect_target(), provider,
+                                  Path(directory) / name)
+                    for archive, name in ((full, "full"), (reduced, "reduced"))]
+        metrics = [rt.measure(model_path, mix, 44100, warmup, iters)[1] for rt in runtimes]
+        full_out, red_out = [rt.raw_outputs for rt in runtimes]
+        if len(full_out) != len(red_out) or not full_out:
+            raise ValueError("native output counts differ or are empty")
+        max_abs, squared_error, count = 0.0, 0.0, 0
+        for fo, ro in zip(full_out, red_out):
+            if fo.shape != ro.shape or not np.isfinite(fo).all() or not np.isfinite(ro).all():
+                raise ValueError("native output shape/finite validation failed")
+            diff = fo.astype(np.float64) - ro.astype(np.float64)
+            max_abs = max(max_abs, float(np.abs(diff).max()))
+            squared_error += float((diff ** 2).sum())
+            count += diff.size
         return {
-            "cold_load_s": None,
-            "warm_median_s": statistics.median(latencies),
-            "warm_p95_s": sorted(latencies)[int(0.95 * len(latencies))],
-            "first_window_s": latencies[0],
-            "peak_rss_kb": peak_rss,
+            "measurement_backend": "native-c-api",
+            "full": metrics[0] | {"runtime_archive": runtimes[0].archive},
+            "reduced": metrics[1] | {"runtime_archive": runtimes[1].archive},
+            "output_max_abs": max_abs, "output_mse": squared_error / count,
+            "tolerance": tolerance,
+            "passed": max_abs <= tolerance and
+                      metrics[0]["fallback_node_count"] == metrics[1]["fallback_node_count"],
         }
-
-    full_metrics = _bench(full_sess)
-    red_metrics = _bench(red_sess)
-    full_metrics["cold_load_s"] = full_cold_load
-    red_metrics["cold_load_s"] = red_cold_load
-
-    # Output equivalence. Both runtimes are fed the same deterministic input.
-    full_out = full_sess.run(None, feed)
-    red_out = red_sess.run(None, feed)
-    max_abs = 0.0
-    mse = 0.0
-    n = 0
-    for fo, ro in zip(full_out, red_out):
-        diff = np.abs(fo.astype(np.float64) - ro.astype(np.float64))
-        max_abs = max(max_abs, float(diff.max()))
-        mse += float((diff ** 2).sum())
-        n += diff.size
-    mse /= max(n, 1)
-
-    # Provider assignment + fallback node count.
-    def _providers(sess) -> dict[str, Any]:
-        try:
-            opts = sess.get_session_options()
-            # fallback node count is not directly exposed; use the model
-            # metadata / session profiler. We report providers available.
-            return {"providers": sess.get_providers()}
-        except Exception:
-            return {"providers": sess.get_providers()}
-
-    report = {
-        "full": full_metrics | _providers(full_sess),
-        "reduced": red_metrics | _providers(red_sess),
-        "output_max_abs": max_abs,
-        "output_mse": mse,
-        "tolerance": tolerance,
-        "passed": max_abs <= tolerance,
-    }
-    del full_sess, red_sess
-    gc.collect()
-    return report
 
 
 def main() -> int:
@@ -241,8 +156,13 @@ def main() -> int:
                         help="Max acceptable output max-abs error (default 0 = bit-identical).")
     parser.add_argument("--report", type=Path, default=Path("runtime-comparison-report.json"),
                         help="Output report JSON path.")
+    parser.add_argument("--target")
+    parser.add_argument("--provider", choices=["cpu", "coreml", "xnnpack", "directml"], default="cpu")
+    parser.add_argument("--ort-source", type=Path, help="Optional source header cross-check.")
     args = parser.parse_args()
 
+    if args.frames != 343980 or args.warmup < 0 or args.iters < 1 or not math.isfinite(args.tolerance) or args.tolerance < 0:
+        parser.error("requires frames=343980, warmup >= 0, iters >= 1 and finite tolerance >= 0")
     if not args.full.is_file() or not args.reduced.is_file():
         print("ERROR: archive not found", file=sys.stderr)
         return 1
@@ -263,23 +183,24 @@ def main() -> int:
             print(f"ERROR: model not found: {args.model}", file=sys.stderr)
             return 1
         print("Running inference comparison...")
-        report["inference"] = inference_comparison(
-            args.full, args.reduced, args.model, args.frames,
-            args.warmup, args.iters, args.tolerance,
-        )
+        try:
+            report["inference"] = inference_comparison(
+                args.full, args.reduced, args.model, args.frames,
+                args.warmup, args.iters, args.tolerance, args.target, args.provider, args.ort_source,
+            )
+        except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            report["inference"] = {"passed": False, "error": str(exc)}
         inf = report["inference"]
-        if inf.get("reduced_load_failed"):
-            print("FAIL: reduced runtime could not load the model", file=sys.stderr)
-            print(f"  error: {inf['reduced_load_error']}", file=sys.stderr)
-            args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-            return 2
-        print(f"  output max-abs: {inf['output_max_abs']} (tolerance {inf['tolerance']})")
+        if "error" in inf:
+            print(f"FAIL: native comparison: {inf['error']}", file=sys.stderr)
+        else:
+            print(f"  output max-abs: {inf['output_max_abs']} (tolerance {inf['tolerance']})")
         if not inf["passed"]:
             print("FAIL: reduced runtime output diverges beyond tolerance", file=sys.stderr)
-            args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+            args.report.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
             return 2
 
-    args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    args.report.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
     print(f"OK: report written to {args.report}")
     return 0
 

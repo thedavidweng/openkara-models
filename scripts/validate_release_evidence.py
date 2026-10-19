@@ -158,6 +158,14 @@ def qualify_release(manifest: dict, download: Callable[[str], bytes]) -> list[st
                     if problems or report["tier"] != "release":
                         raise ValueError(f"invalid release report: {problems}")
                     _fixture_coverage(report, fixtures)
+                for report in (quality, performance):
+                    if (report.get("measurement_backend"), report.get("target"), report.get("provider")) != ("native-c-api", key[2], key[3]):
+                        raise ValueError("native producer backend/target/provider identity mismatch")
+                    archive = report["runtime_archive"]
+                    if (archive["sha256"], archive["size"]) != (runtime["archive_digest"], runtime["byte_size"]):
+                        raise ValueError("producer runtime archive mismatch")
+                    if report.get("model_digest") != {"sha256": model["archive_digest"], "size": model["byte_size"]}:
+                        raise ValueError("producer model bytes mismatch")
                 archive = performance["runtime_archive"]
                 if (archive["sha256"], archive["size"]) != (runtime["archive_digest"], runtime["byte_size"]):
                     raise ValueError("performance runtime archive mismatch")

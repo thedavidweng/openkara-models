@@ -33,9 +33,8 @@ Usage::
 The runtime archive is extracted with archive_utils.safe_extract. The harness
 binary is built into ``ort/smoke/build/`` via CMake.
 
-For DirectML diagnostics, pass
-``--allow-skip-no-gpu`` to gracefully skip when the provider cannot initialize
-due to missing hardware (e.g. DirectML on a GPU-less CI runner). The report
+For DirectML diagnostics, pass ``--allow-skip-no-gpu`` to record the observed
+C0262002 invalid-adapter failure as a skip (not proof of hardware absence). The report
 will contain ``session_creation: "skipped"`` and the script exits 0. This is not release qualification; all other errors fail.
 """
 
@@ -71,11 +70,11 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 
 def _find_lib(dest: Path) -> Path:
-    for p in dest.rglob("*"):
-        low = p.name.lower()
-        if low.endswith((".so", ".dylib", ".dll")) and "onnxruntime" in low:
-            return p
-    raise FileNotFoundError(f"no onnxruntime shared library found in extracted runtime")
+    libraries = [p for p in dest.rglob("*") if p.is_file() and p.name.lower() in
+                 {"libonnxruntime.so", "libonnxruntime.dylib", "onnxruntime.dll"}]
+    if len(libraries) != 1:
+        raise ValueError("runtime archive must contain exactly one ORT runtime library")
+    return libraries[0]
 
 
 def _build_harness(ort_source: Path, build_dir: Path) -> Path:
@@ -90,6 +89,7 @@ def _build_harness(ort_source: Path, build_dir: Path) -> Path:
     r = subprocess.run(configure, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"cmake configure failed:\n{r.stderr}")
+    # Keep even the small harness within the shared-host two-job limit.
     build = ["cmake", "--build", str(build_dir), "--config", "Release",
              "--parallel", str(min(2, os.cpu_count() or 1))]
     r = subprocess.run(build, capture_output=True, text=True)
@@ -162,11 +162,6 @@ def run_smoke(
         }
     data["harness_exit_code"] = r.returncode
     return data
-
-
-# Providers that require dedicated hardware (GPU/NPU) and may be legitimately
-# unavailable on some CI runners (e.g. GitHub-hosted Windows has no GPU).
-HARDWARE_PROVIDERS = {"directml", "coreml"}
 
 
 def hardware_unavailable(provider: str, error: str) -> bool:
@@ -245,8 +240,8 @@ def main() -> int:
                         help="Output JSON report path.")
     parser.add_argument("--allow-skip-no-gpu", action="store_true",
                         help="For DirectML diagnostics, "
-                             "gracefully skip when the provider cannot initialize due "
-                             "to missing hardware. Emits a 'skipped' report and exits 0. "
+                             "record the observed C0262002 invalid-adapter failure "
+                             "as skipped and exit 0, without proving hardware absence. "
                              "Never qualifies a release.")
     args = parser.parse_args()
 
@@ -320,11 +315,8 @@ def main() -> int:
         "harness_exit_code": result.get("harness_exit_code"),
     }
 
-    # Check if this is a hardware-dependent provider that failed due to
-    # missing hardware (e.g. DirectML on a GPU-less CI runner). If
-    # --allow-skip-no-gpu is set, convert the failure to a "skipped" status.
+    # Only the observed DirectML invalid-adapter error may become a diagnostic skip.
     if (args.allow_skip_no_gpu
-            and args.provider in HARDWARE_PROVIDERS
             and report.get("session_creation") == "failed"
             and report.get("session_creation_error")):
         err = report["session_creation_error"]
@@ -357,10 +349,7 @@ def main() -> int:
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 2
-    if report.get("session_creation") == "skipped":
-        print("SKIP: hardware-dependent provider not available on this runner")
-    else:
-        print("OK")
+    print("OK")
     return 0
 
 

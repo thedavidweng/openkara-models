@@ -7,6 +7,8 @@
   "additionalProperties": false,
   "required": ["schema_version", "runtime_archive", "target", "frames", "results"],
   "properties": {
+    "measurement_backend": {"enum": ["native-c-api", "installed-wheel-diagnostic"]},
+    "provider": {"enum": ["cpu", "coreml", "xnnpack", "directml"]},
     "schema_version": {
       "type": "string",
       "const": "openkara.runtime-benchmark/v1"
@@ -32,6 +34,7 @@
         "additionalProperties": false,
         "required": ["model", "cold_load_s", "first_window_s", "warm_median_s", "warm_p95_s", "peak_rss_kb", "providers", "output_shape", "shape_errors", "frames"],
         "properties": {
+          "model_digest": {"type": "object", "additionalProperties": false, "required": ["sha256", "size"], "properties": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "size": {"type": "integer", "minimum": 1}}},
           "model": {"type": "string"},
           "model_artifact_id": {"type": ["string", "null"]},
           "cold_load_s": {"type": "number", "minimum": 0},

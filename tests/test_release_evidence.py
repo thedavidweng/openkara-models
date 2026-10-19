@@ -23,6 +23,13 @@ def case(tmp_path, monkeypatch):
     identity = dict(zip(evidence.EDGE_FIELDS, ("model", "runtime", "target", "cpu")))
     identity.update(model_digest="a" * 64, model_size=100, runtime_digest="b" * 64, runtime_size=200)
     performance["runtime_archive"].update(sha256="b" * 64, size=200)
+    quality["runtime_archive"] = copy.deepcopy(performance["runtime_archive"])
+    for report in (quality, performance):
+        report.update(measurement_backend="native-c-api", target="target", provider="cpu")
+        report["model_digest"] = {"sha256": "a" * 64, "size": 100}
+    for row in performance["results"]:
+        row["rtf_warm"] = row["warm_median_s"] / row["audio_duration_s"]
+        row["end_to_end_s"] = row["rtf_first"] * row["audio_duration_s"]
     corpus = {"schema_version": "openkara.corpus-manifest/v1", "fixtures": [{"fixture_id": "real-test", "kind": "real-audio", "tier": "release",
                            "category": "male-vocals", "license": "CC0-1.0", "channels": 2, "sample_rate": 44100, "frames": 343980, "generator": {"type": "fetch", "sha256": "c" * 64, "size": 1000, "url": "https://example.test/references.npz"}, "reference_stems": {"format": "npz-float32-v1", "order": ["drums", "bass", "other", "vocals"]}}]}
     (tmp_path / "quality").mkdir()
@@ -188,3 +195,17 @@ def test_rejects_environment_mismatch(case):
 
 def test_missing_evidence_stops_before_download():
     assert evidence.qualify_release({"gates": {}}, lambda _: pytest.fail("must not download"))
+
+
+@pytest.mark.parametrize('kind', ['quality', 'performance'])
+@pytest.mark.parametrize('fault', ['backend', 'provider', 'target', 'archive', 'model'])
+def test_producer_report_must_match_native_edge(case, kind, fault):
+    _, docs, _, run = case
+    raw = docs[kind]['edges'][0]['report']
+    if fault == 'backend': raw['measurement_backend'] = 'python-wheel-conversion-only'
+    elif fault == 'archive': raw['runtime_archive']['size'] += 1
+    elif fault == 'model': raw['model_digest']['sha256'] = 'f' * 64
+    else: raw[fault] = 'other'
+    expected = {'archive': 'producer runtime archive mismatch', 'model': 'producer model bytes mismatch'}.get(
+        fault, 'native producer backend/target/provider identity mismatch')
+    assert any(expected in error for error in run())

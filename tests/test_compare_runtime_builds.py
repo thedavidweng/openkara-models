@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,6 +87,7 @@ def test_find_lib(tmp_path: Path) -> None:
     assert cmp._find_lib({"libonnxruntime.dylib": b"y"}) == "libonnxruntime.dylib"
     assert cmp._find_lib({"onnxruntime.dll": b"y"}) == "onnxruntime.dll"
     assert cmp._find_lib({"readme.txt": b"y"}) is None
+    assert cmp._find_lib({"onnxruntime_providers_shared.dll": b"y"}) is None
 
 
 def test_compare_cli_size_only(tmp_path: Path) -> None:
@@ -103,3 +105,50 @@ def test_compare_cli_size_only(tmp_path: Path) -> None:
     data = json.loads(report.read_text())
     assert data["sizes"]["installed_size_delta_bytes"] == -40
     assert "inference" not in data
+
+
+def test_inference_uses_both_archives_and_all_raw_outputs(tmp_path, monkeypatch):
+    import numpy as np
+    import native_quality
+    import compare_runtime_builds as cmp
+    calls = []
+    class Native:
+        def __init__(self, archive, source, target, provider, work):
+            calls.append(archive.name)
+            self.archive = {'name': archive.name}
+            self.raw_outputs = [np.zeros((1,), np.float32), np.array([1 if archive.name == 'red' else 0], np.float32)]
+        def measure(self, *args):
+            return np.zeros(1), {'fallback_node_count': 0}
+    monkeypatch.setattr(native_quality, 'NativeRuntime', Native)
+    report = cmp.inference_comparison(Path('full'), Path('red'), Path('candidate'), 343980, 0, 1, 0)
+    assert calls == ['full', 'red']
+    assert not report['passed']
+    assert report['output_max_abs'] == 1
+    assert report['output_mse'] == 0.5
+
+
+@pytest.mark.parametrize('error', [ValueError('bad native output'), RuntimeError('compile failed'), subprocess.TimeoutExpired('harness', 600)])
+def test_native_failure_preserves_failed_comparison_report(tmp_path, monkeypatch, error):
+    import compare_runtime_builds as cmp
+    archive = tmp_path / 'runtime.tar.gz'
+    _make_tar(archive, {'libonnxruntime.so': b'fake'})
+    model, report = tmp_path / 'model', tmp_path / 'report.json'
+    model.write_bytes(b'fake')
+    def fail(*args):
+        raise error
+    monkeypatch.setattr(cmp, 'inference_comparison', fail)
+    monkeypatch.setattr(sys, 'argv', ['compare', '--full', str(archive), '--reduced', str(archive),
+                                    '--model', str(model), '--report', str(report)])
+    assert cmp.main() == 2
+    doc = json.loads(report.read_text())
+    assert 'sizes' in doc
+    assert doc['inference'] == {'passed': False, 'error': str(error)}
+
+
+@pytest.mark.parametrize('option,value', [('--frames', '1'), ('--warmup', '-1'), ('--iters', '0'), ('--tolerance', 'nan')])
+def test_cli_rejects_invalid_comparison_before_archive_work(monkeypatch, option, value):
+    import compare_runtime_builds as cmp
+    monkeypatch.setattr(sys, 'argv', ['compare', '--full', 'missing', '--reduced', 'missing', option, value])
+    with pytest.raises(SystemExit) as exc:
+        cmp.main()
+    assert exc.value.code == 2
