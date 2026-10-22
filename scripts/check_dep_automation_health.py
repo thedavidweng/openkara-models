@@ -53,8 +53,32 @@ def _github_get(url: str, token: str | None = None) -> Any:
         raise RuntimeError(f"network error: {e.reason}") from e
 
 
+def _open_candidate_pr(latest_tag: str, token: str | None) -> dict[str, Any] | None:
+    """Return the open candidate PR for this ORT tag, if the bot already opened one."""
+    if not token:
+        return None
+    try:
+        pulls = _github_get(
+            "https://api.github.com/repos/thedavidweng/openkara-models/pulls?state=open&per_page=100",
+            token,
+        )
+    except RuntimeError:
+        return None
+    prefix = f"deps/candidate-ort-{latest_tag}-"
+    for pr in pulls if isinstance(pulls, list) else []:
+        ref = (pr.get("head") or {}).get("ref", "")
+        if ref.startswith(prefix):
+            return {"number": pr.get("number"), "branch": ref}
+    return None
+
+
 def check_ort_lock_stale(token: str | None = None) -> dict[str, Any]:
-    """Check if the ORT source lock is stale (behind latest stable)."""
+    """Check if the ORT source lock is stale (behind latest stable).
+
+    A lock that is behind but already covered by an open candidate PR is
+    reported as ``in_progress``: the automation did its job and the lock
+    advances when that PR merges, so this is not an automation failure.
+    """
     import detect_ort_release
     try:
         latest = detect_ort_release.detect_latest_stable(token)
@@ -63,12 +87,18 @@ def check_ort_lock_stale(token: str | None = None) -> dict[str, Any]:
     lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
     lock_tag = lock["upstream"]["tag"]
     comparison = detect_ort_release.compare_with_lock(latest, lock)
-    return {
+    result = {
         "status": "stale" if comparison["update_available"] else "current",
         "lock_tag": lock_tag,
         "latest_tag": latest["tag"],
         "update_available": comparison["update_available"],
     }
+    if comparison["update_available"]:
+        candidate = _open_candidate_pr(latest["tag"], token)
+        if candidate:
+            result["status"] = "in_progress"
+            result["candidate_pr"] = candidate
+    return result
 
 
 def check_model_lock_stale(token: str | None = None) -> dict[str, Any]:
@@ -192,6 +222,10 @@ def main() -> int:
         if not args.json:
             print("STALE: ORT lock is behind latest stable release", file=sys.stderr)
         return 1
+    if ort_check["status"] == "in_progress" and not args.json:
+        candidate = ort_check.get("candidate_pr") or {}
+        print(f"IN_PROGRESS: automatic update already tracked by PR #{candidate.get('number')} "
+              f"({candidate.get('branch')})")
     if model_check["status"] == "stale":
         if not args.json:
             print("STALE: model lock is behind the latest HuggingFace revision", file=sys.stderr)

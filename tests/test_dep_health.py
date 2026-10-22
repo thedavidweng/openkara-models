@@ -322,3 +322,62 @@ def test_main_newer_ort_remains_actionable() -> None:
          patch.object(h, "check_duplicate_candidates", return_value={"status": "clean"}), \
          patch.object(sys, "argv", ["x", "--json"]):
         assert h.main() == 1
+
+
+def test_open_candidate_pr_matches_only_same_tag() -> None:
+    import check_dep_automation_health as h
+    pulls = [
+        {"number": 9, "head": {"ref": "main"}},
+        {"number": 138, "head": {"ref": "deps/candidate-ort-v1.31.0-402979ac1bef"}},
+        {"number": 139, "head": {"ref": "deps/candidate-htdemucs-abc"}},
+    ]
+    with patch.object(h, "_github_get", return_value=pulls):
+        assert h._open_candidate_pr("v1.31.0", "t")["number"] == 138
+        assert h._open_candidate_pr("v1.32.0", "t") is None
+    assert h._open_candidate_pr("v1.31.0", None) is None
+
+
+def test_check_ort_lock_stale_in_progress_when_candidate_open() -> None:
+    """A stale lock already covered by an open candidate PR is in_progress,
+    not an automation failure."""
+    import check_dep_automation_health as h
+    import detect_ort_release
+    original = detect_ort_release.detect_latest_stable
+    detect_ort_release.detect_latest_stable = lambda token=None: {
+        "tag": "v99.99.99",
+        "commit_sha": "new" * 13 + "1",
+        "release_url": "", "published_at": "", "name": "", "body": "",
+    }
+    try:
+        with patch.object(h, "_open_candidate_pr",
+                          return_value={"number": 138, "branch": "deps/candidate-ort-v99.99.99-abc"}):
+            result = h.check_ort_lock_stale("fake-token")
+        with patch.object(h, "_open_candidate_pr", return_value=None):
+            stale = h.check_ort_lock_stale("fake-token")
+    finally:
+        detect_ort_release.detect_latest_stable = original
+    assert result["status"] == "in_progress"
+    assert result["candidate_pr"]["number"] == 138
+    assert stale["status"] == "stale"
+
+
+def test_main_in_progress_exits_zero() -> None:
+    """An open candidate PR is healthy: the monitor must not alert on it."""
+    import check_dep_automation_health as h
+    with patch.object(h, "check_ort_lock_stale",
+                      return_value={"status": "in_progress", "lock_tag": "v1.27.1",
+                                    "latest_tag": "v1.31.0", "update_available": True,
+                                    "candidate_pr": {"number": 138, "branch": "b"}}), \
+         patch.object(h, "check_model_lock_stale", return_value={"status": "current"}), \
+         patch.object(h, "check_workflow_recency",
+                      return_value={"status": "current", "age_days": 1}), \
+         patch.object(h, "check_duplicate_candidates",
+                      return_value={"status": "clean", "candidates": [], "duplicates": {}}):
+        import sys as _sys
+        old_argv = _sys.argv
+        _sys.argv = ["check_dep_automation_health.py"]
+        try:
+            exit_code = h.main()
+        finally:
+            _sys.argv = old_argv
+    assert exit_code == 0
