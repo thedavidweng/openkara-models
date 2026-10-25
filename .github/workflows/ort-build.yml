@@ -477,7 +477,12 @@ jobs:
   reduced-build-and-compare:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
-    runs-on: ubuntu-latest
+    # ubuntu-latest drifted to ubuntu-26.04 (gcc 15) while ort/source-lock.json
+    # pins gcc 13 and build_runtime.py fails closed on toolchain mismatch.
+    # ubuntu-24.04 ships gcc 13 as its distro default, so the reduced
+    # comparison build keeps using the locked toolchain (the pin is a
+    # reproducibility guarantee; the verification is not loosened).
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
