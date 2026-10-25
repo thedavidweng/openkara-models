@@ -70,17 +70,28 @@ def _clone_source(lock: dict[str, Any], target_dir: Path) -> None:
     repo = upstream["repo"]
     commit = upstream["commit_sha"]
 
+    # The checkout must be byte-faithful to the pinned upstream tree: the
+    # packaged C API headers are verified against the exact upstream blobs
+    # (scripts/verify_runtime_package.py), and Git for Windows defaults to
+    # core.autocrlf=true, which rewrites ORT's `*.h text` files to CRLF on
+    # checkout. Force LF on every platform (a no-op on Linux/macOS) so the
+    # packaged bytes match upstream everywhere.
+    faithful = ["-c", "core.autocrlf=false", "-c", "core.eol=lf"]
+
     if target_dir.exists() and (target_dir / ".git").is_dir():
         print(f"  source dir exists, fetching {commit}...")
-        _run(["git", "fetch", "origin", commit], cwd=target_dir)
-        _run(["git", "checkout", commit], cwd=target_dir)
+        _run(["git", *faithful, "fetch", "origin", commit], cwd=target_dir)
+        _run(["git", *faithful, "checkout", commit], cwd=target_dir)
     else:
         target_dir.parent.mkdir(parents=True, exist_ok=True)
-        _run(["git", "clone", f"https://github.com/{repo}.git", str(target_dir)])
+        _run(["git", "clone", "--config", "core.autocrlf=false",
+              "--config", "core.eol=lf",
+              f"https://github.com/{repo}.git", str(target_dir)])
         _run(["git", "checkout", commit], cwd=target_dir)
 
     # Initialize and update submodules.
-    _run(["git", "submodule", "update", "--init", "--recursive", "--depth", "1"],
+    _run(["git", *faithful, "submodule", "update", "--init", "--recursive",
+          "--depth", "1"],
          cwd=target_dir)
 
     # Verify submodule SHAs against the source lock.
