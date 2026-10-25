@@ -96,7 +96,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     needs: validate-source-lock
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -151,7 +151,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     needs: validate-source-lock
     runs-on: macos-15-intel
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -215,7 +215,7 @@ jobs:
     # why a plain ubuntu-22.04 runner cannot build this target).
     container:
       image: quay.io/pypa/manylinux_2_28_x86_64@sha256:4131ddd7acb9c6c966af02fe7e71edc51e078c2d41f475966697676430bfa2ae
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -291,7 +291,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -350,7 +350,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -422,7 +422,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -478,7 +478,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
