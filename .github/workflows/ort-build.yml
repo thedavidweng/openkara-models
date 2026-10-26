@@ -490,7 +490,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.15"
+          # ort/source-lock.json pins python_version 3.11 and build_runtime.py
+          # fails closed on any mismatch, so this job must use the locked
+          # interpreter. It only needs onnx/numpy/flatbuffers for the operator
+          # config and the comparison, which the native jobs already run on
+          # 3.11 with the same floors below.
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements.txt
 
@@ -498,7 +503,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
 
       - name: Install Python deps
-        run: pip install "numpy>=2.5.4" "onnx>=1.23.2" "flatbuffers==25.12.19"
+        run: pip install "numpy>=1.24" "onnx>=1.23.2" "flatbuffers==25.12.19"
 
       - name: Download full build artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
