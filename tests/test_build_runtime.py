@@ -251,5 +251,53 @@ class SubmoduleVerificationTests(unittest.TestCase):
             self.assertIn("submodule verification failed", str(ctx.exception))
 
 
+class CloneFaithfulnessTests(unittest.TestCase):
+    """The source checkout must be byte-faithful to the pinned upstream tree.
+
+    Git for Windows defaults to core.autocrlf=true, and ORT's .gitattributes
+    (`*.h text`) then rewrites the C API headers to CRLF on checkout. The
+    packaged headers are byte-compared against the upstream blobs by
+    verify_runtime_package.py, so a CRLF checkout fails verification on
+    Windows runners (run 40189020525)."""
+
+    def _clone_commands(self, existing: bool) -> list[list[str]]:
+        source_dir = Path("/fake/ort/source")
+        lock = {"upstream": {"repo": "microsoft/onnxruntime", "commit_sha": "a" * 40},
+                "submodules": {}}
+        commands: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd=None, env=None):
+            commands.append(list(cmd))
+
+        with mock.patch.object(Path, "exists", return_value=existing), \
+             mock.patch.object(Path, "is_dir", return_value=existing), \
+             mock.patch.object(Path, "mkdir"), \
+             mock.patch.object(br, "_run", side_effect=fake_run), \
+             mock.patch.object(br, "_verify_submodules"):
+            br._clone_source(lock, source_dir)
+        return commands
+
+    def test_fresh_clone_pins_lf_line_endings(self):
+        commands = self._clone_commands(existing=False)
+        clone = commands[0]
+        self.assertEqual(clone[:2], ["git", "clone"])
+        self.assertIn("core.autocrlf=false", clone)
+        self.assertIn("core.eol=lf", clone)
+
+    def test_existing_checkout_pins_lf_line_endings(self):
+        commands = self._clone_commands(existing=True)
+        for cmd in commands:
+            self.assertIn("core.autocrlf=false", cmd)
+            self.assertIn("core.eol=lf", cmd)
+
+    def test_submodule_update_pins_lf_line_endings(self):
+        commands = self._clone_commands(existing=False)
+        submodule_update = [c for c in commands if "submodule" in c]
+        self.assertTrue(submodule_update)
+        for cmd in submodule_update:
+            self.assertIn("core.autocrlf=false", cmd)
+            self.assertIn("core.eol=lf", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()
