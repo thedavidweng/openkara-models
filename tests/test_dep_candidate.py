@@ -230,3 +230,45 @@ def test_reduced_job_uses_the_locked_python_and_resolvable_deps():
     assert 'flatbuffers==25.12.19' in reduced
     assert "onnx>=1.23.2" in reduced
 
+
+def _numpy_floor() -> tuple[int, ...]:
+    """Lower bound of the numpy requirement in requirements.txt."""
+    for line in (ROOT / "requirements.txt").read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line.lower().startswith("numpy"):
+            continue
+        spec = line.split("numpy", 1)[1]
+        for part in spec.split(","):
+            part = part.strip()
+            if part.startswith(">="):
+                return tuple(int(x) for x in part[2:].split("."))
+    raise AssertionError("requirements.txt has no numpy lower bound")
+
+
+def test_requirements_numpy_resolves_on_the_converter_python():
+    """The shared requirements file must be installable on the converter's Python.
+
+    ``convert.yml`` installs ``requirements.txt`` on Python 3.11, and NumPy
+    2.5.0 onwards declares ``Requires-Python >=3.12``, so a 2.5+ floor makes
+    ``pip install -r requirements.txt`` fail with "No matching distribution"
+    before any conversion work starts (observed on run 40184776819). The floor
+    therefore has to stay below 2.5 while the converter stays on 3.11, and must
+    still allow a current NumPy series.
+    """
+    import re
+
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+    versions = re.findall(r'python-version:\s*"([0-9.]+)"', convert)
+    assert versions, "convert.yml must pin python-version explicitly"
+    oldest = min(tuple(int(x) for x in v.split(".")) for v in versions)
+
+    floor = _numpy_floor()
+    # NumPy 2.5+ requires Python >=3.12; anything older cannot resolve it.
+    if oldest < (3, 12):
+        assert floor < (2, 5), (
+            f"numpy>={'.'.join(map(str, floor))} cannot resolve on Python "
+            f"{'.'.join(map(str, oldest))} used by convert.yml"
+        )
+    assert floor >= (2, 4), "numpy floor drifted below a currently supported series"
+
+
