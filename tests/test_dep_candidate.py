@@ -204,3 +204,29 @@ def test_candidate_reuses_exact_native_pipeline():
     assert "needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]" in native
     assert "inputs.candidate_lock_artifact == ''" in native
     assert "git push --force" not in candidate
+
+
+def test_reduced_job_uses_the_locked_python_and_resolvable_deps():
+    """The reduced job must not pick a Python the toolchain lock rejects.
+
+    ``build_runtime.py`` calls ``_assert_toolchain`` before any CMake work and
+    fails closed on a python_version mismatch, so a job that selects a different
+    interpreter can never build. NumPy 2.5.x also requires Python >= 3.12, which
+    is why pinning both at once is impossible on the locked 3.11.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    lock = json.loads((ROOT / "ort/source-lock.json").read_text())
+    locked_python = lock["toolchain"]["python_version"]
+
+    reduced = native.split("  reduced-build-and-compare:", 1)[1].split(
+        "  benchmark-x86_64-unknown-linux-gnu:", 1
+    )[0]
+    assert f'python-version: "{locked_python}"' in reduced
+    # NumPy 2.5+ is unavailable on the locked interpreter; requiring it would
+    # fail resolution before the build ever starts.
+    assert "numpy>=2.5" not in reduced
+    assert "numpy>=1.24" in reduced
+    # The operator config needs the pinned flatbuffers and a current onnx.
+    assert 'flatbuffers==25.12.19' in reduced
+    assert "onnx>=1.23.2" in reduced
+
