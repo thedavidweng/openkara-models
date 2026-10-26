@@ -498,7 +498,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
 
       - name: Install Python deps
-        run: pip install "numpy>=1.24" "onnx>=1.22.0"
+        run: pip install "numpy>=2.5.4" "onnx>=1.23.2" "flatbuffers==25.12.19"
 
       - name: Download full build artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
