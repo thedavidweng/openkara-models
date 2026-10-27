@@ -245,30 +245,256 @@ def _numpy_floor() -> tuple[int, ...]:
     raise AssertionError("requirements.txt has no numpy lower bound")
 
 
-def test_requirements_numpy_resolves_on_the_converter_python():
-    """The shared requirements file must be installable on the converter's Python.
+def test_requirements_numpy_floor_keeps_python_311_resolvable():
+    """``numpy>=2.5`` cannot resolve on Python 3.11.
 
-    ``convert.yml`` installs ``requirements.txt`` on Python 3.11, and NumPy
-    2.5.0 onwards declares ``Requires-Python >=3.12``, so a 2.5+ floor makes
-    ``pip install -r requirements.txt`` fail with "No matching distribution"
-    before any conversion work starts (observed on run 40184776819). The floor
-    therefore has to stay below 2.5 while the converter stays on 3.11, and must
-    still allow a current NumPy series.
+    ``requirements.txt`` is proven to resolve on Python 3.11 (NumPy 2.4.6), which
+    the runtime toolchain still uses for its own separate dependency install.
+    NumPy 2.5.0 onwards declares ``Requires-Python >=3.12``, so raising this
+    floor would make the file unresolvable there. The floor must stay at 2.4 or
+    above and below 2.5.
+    """
+    floor = _numpy_floor()
+    assert floor >= (2, 4), "numpy floor drifted below a currently supported series"
+    assert floor < (2, 5), "numpy>=2.5 cannot resolve on Python 3.11"
+
+
+def test_converter_python_is_the_highest_still_supported_by_the_dependency_graph():
+    """``convert.yml`` must run on a Python the full CPU dependency graph supports.
+
+    Torch 2.14 ships ``cp310``-``cp314`` wheels and NumPy 2.5+ needs >=3.12, so
+    3.14 is the newest CPython that can install the whole graph; 3.15 has no
+    torch wheel at all. A resolver failure here would stop conversion before any
+    export work starts, so every convert job pins the same supported version.
     """
     import re
 
     convert = (ROOT / ".github/workflows/convert.yml").read_text()
     versions = re.findall(r'python-version:\s*"([0-9.]+)"', convert)
     assert versions, "convert.yml must pin python-version explicitly"
-    oldest = min(tuple(int(x) for x in v.split(".")) for v in versions)
+    assert len(set(versions)) == 1, f"convert jobs disagree on Python: {sorted(set(versions))}"
+    converter = tuple(int(x) for x in versions[0].split("."))
 
-    floor = _numpy_floor()
-    # NumPy 2.5+ requires Python >=3.12; anything older cannot resolve it.
-    if oldest < (3, 12):
-        assert floor < (2, 5), (
-            f"numpy>={'.'.join(map(str, floor))} cannot resolve on Python "
-            f"{'.'.join(map(str, oldest))} used by convert.yml"
+    # Torch/torchaudio publish no cp315 wheels, so 3.15 cannot resolve.
+    assert converter <= (3, 14), f"Python {versions[0]} has no torch wheels"
+    # NumPy 2.5+ requires >=3.12; anything older cannot take a current NumPy.
+    assert converter >= (3, 12), f"Python {versions[0]} cannot resolve numpy>=2.4"
+
+
+def test_dispatch_defaults_to_artifact_only():
+    """Manual dispatch must not publish unless the caller asks for it.
+
+    The default dispatch path previously ran the release step, which needs a
+    write token. A dry run of the converter should be safe by default, so
+    dispatch defaults ``publish`` to false and only tag pushes publish.
+    """
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+
+    dispatch = convert.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
+    assert "publish:" in dispatch, "dispatch must expose a publish input"
+    assert "type: boolean" in dispatch
+    assert "default: false" in dispatch, "dispatch must default to artifact-only"
+
+
+def _convert_jobs() -> dict[str, str]:
+    """Split ``convert.yml`` into top-level job blocks, without needing a YAML parser."""
+    import re
+
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+    body = convert.split("\njobs:\n", 1)[1]
+    blocks = re.split(r"\n(?=  [A-Za-z0-9_-]+:\n)", body)
+    jobs: dict[str, str] = {}
+    for block in blocks:
+        name = block.split(":", 1)[0].strip()
+        if name:
+            jobs[name] = block
+    return jobs
+
+
+def _steps(job_block: str) -> dict[str, str]:
+    """Split a job block into step blocks keyed by step name."""
+    import re
+
+    steps: dict[str, str] = {}
+    current_name: str | None = None
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        if current_name is not None:
+            steps[current_name] = "\n".join(current_lines)
+
+    for line in job_block.splitlines():
+        starts_step = line.startswith("      - ")
+        if starts_step:
+            flush()
+            current_lines = [line]
+            m = re.match(r"^      - name:\s*(.+)$", line)
+            current_name = m.group(1).strip() if m else None
+            continue
+        if current_lines:
+            current_lines.append(line)
+    flush()
+    return steps
+
+
+def _step_with(step: str) -> dict[str, str]:
+    """Parse a step's ``with:`` block into key -> value (``|`` blocks joined)."""
+    import re
+
+    lines = step.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "with:")
+    inputs: dict[str, str] = {}
+    i = start + 1
+    while i < len(lines):
+        m = re.match(r"^          ([A-Za-z0-9_-]+):\s*(.*)$", lines[i])
+        if not m:
+            break
+        key, value = m.group(1), m.group(2).strip()
+        if value == "|":
+            block = []
+            i += 1
+            while i < len(lines) and lines[i].startswith("            "):
+                block.append(lines[i].strip())
+                i += 1
+            inputs[key] = "\n".join(block)
+            continue
+        inputs[key] = value
+        i += 1
+    return inputs
+
+
+def _lca_root(paths: list[str]) -> str:
+    """Least common ancestor directory of upload paths, as upload-artifact computes it."""
+    split = [p.split("/") for p in paths]
+    common: list[str] = []
+    for parts in zip(*split):
+        if len(set(parts)) != 1:
+            break
+        common.append(parts[0])
+    return "/".join(common) or "."
+
+
+def test_artifact_producer_and_consumer_names_match():
+    """Each release job must download the artifact its producer actually uploads.
+
+    ``actions/download-artifact`` matches on the artifact name, so a stale or
+    hard-coded name in the consumer silently breaks the release while every
+    other check still passes.
+    """
+    jobs = _convert_jobs()
+    pairs = (
+        ("convert-single", "Upload artifacts", "release-single", "Download converted model"),
+        ("finalize-ensemble", "Upload artifacts", "release-ensemble", "Download converted model"),
+    )
+    for producer_job, producer_step, consumer_job, consumer_step in pairs:
+        produced = _step_with(_steps(jobs[producer_job])[producer_step])["name"]
+        consumed = _step_with(_steps(jobs[consumer_job])[consumer_step])["name"]
+        assert produced == consumed, (
+            f"{consumer_job} downloads {consumed!r} but {producer_job} uploads {produced!r}"
         )
-    assert floor >= (2, 4), "numpy floor drifted below a currently supported series"
+
+    # The single-model artifact name follows the dispatched model.
+    single = _step_with(_steps(jobs["convert-single"])["Upload artifacts"])["name"]
+    assert "needs.detect-model.outputs.model" in single
+
+
+def test_artifact_restore_path_matches_the_upload_layout():
+    """Downloads must extract at the repo root the upload was rooted at.
+
+    ``upload-artifact`` roots a multi-path artifact at the least common ancestor
+    of its paths. The producers upload ``models/<artifact>``,
+    ``models/<artifact>.sha256`` and ``release-body.md``, whose LCA is the repo
+    root, so the consumer has to extract into ``.``. Extracting into a narrower
+    directory would place ``release-body.md`` where ``body_path`` cannot find it
+    and shift the model away from the ``files:`` paths.
+    """
+    jobs = _convert_jobs()
+    pairs = (
+        ("convert-single", "release-single"),
+        ("finalize-ensemble", "release-ensemble"),
+    )
+    for producer_job, consumer_job in pairs:
+        upload = _step_with(_steps(jobs[producer_job])["Upload artifacts"])
+        upload_paths = upload["path"].splitlines()
+        assert _lca_root(upload_paths) == ".", (
+            f"{producer_job} upload paths are not rooted at the repo root: {upload_paths}"
+        )
+
+        download = _step_with(_steps(jobs[consumer_job])["Download converted model"])
+        assert download["path"] == ".", (
+            f"{consumer_job} must restore at the repo root, got {download['path']!r}"
+        )
+
+        # Every restored file must be referenced where the release step expects it.
+        release = _step_with(_steps(jobs[consumer_job])["Create Release"])
+        release_text = "\n".join(release.values())
+        for path in upload_paths:
+            assert path in release_text, f"{consumer_job} does not reference restored {path!r}"
+
+
+
+def test_only_the_release_jobs_hold_a_write_token():
+    """Export/validation jobs stay read-only; release jobs are gated on publish.
+
+    Keeping ``contents: write`` on the conversion jobs would let any dispatch
+    write a release even when publishing is off. Only the release jobs may hold
+    the token, and each one also requires the tag/publish condition.
+    """
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+    assert "\npermissions:\n  contents: read\n" in convert, "workflow default must be read-only"
+
+    jobs = _convert_jobs()
+    writers = [
+        name for name, block in jobs.items()
+        if "\n    permissions:\n      contents: write\n" in block
+    ]
+    assert sorted(writers) == ["release-ensemble", "release-single"], (
+        f"unexpected jobs with a write token: {sorted(writers)}"
+    )
+    for name in writers:
+        guard = jobs[name].split("if:", 1)[1].split("\n", 1)[0]
+        assert "publish == 'true'" in guard, f"{name} must require publish"
+        assert "startsWith(github.ref, 'refs/tags/')" in guard, f"{name} must require a tag"
+
+
+def test_artifact_only_dispatch_does_not_reach_a_release_step():
+    """With ``publish: false`` on a dispatch, no release job can be scheduled.
+
+    GitHub evaluates ``if:`` per job; a false guard means the release job never
+    runs, so the run leaves only ``upload-artifact`` output.
+    """
+    jobs = _convert_jobs()
+    for name in ("release-single", "release-ensemble"):
+        guard = jobs[name].split("if:", 1)[1].split("\n", 1)[0]
+        # Dispatch with publish=false fails the publish half of the guard.
+        assert "publish == 'true'" in guard
+        # A dispatch ref is not a tag, so the tag half fails too.
+        assert "refs/tags/" in guard
+
+    # The conversion jobs must not create releases themselves.
+    for name in ("convert-single", "finalize-ensemble"):
+        assert "action-gh-release" not in jobs[name], f"{name} must not create a release"
+        assert "contents: write" not in jobs[name]
+
+
+
+def test_tag_push_still_publishes_the_same_artifact():
+    """Tag pushes keep their existing release semantics and asset set.
+
+    The publish guard must not change what a tagged build produces: the same
+    ONNX file plus checksum, with release notes generated from the same body.
+    """
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+    detect = convert.split("Determine model from tag or input", 1)[1]
+    assert "PUBLISH=true" in detect, "tag pushes must set publish=true"
+
+    jobs = _convert_jobs()
+    for job in ("release-single", "release-ensemble"):
+        block = jobs[job]
+        assert "models/${{ needs.detect-model.outputs.artifact }}" in block
+        assert "models/${{ needs.detect-model.outputs.artifact }}.sha256" in block
+        assert "body_path: release-body.md" in block
+        assert "generate_release_notes: true" in block
+
 
 

@@ -12,6 +12,10 @@ on:
         type: choice
         options: [htdemucs, htdemucs_ft]
         default: htdemucs
+      publish:
+        description: "Create the GitHub Release (tag refs only). Off keeps the run artifact-only."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,15 +32,24 @@ jobs:
       model: ${{ steps.model.outputs.model }}
       is_ensemble: ${{ steps.model.outputs.is_ensemble }}
       artifact: ${{ steps.model.outputs.artifact }}
+      publish: ${{ steps.model.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Determine model from tag or input
         id: model
+        env:
+          PUBLISH_INPUT: ${{ github.event.inputs.publish }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             MODEL="${{ github.event.inputs.model }}"
+            # Dispatch is artifact-only unless the caller opts in explicitly.
+            if [ "$PUBLISH_INPUT" = "true" ]; then
+              PUBLISH=true
+            else
+              PUBLISH=false
+            fi
           else
             TAG="${GITHUB_REF#refs/tags/}"
             if [[ "$TAG" == model-ft-spectral-* ]]; then
@@ -44,6 +57,8 @@ jobs:
             else
               MODEL="htdemucs"
             fi
+            # Tag pushes keep their existing release semantics.
+            PUBLISH=true
           fi
           echo "model=$MODEL" >> "$GITHUB_OUTPUT"
           if [ "$MODEL" = "htdemucs_ft" ]; then
@@ -52,6 +67,7 @@ jobs:
             echo "is_ensemble=false" >> "$GITHUB_OUTPUT"
           fi
           echo "artifact=${MODEL}.spectral.onnx" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
 
   # Parallel sub-model export for htdemucs_ft (4 jobs, ~6min wall time
   # instead of ~20min serial).
@@ -71,7 +87,7 @@ jobs:
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -93,11 +109,9 @@ jobs:
           path: sub_${{ matrix.index }}.onnx
           retention-days: 7
 
-  # Single-model path for htdemucs: export + optimize + validate + release
-  # in one job (already fast, ~5min).
+  # Single-model path for htdemucs: export + optimize + validate, then a
+  # separate release job. This job never holds a write token.
   convert-single:
-    permissions:
-      contents: write
     needs: detect-model
     if: needs.detect-model.outputs.is_ensemble == 'false'
     runs-on: ubuntu-latest
@@ -111,7 +125,7 @@ jobs:
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -183,10 +197,30 @@ jobs:
           path: |
             models/${{ needs.detect-model.outputs.artifact }}
             models/${{ needs.detect-model.outputs.artifact }}.sha256
+            release-body.md
           retention-days: 7
 
+  # Release for htdemucs. The only job in the single-model path with a write
+  # token, and it runs only when the run is allowed to publish.
+  release-single:
+    needs: [detect-model, convert-single]
+    if: needs.detect-model.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download converted model
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.detect-model.outputs.model }}-spectral-core-onnx
+          path: .
+
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
         # v3.0.3 retained for coordinated uploads/release metadata; no shell execution.
         # v3.0.3; required create/update release semantics.
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3 # zizmor: ignore[superfluous-actions]
@@ -198,10 +232,8 @@ jobs:
           generate_release_notes: true
 
   # Ensemble merge + finalize path for htdemucs_ft: merges 4 sub-model
-  # artifacts, optimizes, validates, and releases.
+  # artifacts, optimizes, validates. Never holds a write token.
   finalize-ensemble:
-    permissions:
-      contents: write
     needs: [detect-model, export-sub-models]
     if: needs.detect-model.outputs.is_ensemble == 'true'
     runs-on: ubuntu-latest
@@ -215,7 +247,7 @@ jobs:
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
 
       - name: Install CPU-only PyTorch
         run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -296,10 +328,30 @@ jobs:
           path: |
             models/${{ needs.detect-model.outputs.artifact }}
             models/${{ needs.detect-model.outputs.artifact }}.sha256
+            release-body.md
           retention-days: 7
 
+  # Release for htdemucs_ft. The only job in the ensemble path with a write
+  # token, and it runs only when the run is allowed to publish.
+  release-ensemble:
+    needs: [detect-model, finalize-ensemble]
+    if: needs.detect-model.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download converted model
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: htdemucs_ft-spectral-core-onnx
+          path: .
+
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
         # v3.0.3 retained for coordinated uploads/release metadata; no shell execution.
         # v3.0.3; required create/update release semantics.
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3 # zizmor: ignore[superfluous-actions]
