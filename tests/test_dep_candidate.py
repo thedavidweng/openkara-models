@@ -432,6 +432,39 @@ def test_reduced_job_is_the_x86_64_reduced_producer():
     )
 
 
+def test_reduced_job_preserves_baseline_and_uploads_bound_smoke():
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    job = native.split("\n  reduced-build-and-compare:\n", 1)[1].split(
+        "\n  benchmark-x86_64-unknown-linux-gnu:", 1
+    )[0]
+    reduced_glob = "ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz"
+
+    def check(body):
+        supply = body.split("- name: Generate supply-chain records for reduced runtime", 1)[1].split("\n      - ", 1)[0]
+        assert f"REDUCED=$(ls {reduced_glob})" in supply
+        assert 'generate_runtime_supply_chain.py --archive "$REDUCED"' in supply
+        assert "--all" not in supply
+        smoke = body.split("- name: Run reduced native smoke harness (CPU + XNNPACK)", 1)[1].split("\n      - ", 1)[0]
+        assert f"RUNTIME=$(ls {reduced_glob})" in smoke
+        assert "for PROV in cpu xnnpack" in smoke
+        assert '--runtime "$RUNTIME"' in smoke
+        assert '--report "smoke-x86_64-unknown-linux-gnu-reduced-${PROV}.json"' in smoke
+        upload = body.split("name: smoke-x86_64-unknown-linux-gnu-reduced\n", 1)[1].split("\n      - ", 1)[0]
+        assert "smoke-x86_64-unknown-linux-gnu-reduced-cpu.json" in upload
+        assert "smoke-x86_64-unknown-linux-gnu-reduced-xnnpack.json" in upload
+        assert "if-no-files-found: error" in upload
+        comparison = body.split("- name: Compare full vs reduced (size + inference)", 1)[1].split("\n      - ", 1)[0]
+        assert '--full "$FULL" --reduced "$REDUCED"' in comparison
+        assert f"REDUCED=$(ls {reduced_glob})" in comparison
+
+    check(job)
+    import pytest
+    with pytest.raises(AssertionError):
+        check(job.replace(f"RUNTIME=$(ls {reduced_glob})", "RUNTIME=full.tar.gz"))
+    with pytest.raises(AssertionError):
+        check(job.replace("smoke-x86_64-unknown-linux-gnu-reduced-xnnpack.json", "missing.json"))
+
+
 def _numpy_floor() -> tuple[int, ...]:
     """Lower bound of the numpy requirement in requirements.txt."""
     for line in (ROOT / "requirements.txt").read_text().splitlines():

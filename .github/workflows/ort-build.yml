@@ -562,8 +562,10 @@ jobs:
       - name: Build reduced runtime
         run: python scripts/build_runtime.py --locked --target x86_64-unknown-linux-gnu --reduced
 
-      - name: Generate supply-chain records (SBOM + provenance, full + reduced)
-        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Generate supply-chain records for reduced runtime
+        run: |
+          REDUCED=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
+          python scripts/generate_runtime_supply_chain.py --archive "$REDUCED"
 
       - name: Verify reduced package
         run: python scripts/verify_runtime_package.py --all
@@ -574,6 +576,28 @@ jobs:
           python scripts/check_linux_abi_floor.py \
             --archive "$RUNTIME" \
             --max-glibc 2.35 --max-glibcxx 3.4.30 --max-cxxabi 1.3.13
+
+      - name: Run reduced native smoke harness (CPU + XNNPACK)
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
+          for PROV in cpu xnnpack; do
+            python scripts/run_native_smoke.py \
+              --runtime "$RUNTIME" \
+              --model models/htdemucs.spectral.onnx \
+              --target x86_64-unknown-linux-gnu \
+              --provider "$PROV" \
+              --ort-source ort/source \
+              --report "smoke-x86_64-unknown-linux-gnu-reduced-${PROV}.json"
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-x86_64-unknown-linux-gnu-reduced
+          path: |
+            smoke-x86_64-unknown-linux-gnu-reduced-cpu.json
+            smoke-x86_64-unknown-linux-gnu-reduced-xnnpack.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Compare full vs reduced (size + inference)
         run: |
