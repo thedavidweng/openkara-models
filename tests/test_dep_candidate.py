@@ -297,6 +297,47 @@ def test_linux_only_dispatch_skips_non_linux_jobs():
         assert "!cancelled()" in body, f"{job} must tolerate skipped Apple needs"
 
 
+def test_linux_only_dispatch_skips_the_linux_dependents():
+    """A linux_only dispatch stops after the two Linux builds.
+
+    reduced-build-and-compare and benchmark are Linux jobs, but they only
+    re-verify the archives the two builds just produced: a fix dispatch would
+    spend another 150 minutes of runner time proving what the builds' own
+    verify, ABI-floor, smoke, and comparison steps already assert. They keep
+    their normal behaviour for every other dispatch.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    for job in ("reduced-build-and-compare", "benchmark-x86_64-unknown-linux-gnu"):
+        body = job_block(job)
+        assert "!inputs.linux_only" in body, f"{job} must be skipped by linux_only"
+        # The normal dispatch gate stays: these jobs still only run for a plain
+        # dispatch that is not preparing a dependency candidate.
+        assert "inputs.candidate_lock_artifact == ''" in body, job
+
+
+def test_reduced_build_verifies_the_source_lock():
+    """The reduced x86_64 build must pass --locked like every other target.
+
+    --locked checks the checked-out ORT source and submodules against
+    ort/source-lock.json. The reduced job is the only build that omitted it,
+    which left the one archive this fix re-ships as the only unverified source
+    tree.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    body = re.split(
+        r"\n  (?=\S)", native.split("\n  reduced-build-and-compare:\n", 1)[1], maxsplit=1
+    )[0]
+    build_lines = [line for line in body.splitlines() if "build_runtime.py" in line]
+    assert build_lines, "reduced job must invoke build_runtime.py"
+    for line in build_lines:
+        assert "--locked" in line, f"reduced build must pass --locked: {line.strip()}"
+
+
 def _numpy_floor() -> tuple[int, ...]:
     """Lower bound of the numpy requirement in requirements.txt."""
     for line in (ROOT / "requirements.txt").read_text().splitlines():

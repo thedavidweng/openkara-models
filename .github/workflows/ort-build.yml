@@ -509,7 +509,7 @@ jobs:
   # archive size + inference output. Fails if the reduced runtime cannot load
   # the model (a required kernel was pruned) or output diverges.
   reduced-build-and-compare:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' && !inputs.linux_only }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
     # Must run in the same manylinux_2_28 container as the full build above.
     # The glibc symbol floor of a shared library is fixed by the headers and
@@ -560,7 +560,7 @@ jobs:
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
 
       - name: Build reduced runtime
-        run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu --reduced
+        run: python scripts/build_runtime.py --locked --target x86_64-unknown-linux-gnu --reduced
 
       - name: Generate supply-chain records (SBOM + provenance, full + reduced)
         run: python scripts/generate_runtime_supply_chain.py --all
@@ -614,7 +614,7 @@ jobs:
   # the model cannot load, output contains NaN/Inf, or shape mismatches. The
   # report is validated against ort/benchmark-report-v1.json and uploaded.
   benchmark-x86_64-unknown-linux-gnu:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' && !inputs.linux_only }}
     needs: [validate-source-lock, reduced-build-and-compare]
     runs-on: ubuntu-latest
     timeout-minutes: 30
