@@ -245,30 +245,134 @@ def _numpy_floor() -> tuple[int, ...]:
     raise AssertionError("requirements.txt has no numpy lower bound")
 
 
-def test_requirements_numpy_resolves_on_the_converter_python():
-    """The shared requirements file must be installable on the converter's Python.
+def test_requirements_numpy_floor_keeps_the_runtime_python_working():
+    """``numpy>=2.5`` cannot resolve on the runtime's locked Python 3.11.
 
-    ``convert.yml`` installs ``requirements.txt`` on Python 3.11, and NumPy
-    2.5.0 onwards declares ``Requires-Python >=3.12``, so a 2.5+ floor makes
-    ``pip install -r requirements.txt`` fail with "No matching distribution"
-    before any conversion work starts (observed on run 40184776819). The floor
-    therefore has to stay below 2.5 while the converter stays on 3.11, and must
-    still allow a current NumPy series.
+    ``requirements.txt`` is shared: ``convert.yml`` installs it on the converter's
+    Python, and the runtime build installs it on the toolchain-locked Python
+    3.11. NumPy 2.5.0 onwards declares ``Requires-Python >=3.12``, so raising the
+    floor breaks the runtime job (observed on run 40184776819). The floor must
+    stay at 2.4 or above and below 2.5.
+    """
+    floor = _numpy_floor()
+    assert floor >= (2, 4), "numpy floor drifted below a currently supported series"
+    assert floor < (2, 5), "numpy>=2.5 cannot resolve on the runtime's locked Python 3.11"
+
+
+def test_converter_python_is_the_highest_still_supported_by_the_dependency_graph():
+    """``convert.yml`` must run on a Python the full CPU dependency graph supports.
+
+    Torch 2.14 ships ``cp310``-``cp314`` wheels and NumPy 2.5+ needs >=3.12, so
+    3.14 is the newest CPython that can install the whole graph; 3.15 has no
+    torch wheel at all. A resolver failure here would stop conversion before any
+    export work starts, so every convert job pins the same supported version.
     """
     import re
 
     convert = (ROOT / ".github/workflows/convert.yml").read_text()
     versions = re.findall(r'python-version:\s*"([0-9.]+)"', convert)
     assert versions, "convert.yml must pin python-version explicitly"
-    oldest = min(tuple(int(x) for x in v.split(".")) for v in versions)
+    assert len(set(versions)) == 1, f"convert jobs disagree on Python: {sorted(set(versions))}"
+    converter = tuple(int(x) for x in versions[0].split("."))
 
-    floor = _numpy_floor()
-    # NumPy 2.5+ requires Python >=3.12; anything older cannot resolve it.
-    if oldest < (3, 12):
-        assert floor < (2, 5), (
-            f"numpy>={'.'.join(map(str, floor))} cannot resolve on Python "
-            f"{'.'.join(map(str, oldest))} used by convert.yml"
-        )
-    assert floor >= (2, 4), "numpy floor drifted below a currently supported series"
+    # Torch/torchaudio publish no cp315 wheels, so 3.15 cannot resolve.
+    assert converter <= (3, 14), f"Python {versions[0]} has no torch wheels"
+    # NumPy 2.5+ requires >=3.12; anything older cannot take a current NumPy.
+    assert converter >= (3, 12), f"Python {versions[0]} cannot resolve numpy>=2.4"
+
+
+def test_dispatch_defaults_to_artifact_only():
+    """Manual dispatch must not publish unless the caller asks for it.
+
+    The default dispatch path previously ran the release step, which needs a
+    write token. A dry run of the converter should be safe by default, so
+    dispatch defaults ``publish`` to false and only tag pushes publish.
+    """
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+
+    dispatch = convert.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
+    assert "publish:" in dispatch, "dispatch must expose a publish input"
+    assert "type: boolean" in dispatch
+    assert "default: false" in dispatch, "dispatch must default to artifact-only"
+
+
+def _convert_jobs() -> dict[str, str]:
+    """Split ``convert.yml`` into top-level job blocks, without needing a YAML parser."""
+    import re
+
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+    body = convert.split("\njobs:\n", 1)[1]
+    blocks = re.split(r"\n(?=  [A-Za-z0-9_-]+:\n)", body)
+    jobs: dict[str, str] = {}
+    for block in blocks:
+        name = block.split(":", 1)[0].strip()
+        if name:
+            jobs[name] = block
+    return jobs
+
+
+def test_only_the_release_jobs_hold_a_write_token():
+    """Export/validation jobs stay read-only; release jobs are gated on publish.
+
+    Keeping ``contents: write`` on the conversion jobs would let any dispatch
+    write a release even when publishing is off. Only the release jobs may hold
+    the token, and each one also requires the tag/publish condition.
+    """
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+    assert "\npermissions:\n  contents: read\n" in convert, "workflow default must be read-only"
+
+    jobs = _convert_jobs()
+    writers = [
+        name for name, block in jobs.items()
+        if "\n    permissions:\n      contents: write\n" in block
+    ]
+    assert sorted(writers) == ["release-ensemble", "release-single"], (
+        f"unexpected jobs with a write token: {sorted(writers)}"
+    )
+    for name in writers:
+        guard = jobs[name].split("if:", 1)[1].split("\n", 1)[0]
+        assert "publish == 'true'" in guard, f"{name} must require publish"
+        assert "startsWith(github.ref, 'refs/tags/')" in guard, f"{name} must require a tag"
+
+
+def test_artifact_only_dispatch_does_not_reach_a_release_step():
+    """With ``publish: false`` on a dispatch, no release job can be scheduled.
+
+    GitHub evaluates ``if:`` per job; a false guard means the release job never
+    runs, so the run leaves only ``upload-artifact`` output.
+    """
+    jobs = _convert_jobs()
+    for name in ("release-single", "release-ensemble"):
+        guard = jobs[name].split("if:", 1)[1].split("\n", 1)[0]
+        # Dispatch with publish=false fails the publish half of the guard.
+        assert "publish == 'true'" in guard
+        # A dispatch ref is not a tag, so the tag half fails too.
+        assert "refs/tags/" in guard
+
+    # The conversion jobs must not create releases themselves.
+    for name in ("convert-single", "finalize-ensemble"):
+        assert "action-gh-release" not in jobs[name], f"{name} must not create a release"
+        assert "contents: write" not in jobs[name]
+
+
+
+def test_tag_push_still_publishes_the_same_artifact():
+    """Tag pushes keep their existing release semantics and asset set.
+
+    The publish guard must not change what a tagged build produces: the same
+    ONNX file plus checksum, with release notes generated from the same body.
+    """
+    convert = (ROOT / ".github/workflows/convert.yml").read_text()
+    detect = convert.split("Determine model from tag or input", 1)[1]
+    assert "PUBLISH=true" in detect, "tag pushes must set publish=true"
+
+    jobs = _convert_jobs()
+    for job in ("release-single", "release-ensemble"):
+        block = jobs[job]
+        assert "models/${{ needs.detect-model.outputs.artifact }}" in block
+        assert "models/${{ needs.detect-model.outputs.artifact }}.sha256" in block
+        assert "body_path: release-body.md" in block
+        assert "generate_release_notes: true" in block
+
 
 

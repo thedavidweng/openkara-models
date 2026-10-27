@@ -3,8 +3,9 @@ torchaudio>=2.11.0,<3.0
 demucs>=4.1.0
 onnx>=1.23.2
 onnxruntime>=1.31.0,<2
-# NumPy 2.5+ declares Requires-Python >=3.12, but the converter jobs run on
-# Python 3.11 (see .github/workflows/convert.yml). 2.4.x is the newest series
-# that resolves there, so the floor stops below 2.5.
+# The converter jobs run on Python 3.14 (see .github/workflows/convert.yml), so
+# NumPy 2.5+ would resolve here. The floor stays at 2.4 because this file is
+# also installed where the runtime still builds on Python 3.11, and 2.5.0
+# onwards declares Requires-Python >=3.12.
 numpy>=2.4
 jsonschema>=4.26.0
