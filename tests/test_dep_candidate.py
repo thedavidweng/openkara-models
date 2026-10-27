@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -263,6 +264,37 @@ def test_linux_build_jobs_pin_the_manylinux_glibc_floor():
             assert "quay.io/pypa/manylinux_2_28_" in body, job
             assert "@sha256:" in body, f"{job} must pin the image digest"
             assert "check_linux_abi_floor.py" in body, f"{job} must gate the ABI floor"
+
+
+def test_linux_only_dispatch_skips_non_linux_jobs():
+    """A linux_only dispatch must not rebuild the Apple or Windows targets.
+
+    Rebuilding the two affected Linux archives is the only work a fix needs; a
+    full six-target dispatch would burn native runner minutes re-verifying
+    artifacts that did not change. The non-Linux jobs are gated on the input and
+    the Linux jobs tolerate their `needs` being skipped.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    inputs = native.split("  workflow_dispatch:\n", 1)[1].split("  pull_request:", 1)[0]
+    assert "linux_only:" in inputs
+    assert "type: boolean" in inputs
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    for job in (
+        "build-aarch64-apple-darwin",
+        "build-x86_64-apple-darwin",
+        "build-x86_64-pc-windows-msvc",
+        "build-x86_64-pc-windows-msvc-cpu",
+    ):
+        body = job_block(job)
+        assert "!inputs.linux_only" in body, f"{job} must be skipped by linux_only"
+    for job in ("build-x86_64-unknown-linux-gnu", "build-aarch64-unknown-linux-gnu"):
+        body = job_block(job)
+        assert "inputs.linux_only" in body, f"{job} must run on linux_only"
+        assert "!cancelled()" in body, f"{job} must tolerate skipped Apple needs"
 
 
 def _numpy_floor() -> tuple[int, ...]:

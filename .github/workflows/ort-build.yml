@@ -7,6 +7,12 @@ on:
         required: true
         type: string
   workflow_dispatch:
+    inputs:
+      linux_only:
+        description: "Build only the Linux targets (skips the Apple and Windows jobs)"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
@@ -93,7 +99,7 @@ jobs:
         run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/native_quality.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/download_stable_model.py scripts/runtime_inputs.py
 
   build-aarch64-apple-darwin:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
     needs: validate-source-lock
     runs-on: macos-15
     timeout-minutes: 120
@@ -148,7 +154,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-apple-darwin:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
     needs: validate-source-lock
     runs-on: macos-15-intel
     timeout-minutes: 120
@@ -203,7 +209,11 @@ jobs:
           retention-days: 14
 
   build-x86_64-unknown-linux-gnu:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    # Runs after the paired Apple jobs by default. A linux_only dispatch skips
+    # those jobs, so the condition tolerates them being skipped while still
+    # requiring validate-source-lock; !cancelled() is what lets a job run
+    # when its `needs` were skipped.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.validate-source-lock.result == 'success' && (inputs.linux_only || (needs.build-aarch64-apple-darwin.result == 'success' && needs.build-x86_64-apple-darwin.result == 'success')) }}
     needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]
     runs-on: ubuntu-latest
     # manylinux_2_28 container: the artifact's glibc symbol floor is set by
@@ -288,7 +298,11 @@ jobs:
           retention-days: 14
 
   build-aarch64-unknown-linux-gnu:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    # Runs after the paired Apple jobs by default. A linux_only dispatch skips
+    # those jobs, so the condition tolerates them being skipped while still
+    # requiring validate-source-lock; !cancelled() is what lets a job run
+    # when its `needs` were skipped.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.validate-source-lock.result == 'success' && (inputs.linux_only || (needs.build-aarch64-apple-darwin.result == 'success' && needs.build-x86_64-apple-darwin.result == 'success')) }}
     needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]
     runs-on: ubuntu-24.04-arm
     # manylinux_2_28 arm64 container for the same reason as the x86_64 Linux
@@ -367,7 +381,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-pc-windows-msvc:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 120
@@ -439,7 +453,7 @@ jobs:
   # import, so it loads on any Windows host. Built reduced to match the
   # DirectML reduced runtime the publish flow ships.
   build-x86_64-pc-windows-msvc-cpu:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 120
