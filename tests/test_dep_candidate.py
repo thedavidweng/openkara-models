@@ -217,11 +217,14 @@ def test_reduced_job_uses_the_locked_python_and_resolvable_deps():
     native = (ROOT / ".github/workflows/ort-build.yml").read_text()
     lock = json.loads((ROOT / "ort/source-lock.json").read_text())
     locked_python = lock["toolchain"]["python_version"]
+    # The reduced job runs inside the manylinux container, so the interpreter
+    # comes from the image's CPython tree instead of actions/setup-python.
+    locked_interpreter = "/opt/python/cp" + locked_python.replace(".", "") + "-cp" + locked_python.replace(".", "")
 
     reduced = native.split("  reduced-build-and-compare:", 1)[1].split(
         "  benchmark-x86_64-unknown-linux-gnu:", 1
     )[0]
-    assert f'python-version: "{locked_python}"' in reduced
+    assert locked_interpreter + "/bin/python" in reduced
     # NumPy 2.5+ is unavailable on the locked interpreter; requiring it would
     # fail resolution before the build ever starts.
     assert "numpy>=2.5" not in reduced
@@ -229,6 +232,37 @@ def test_reduced_job_uses_the_locked_python_and_resolvable_deps():
     # The operator config needs the pinned flatbuffers and a current onnx.
     assert 'flatbuffers==25.12.19' in reduced
     assert "onnx>=1.23.2" in reduced
+
+
+def test_linux_build_jobs_pin_the_manylinux_glibc_floor():
+    """Every Linux artifact must be built inside the controlled manylinux image.
+
+    A shared library's glibc symbol floor comes from the environment it is
+    built in, so a distro runner silently raises the floor above OpenKara's
+    ubuntu-22.04 baseline (glibc 2.35). The x86_64 reduced and aarch64 jobs did
+    exactly that (GLIBC_2.38); each Linux job must therefore run in the pinned
+    manylinux_2_28 container and assert the floor on its own artifact.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    publish = (ROOT / ".github/workflows/ort-publish.yml").read_text()
+    for workflow, jobs in (
+        (native, (
+            "build-x86_64-unknown-linux-gnu",
+            "build-aarch64-unknown-linux-gnu",
+            "reduced-build-and-compare",
+        )),
+        (publish, ("build-x86_64-linux", "build-aarch64-linux")),
+    ):
+        for job in jobs:
+            body = workflow.split(f"  {job}:", 1)[1]
+            body = body.split("\n  build-", 1)[0]
+            body = body.split("\n  reduced-build", 1)[0]
+            body = body.split("\n  benchmark-", 1)[0]
+            body = body.split("\n  publish", 1)[0]
+            assert "container:" in body, f"{job} must run in a container"
+            assert "quay.io/pypa/manylinux_2_28_" in body, job
+            assert "@sha256:" in body, f"{job} must pin the image digest"
+            assert "check_linux_abi_floor.py" in body, f"{job} must gate the ABI floor"
 
 
 def _numpy_floor() -> tuple[int, ...]:
