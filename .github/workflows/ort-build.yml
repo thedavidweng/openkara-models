@@ -509,7 +509,7 @@ jobs:
   # archive size + inference output. Fails if the reduced runtime cannot load
   # the model (a required kernel was pruned) or output diverges.
   reduced-build-and-compare:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' && !inputs.linux_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
     # Must run in the same manylinux_2_28 container as the full build above.
     # The glibc symbol floor of a shared library is fixed by the headers and

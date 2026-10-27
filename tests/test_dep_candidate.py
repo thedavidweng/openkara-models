@@ -297,14 +297,15 @@ def test_linux_only_dispatch_skips_non_linux_jobs():
         assert "!cancelled()" in body, f"{job} must tolerate skipped Apple needs"
 
 
-def test_linux_only_dispatch_skips_the_linux_dependents():
-    """A linux_only dispatch stops after the two Linux builds.
+def test_linux_only_dispatch_rebuilds_the_abi_affected_archives():
+    """A linux_only dispatch must rebuild both ABI-affected archives.
 
-    reduced-build-and-compare and benchmark are Linux jobs, but they only
-    re-verify the archives the two builds just produced: a fix dispatch would
-    spend another 150 minutes of runner time proving what the builds' own
-    verify, ABI-floor, smoke, and comparison steps already assert. They keep
-    their normal behaviour for every other dispatch.
+    The two bad archives are the x86_64 Linux reduced archive and the aarch64
+    Linux reduced archive. The x86_64 reduced archive is produced by
+    reduced-build-and-compare, not by build-x86_64-unknown-linux-gnu (which is
+    the full, already-qualified build). So the dispatch must run that reduced
+    job, and the full build as its comparison baseline; only benchmark, which
+    consumes the reduced archive and emits a report, may stay skipped.
     """
     native = (ROOT / ".github/workflows/ort-build.yml").read_text()
 
@@ -312,30 +313,53 @@ def test_linux_only_dispatch_skips_the_linux_dependents():
         """Body of one top-level job: from its name to the next 2-space key."""
         return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
 
-    for job in ("reduced-build-and-compare", "benchmark-x86_64-unknown-linux-gnu"):
-        body = job_block(job)
-        assert "!inputs.linux_only" in body, f"{job} must be skipped by linux_only"
-        # The normal dispatch gate stays: these jobs still only run for a plain
-        # dispatch that is not preparing a dependency candidate.
-        assert "inputs.candidate_lock_artifact == ''" in body, job
+    reduced = job_block("reduced-build-and-compare")
+    assert "!inputs.linux_only" not in reduced, "reduced job produces a bad archive"
+    assert "inputs.candidate_lock_artifact == ''" in reduced, "dispatch gate stays"
+
+    benchmark = job_block("benchmark-x86_64-unknown-linux-gnu")
+    assert "!inputs.linux_only" in benchmark, "benchmark may stay skipped"
 
 
-def test_reduced_build_verifies_the_source_lock():
-    """The reduced x86_64 build must pass --locked like every other target.
+def test_reduced_job_is_the_x86_64_reduced_producer():
+    """Pin which job produces which archive, so the selector cannot drift.
 
-    --locked checks the checked-out ORT source and submodules against
-    ort/source-lock.json. The reduced job is the only build that omitted it,
-    which left the one archive this fix re-ships as the only unverified source
-    tree.
+    build-x86_64-unknown-linux-gnu builds the full library (no --reduced);
+    reduced-build-and-compare builds the reduced one and uploads it under
+    ort-x86_64-unknown-linux-gnu-reduced, consuming the full artifact as its
+    comparison baseline. A selector that skipped the reduced job would leave
+    the bad x86_64 reduced archive unbuilt while rebuilding the good full one.
     """
     native = (ROOT / ".github/workflows/ort-build.yml").read_text()
-    body = re.split(
-        r"\n  (?=\S)", native.split("\n  reduced-build-and-compare:\n", 1)[1], maxsplit=1
-    )[0]
-    build_lines = [line for line in body.splitlines() if "build_runtime.py" in line]
-    assert build_lines, "reduced job must invoke build_runtime.py"
-    for line in build_lines:
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    def build_lines(body: str) -> list[str]:
+        return [line for line in body.splitlines() if "build_runtime.py --" in line]
+
+    full = job_block("build-x86_64-unknown-linux-gnu")
+    assert any("--target x86_64-unknown-linux-gnu" in line for line in build_lines(full))
+    assert not any("--reduced" in line for line in build_lines(full)), (
+        "the full build must not be the reduced producer"
+    )
+
+    reduced = job_block("reduced-build-and-compare")
+    reduced_builds = build_lines(reduced)
+    assert reduced_builds, "reduced job must build an archive"
+    for line in reduced_builds:
+        assert "--target x86_64-unknown-linux-gnu" in line, line.strip()
+        assert "--reduced" in line, f"reduced job must pass --reduced: {line.strip()}"
         assert "--locked" in line, f"reduced build must pass --locked: {line.strip()}"
+    assert "name: ort-x86_64-unknown-linux-gnu-reduced" in reduced, (
+        "reduced job must upload the reduced archive under its own name"
+    )
+    # The full artifact is the reduced job's comparison baseline.
+    assert "needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]" in reduced
+    assert "name: ort-x86_64-unknown-linux-gnu\n" in reduced, (
+        "reduced job must download the full artifact as its baseline"
+    )
 
 
 def _numpy_floor() -> tuple[int, ...]:
