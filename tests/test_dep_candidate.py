@@ -316,9 +316,79 @@ def test_linux_only_dispatch_rebuilds_the_abi_affected_archives():
     reduced = job_block("reduced-build-and-compare")
     assert "!inputs.linux_only" not in reduced, "reduced job produces a bad archive"
     assert "inputs.candidate_lock_artifact == ''" in reduced, "dispatch gate stays"
+    # The reduced job must not depend on the scheduler's implicit success():
+    # a skipped Apple ancestor propagates through the DAG (runner #2205 shape),
+    # so both DIRECT needs are pinned to explicit success, with the run-level
+    # cancel guard. Static shape only; it cannot prove server scheduling.
+    assert "!cancelled()" in reduced, "reduced job must keep the cancel guard"
+    assert "needs.validate-source-lock.result == 'success'" in reduced, (
+        "reduced job must require validate success explicitly"
+    )
+    assert "needs.build-x86_64-unknown-linux-gnu.result == 'success'" in reduced, (
+        "reduced job must require the full baseline success explicitly"
+    )
+    assert "github.event_name == 'workflow_dispatch'" in reduced, "event gate stays"
 
     benchmark = job_block("benchmark-x86_64-unknown-linux-gnu")
     assert "!inputs.linux_only" in benchmark, "benchmark may stay skipped"
+
+
+def test_reduced_job_gate_runs_only_on_healthy_direct_needs():
+    """Static truth table for the reduced job gate (shape check, not a proof).
+
+    Evaluates the reduced job's ``if:`` conjunction over dispatch/call,
+    linux_only true/false, candidate gate set/empty, and success/failed/
+    skipped/cancelled direct needs. This pins the intended scheduler contract
+    in-repo; only a real dispatch can confirm GitHub's server evaluation.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    reduced = job_block("reduced-build-and-compare")
+    assert "inputs.linux_only" not in reduced, (
+        "reduced job must not branch on linux_only at all"
+    )
+    gate = next(
+        line.split("if:", 1)[1].strip()
+        for line in reduced.splitlines()
+        if line.strip().startswith("if:")
+    )
+
+    def holds(event, candidate_artifact, validate, full, cancelled):
+        """Evaluate each && atom of the gate against one static context."""
+        context = {
+            "!cancelled()": not cancelled,
+            "github.event_name == 'workflow_dispatch'": event == "workflow_dispatch",
+            "inputs.candidate_lock_artifact == ''": candidate_artifact == "",
+            "needs.validate-source-lock.result == 'success'": validate == "success",
+            "needs.build-x86_64-unknown-linux-gnu.result == 'success'": full == "success",
+        }
+        atoms = [atom.strip().strip("${} ") for atom in gate.split("&&")]
+        assert atoms, "reduced gate must be a non-empty conjunction"
+        for atom in atoms:
+            assert atom in context, f"gate gained an unmodelled atom: {atom}"
+            if not context[atom]:
+                return False
+        return True
+
+    healthy = dict(event="workflow_dispatch", candidate_artifact="",
+                   validate="success", full="success", cancelled=False)
+    # linux_only true AND false dispatch with healthy needs: both run.
+    assert holds(**healthy) is True
+    # workflow_call never enters the reduced job (unchanged contract).
+    assert holds(**{**healthy, "event": "workflow_call"}) is False
+    assert holds(**{**healthy, "event": "pull_request"}) is False
+    # A candidate lock artifact present: candidate path takes over.
+    assert holds(**{**healthy, "candidate_artifact": "ort-x86_64-unknown-linux-gnu"}) is False
+    # Either direct need failed or skipped: must not run.
+    for bad in ("failure", "skipped"):
+        assert holds(**{**healthy, "validate": bad}) is False
+        assert holds(**{**healthy, "full": bad}) is False
+    # Cancelled run: the guard stops the job.
+    assert holds(**{**healthy, "cancelled": True}) is False
 
 
 def test_reduced_job_is_the_x86_64_reduced_producer():
