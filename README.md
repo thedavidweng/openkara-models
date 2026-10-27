@@ -124,7 +124,7 @@ Each workflow:
 3. Validates ONNX output against PyTorch (MSE < 1e-4), checks optimized-artifact metadata, and asserts the graph contains no `com.microsoft.nchwc` nodes
 4. Publishes the optimized ONNX file + SHA-256 checksum as a GitHub Release (release body includes model size and validation MSE)
 
-The converter runs on **Python 3.14**: torch 2.14 ships `cp310`–`cp314` wheels and NumPy 2.5+ requires Python >= 3.12, so 3.14 is the newest interpreter that resolves the whole CPU dependency graph (3.15 has no torch wheels at all). `requirements.txt` still floors NumPy at 2.4 because the runtime build installs it on the toolchain-locked Python 3.11.
+The converter runs on **Python 3.14**: torch 2.14 ships `cp310`–`cp314` wheels and NumPy 2.5+ requires Python >= 3.12, so 3.14 is the newest interpreter that resolves the whole CPU dependency graph (3.15 has no torch wheels at all). The converter therefore resolves NumPy 2.5.x. `requirements.txt` keeps a `>=2.4` floor because the file is also proven to resolve on Python 3.11 (NumPy 2.4.6), where 2.5+ is unavailable.
 
 Export and validation never hold a write token. A manual `workflow_dispatch` defaults to `publish: false` and stops at the CI artifact; set `publish: true` on a tag ref to create the release. Tag pushes keep their existing release semantics.
 
