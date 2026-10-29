@@ -5,6 +5,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Floors in requirements.txt are proven minimums, not targets. convert.yml
+    # also installs this file on Python 3.11, where NumPy 2.5+ does not exist,
+    # so raising a floor that already admits the new release breaks the
+    # converter (#152). Only widen a range when a release falls outside it.
+    versioning-strategy: increase-if-necessary
     labels:
       - "dependencies"
       - "python"
