@@ -246,6 +246,18 @@ def test_linux_build_jobs_pin_the_manylinux_glibc_floor():
     """
     native = (ROOT / ".github/workflows/ort-build.yml").read_text()
     publish = (ROOT / ".github/workflows/ort-publish.yml").read_text()
+
+    def job_block(workflow: str, name: str) -> str:
+        match = re.search(r"(?:^|\n)  " + re.escape(name) + r":\n(.*?)(?=\n  \S|\Z)", workflow, re.DOTALL)
+        assert match is not None, f"job {name} not found"
+        return match.group(1)
+
+    expected_abi_floor = {
+        "max-glibc": "2.35",
+        "max-glibcxx": "3.4.30",
+        "max-cxxabi": "1.3.13",
+    }
+
     for workflow, jobs in (
         (native, (
             "build-x86_64-unknown-linux-gnu",
@@ -255,15 +267,68 @@ def test_linux_build_jobs_pin_the_manylinux_glibc_floor():
         (publish, ("build-x86_64-linux", "build-aarch64-linux")),
     ):
         for job in jobs:
-            body = workflow.split(f"  {job}:", 1)[1]
-            body = body.split("\n  build-", 1)[0]
-            body = body.split("\n  reduced-build", 1)[0]
-            body = body.split("\n  benchmark-", 1)[0]
-            body = body.split("\n  publish", 1)[0]
+            body = job_block(workflow, job)
             assert "container:" in body, f"{job} must run in a container"
             assert "quay.io/pypa/manylinux_2_28_" in body, job
             assert "@sha256:" in body, f"{job} must pin the image digest"
-            assert "check_linux_abi_floor.py" in body, f"{job} must gate the ABI floor"
+
+            steps = re.split(r"\n    - |\n      - ", body)[1:]
+            abi_runs = []
+            for step in steps:
+                run_match = re.search(r"(?:^|\n)\s*run:\s*[>|]?(.*)", step, re.DOTALL)
+                if not run_match:
+                    continue
+                code_lines = [l for l in run_match.group(1).splitlines() if not l.strip().startswith("#")]
+                code = " ".join(code_lines)
+                if "check_linux_abi_floor.py" in code:
+                    abi_runs.append(code)
+            assert len(abi_runs) == 1, f"{job} must have exactly one check_linux_abi_floor.py run step"
+            code = abi_runs[0]
+            m_glibc = re.search(r"--max-glibc\s+([^\s\\]+)", code)
+            m_glibcxx = re.search(r"--max-glibcxx\s+([^\s\\]+)", code)
+            m_cxxabi = re.search(r"--max-cxxabi\s+([^\s\\]+)", code)
+            assert m_glibc is not None, f"{job} missing --max-glibc"
+            assert m_glibcxx is not None, f"{job} missing --max-glibcxx"
+            assert m_cxxabi is not None, f"{job} missing --max-cxxabi"
+            parsed_args = {
+                "max-glibc": m_glibc.group(1),
+                "max-glibcxx": m_glibcxx.group(1),
+                "max-cxxabi": m_cxxabi.group(1),
+            }
+            assert parsed_args == expected_abi_floor, (
+                f"{job} ABI floor arguments mismatch: {parsed_args} != {expected_abi_floor}"
+            )
+
+
+def test_publish_job_depends_on_all_linux_producers_and_downloads_arm64():
+    """Publish must depend on all runtime producers and its pattern must cover arm64.
+
+    If publish drops build-aarch64-linux (or build-x86_64-linux), it runs in
+    parallel with uncompleted builds and cuts an incomplete release. The
+    download-artifact pattern must cover ort-aarch64-unknown-linux-gnu.
+    """
+    import fnmatch
+
+    publish = (ROOT / ".github/workflows/ort-publish.yml").read_text()
+    match = re.search(r"(?:^|\n)  publish:\n(.*?)(?=\n  \S|\Z)", publish, re.DOTALL)
+    assert match is not None, "publish job not found"
+    body = match.group(1)
+
+    needs_match = re.search(r"^\s*needs:\s*\[(.*?)\]", body, re.MULTILINE)
+    if needs_match:
+        needs = [n.strip() for n in needs_match.group(1).split(",") if n.strip()]
+    else:
+        needs_list_match = re.search(r"^\s*needs:\s*\n((?:\s+-\s+\S+\n?)+)", body, re.MULTILINE)
+        assert needs_list_match is not None, "publish job must specify needs list"
+        needs = [re.sub(r"^\s+-\s+", "", line).strip() for line in needs_list_match.group(1).splitlines() if line.strip()]
+    assert needs == ["build", "build-x86_64-linux", "build-aarch64-linux"]
+
+    pattern_match = re.search(r"actions/download-artifact.*?pattern:\s*(\S+)", body, re.DOTALL)
+    assert pattern_match is not None, "publish job must use actions/download-artifact with pattern"
+    pattern = pattern_match.group(1).strip()
+    assert fnmatch.fnmatch("ort-aarch64-unknown-linux-gnu", pattern), (
+        f"download-artifact pattern '{pattern}' does not cover ort-aarch64-unknown-linux-gnu"
+    )
 
 
 def test_linux_only_dispatch_skips_non_linux_jobs():

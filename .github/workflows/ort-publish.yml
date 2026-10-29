@@ -50,11 +50,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
-      - name: Install build deps (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential
       - name: Install Python deps (onnx for required-operator config)
         run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
       # Reduced build: derive the operator set from the spectral stable model,
@@ -89,7 +84,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     container:
-      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:4131ddd7acb9c6c966af02fe7e71edc51e078c2d41f475966697676430bfa2ae
+      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:e0adf18521ad35192df733a6c62d35df7801957d24e0470238aacecfab2188a3
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,7 +107,7 @@ jobs:
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
       - name: Build reduced ORT for x86_64-unknown-linux-gnu
-        run: python scripts/build_runtime.py --target x86_64-unknown-linux-gnu --reduced
+        run: python scripts/build_runtime.py --locked --target x86_64-unknown-linux-gnu --reduced
       - name: Verify ABI floor against the release baseline
         run: |
           RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz)
@@ -161,7 +156,7 @@ jobs:
       - name: Generate required-operator config
         run: python scripts/generate_required_operators.py --models models/htdemucs.spectral.onnx
       - name: Build reduced ORT for aarch64-unknown-linux-gnu
-        run: python scripts/build_runtime.py --target aarch64-unknown-linux-gnu --reduced
+        run: python scripts/build_runtime.py --locked --target aarch64-unknown-linux-gnu --reduced
       - name: Verify ABI floor against the release baseline
         run: |
           RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu-reduced.tar.gz)
@@ -240,7 +235,7 @@ jobs:
           TAG="$RELEASE_TAG"
           gh release create "$TAG" \
             --title "ORT runtime $RELEASE_TITLE" \
-            --notes "Source-built, reduced-operator ONNX Runtime archives for 5 targets. See catalog/specs/runtime-entries.json for the catalog spec fragment and runtime-required-operators for the operator set." \
+            --notes "Source-built, reduced-operator ONNX Runtime archives for 6 targets. See catalog/specs/runtime-entries.json for the catalog spec fragment and runtime-required-operators for the operator set." \
             ort/packages/onnxruntime-*.tar.gz ort/packages/onnxruntime-*.zip
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
