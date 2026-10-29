@@ -299,5 +299,122 @@ class CloneFaithfulnessTests(unittest.TestCase):
             self.assertIn("core.eol=lf", cmd)
 
 
+class WindowsPatchToolchainTests(unittest.TestCase):
+    """Windows targets require GNU patch >= 2.8 so FetchContent applies
+    cmake/patches/onnx/onnx.patch without hunk failures on scoped_resource.h."""
+
+    def test_find_windows_patch_prefers_env_var(self):
+        with mock.patch.dict(br.os.environ, {"PATCH_EXECUTABLE": r"D:\custom\patch.exe"}):
+            self.assertEqual(br._find_windows_patch(), Path(r"D:\custom\patch.exe"))
+
+    def test_find_windows_patch_checks_msys2_default(self):
+        with mock.patch.dict(br.os.environ, {}, clear=True):
+            with mock.patch.object(Path, "is_file", return_value=True):
+                self.assertEqual(br._find_windows_patch(), Path(r"C:\msys64\usr\bin\patch.exe"))
+
+    def test_find_windows_patch_falls_back_to_path(self):
+        with mock.patch.dict(br.os.environ, {}, clear=True):
+            with mock.patch.object(Path, "is_file", return_value=False):
+                with mock.patch.object(br.shutil, "which", return_value=r"C:\bin\patch.exe"):
+                    self.assertEqual(br._find_windows_patch(), Path(r"C:\bin\patch.exe"))
+
+    def test_windows_toolchain_rejects_missing_patch(self):
+        lock = {
+            "toolchain": {
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "cmake_minimum_version": "3.28",
+                "visual_studio_version": "2022",
+                "patch_minimum_version": "2.8",
+            }
+        }
+        with mock.patch.object(Path, "is_file", return_value=True):
+            with mock.patch.object(br.subprocess, "run", return_value=mock.MagicMock(returncode=0, stdout="17.10.0\n")):
+                with mock.patch.object(br, "_find_windows_patch", return_value=None):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        br._assert_toolchain(lock, "x86_64-pc-windows-msvc")
+                    self.assertIn("patch: not found", str(ctx.exception))
+
+    def test_windows_toolchain_rejects_patch_below_floor(self):
+        lock = {
+            "toolchain": {
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "cmake_minimum_version": "3.28",
+                "visual_studio_version": "2022",
+                "patch_minimum_version": "2.8",
+            }
+        }
+        fake_patch = Path(r"C:\fake\patch.exe")
+
+        def fake_run(cmd, capture_output=True, text=True):
+            m = mock.MagicMock()
+            m.returncode = 0
+            if "vswhere" in str(cmd[0]):
+                m.stdout = "17.10.0\n"
+            elif "cmake" in str(cmd[0]):
+                m.stdout = "cmake version 3.28.3\n"
+            else:
+                m.stdout = "patch 2.7.6\nCopyright (C) 2018 Free Software Foundation, Inc.\n"
+            return m
+
+        with mock.patch.object(Path, "is_file", return_value=True):
+            with mock.patch.object(br.subprocess, "run", side_effect=fake_run):
+                with mock.patch.object(br, "_find_windows_patch", return_value=fake_patch):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        br._assert_toolchain(lock, "x86_64-pc-windows-msvc")
+                    self.assertIn("patch version: expected >= 2.8, got 2.7.6", str(ctx.exception))
+
+    def test_windows_toolchain_accepts_patch_ge_2_8(self):
+        lock = {
+            "toolchain": {
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "cmake_minimum_version": "3.28",
+                "visual_studio_version": "2022",
+                "patch_minimum_version": "2.8",
+            }
+        }
+        fake_patch = Path(r"C:\msys64\usr\bin\patch.exe")
+
+        def fake_run(cmd, capture_output=True, text=True):
+            m = mock.MagicMock()
+            m.returncode = 0
+            if "vswhere" in str(cmd[0]):
+                m.stdout = "17.10.0\n"
+            elif "cmake" in str(cmd[0]):
+                m.stdout = "cmake version 3.28.3\n"
+            else:
+                m.stdout = "GNU patch 2.8\nCopyright (C) 2024 Free Software Foundation, Inc.\n"
+            return m
+
+        with mock.patch.object(Path, "is_file", return_value=True):
+            with mock.patch.object(br.subprocess, "run", side_effect=fake_run):
+                with mock.patch.object(br, "_find_windows_patch", return_value=fake_patch):
+                    # Should not raise
+                    br._assert_toolchain(lock, "x86_64-pc-windows-msvc")
+
+    def test_windows_build_target_injects_patch_executable(self):
+        lock = {
+            "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
+            "submodules": {},
+            "targets": {"x86_64-pc-windows-msvc": {"cmake_args": ["-DTEST=ON"]}},
+            "toolchain": {"python_version": "3.11", "cmake_minimum_version": "3.28",
+                          "visual_studio_version": "2022", "patch_minimum_version": "2.8"},
+        }
+        captured_cmds: list[list[str]] = []
+        with mock.patch.object(br, "_assert_toolchain"):
+            with mock.patch.object(br.ort_api_version, "parse_ort_api_version", return_value=27):
+                with mock.patch.object(br, "_get_submodule_state", return_value={}):
+                    with mock.patch.object(br.os, "cpu_count", return_value=2):
+                        with mock.patch.object(br, "_find_windows_patch", return_value=Path("C:/msys64/usr/bin/patch.exe")):
+                            with mock.patch.object(br, "_run", side_effect=lambda cmd, **kw: captured_cmds.append(cmd)):
+                                with tempfile.TemporaryDirectory() as td:
+                                    source_dir = Path(td) / "source"
+                                    (source_dir / "cmake").mkdir(parents=True)
+                                    build_dir = Path(td) / "build"
+                                    meta = br._build_target(lock, "x86_64-pc-windows-msvc", source_dir, build_dir)
+        self.assertIn("-DPatch_EXECUTABLE=C:/msys64/usr/bin/patch.exe", meta["cmake_args"])
+        configure_cmd = captured_cmds[0]
+        self.assertIn("-DPatch_EXECUTABLE=C:/msys64/usr/bin/patch.exe", configure_cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

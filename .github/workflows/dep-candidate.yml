@@ -288,7 +288,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Create or switch to the candidate branch.
-          git checkout -b "$BRANCH_NAME"
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" > /dev/null 2>&1; then
+            git checkout -B "$BRANCH_NAME" "origin/$BRANCH_NAME"
+          else
+            git checkout -b "$BRANCH_NAME"
+          fi
           # Stage only the relevant lock file: ort/source-lock.json for ORT
           # updates, models/source-lock.json for model-weight updates.
           # NEVER stage catalog/channels/stable.json — the stable pointer is

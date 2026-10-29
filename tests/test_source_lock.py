@@ -64,7 +64,7 @@ class SourceLockStructureTests(unittest.TestCase):
 
     def test_toolchain_versions_declared(self):
         lock = _load_lock()
-        for field in ("cmake_minimum_version", "python_version"):
+        for field in ("cmake_minimum_version", "python_version", "patch_minimum_version"):
             self.assertIn(field, lock["toolchain"])
 
 

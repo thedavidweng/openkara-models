@@ -143,6 +143,26 @@ def _get_submodule_state(source_dir: Path) -> dict[str, str]:
     return submodules
 
 
+def _find_windows_patch() -> Path | None:
+    """Locate the GNU patch executable on Windows.
+
+    Checks PATCH_EXECUTABLE or Patch_EXECUTABLE in the environment first,
+    falling back to MSYS2's default install location (C:\\msys64\\usr\\bin\\patch.exe)
+    or PATH.
+    """
+    for env_var in ("PATCH_EXECUTABLE", "Patch_EXECUTABLE"):
+        val = os.environ.get(env_var)
+        if val:
+            return Path(val)
+    msys = Path(r"C:\msys64\usr\bin\patch.exe")
+    if msys.is_file():
+        return msys
+    which = shutil.which("patch")
+    if which:
+        return Path(which)
+    return None
+
+
 def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
     """Assert the local toolchain matches the source lock before building.
 
@@ -256,11 +276,45 @@ def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
                     f"{ver_str or 'none'} (major {major})"
                 )
 
+        # GNU patch >= 2.8 requirement.
+        # ORT applies cmake/patches/onnx/onnx.patch to onnx v1.22.0 via FetchContent.
+        # Upstream's patch has whitespace-mismatched context for scoped_resource.h;
+        # GNU patch 2.8 applies it cleanly, but older patch utilities (such as
+        # Git for Windows' patch 2.7.6) reject it with hunk failures.
+        required_patch = tc.get("patch_minimum_version", "2.8")
+        patch_exe = _find_windows_patch()
+        if patch_exe is None or not patch_exe.is_file():
+            errors.append(
+                f"patch: not found (GNU patch >= {required_patch} required on Windows; "
+                "set PATCH_EXECUTABLE or install MSYS2 patch)"
+            )
+        else:
+            try:
+                r = subprocess.run(
+                    [str(patch_exe), "--version"],
+                    capture_output=True, text=True,
+                )
+                if r.returncode != 0:
+                    errors.append(f"patch: failed to execute {patch_exe}")
+                else:
+                    first = r.stdout.strip().splitlines()[0] if r.stdout.strip().splitlines() else ""
+                    m = re.search(r"(\d+(?:\.\d+)+)", first)
+                    ver = m.group(1) if m else "0"
+                    if not _version_ge(ver, required_patch):
+                        errors.append(
+                            f"patch version: expected >= {required_patch}, "
+                            f"got {ver} from {patch_exe} (GNU patch >= {required_patch} "
+                            "is required to apply ORT onnx.patch cleanly)"
+                        )
+            except Exception as ex:
+                errors.append(f"patch: error probing {patch_exe}: {ex}")
+
     if errors:
         for e in errors:
             print(f"  TOOLCHAIN MISMATCH: {e}", file=sys.stderr)
+        details = "; ".join(errors)
         raise RuntimeError(
-            f"toolchain verification failed ({len(errors)} error(s)); "
+            f"toolchain verification failed ({len(errors)} error(s)): {details}; "
             "the local toolchain does not match ort/source-lock.json"
         )
 
@@ -287,6 +341,13 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
 
     # Assert the toolchain matches the source lock before building.
     _assert_toolchain(lock, target)
+
+    # On Windows targets, pass -DPatch_EXECUTABLE to ensure CMake uses GNU patch >= 2.8.
+    if "windows" in target:
+        if not any(arg.startswith("-DPatch_EXECUTABLE=") for arg in cmake_args):
+            patch_exe = _find_windows_patch()
+            if patch_exe:
+                cmake_args.append(f"-DPatch_EXECUTABLE={patch_exe.as_posix()}")
 
     # The source header, not the release tag, defines the API level.
     ort_api_version_value = ort_api_version.parse_ort_api_version(source_dir)

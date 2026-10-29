@@ -385,6 +385,8 @@ jobs:
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 120
+    env:
+      PATCH_EXECUTABLE: C:/msys64/usr/bin/patch.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -398,6 +400,15 @@ jobs:
           python-version: "3.11"
       - name: Install Python deps (onnx for required-operator config)
         run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      # ORT applies cmake/patches/onnx/onnx.patch to onnx v1.22.0 via FetchContent.
+      # scoped_resource.h context has whitespace mismatches that fail on older
+      # patch utilities (such as Git for Windows' patch 2.7.6). Explicitly install
+      # GNU patch >= 2.8 via MSYS2 and select it for CMake configure.
+      - name: Install GNU patch >= 2.8 via MSYS2
+        shell: bash
+        run: |
+          C:/msys64/usr/bin/pacman.exe -S --noconfirm --needed patch || C:/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed patch
+          C:/msys64/usr/bin/patch.exe --version
       # Reduced build: derive the operator set from the spectral stable model,
       # then prune every other kernel (matches the ort-publish.yml template, so
       # CI builds the same reduced runtime that publish ships).
@@ -457,6 +468,8 @@ jobs:
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 120
+    env:
+      PATCH_EXECUTABLE: C:/msys64/usr/bin/patch.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -470,6 +483,15 @@ jobs:
           python-version: "3.11"
       - name: Install Python deps (onnx for required-operator config)
         run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      # ORT applies cmake/patches/onnx/onnx.patch to onnx v1.22.0 via FetchContent.
+      # scoped_resource.h context has whitespace mismatches that fail on older
+      # patch utilities (such as Git for Windows' patch 2.7.6). Explicitly install
+      # GNU patch >= 2.8 via MSYS2 and select it for CMake configure.
+      - name: Install GNU patch >= 2.8 via MSYS2
+        shell: bash
+        run: |
+          C:/msys64/usr/bin/pacman.exe -S --noconfirm --needed patch || C:/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed patch
+          C:/msys64/usr/bin/patch.exe --version
       - name: Download stable model from catalog
         run: >
           python scripts/download_stable_model.py

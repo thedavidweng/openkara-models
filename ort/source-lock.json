@@ -229,6 +229,7 @@
     "cmake_minimum_version": "3.28",
     "gcc_version": "13",
     "note": "Toolchain versions are enforced by the CI workflow. Local builds should match.",
+    "patch_minimum_version": "2.8",
     "python_version": "3.11",
     "visual_studio_version": "2022",
     "xcode_version": "16.0"
