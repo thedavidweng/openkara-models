@@ -2,8 +2,206 @@
   "c_api_level": {
     "ort_api_version_note": "The ORT C API version is no longer manually maintained here. It is parsed at build time from ORT_API_VERSION in include/onnxruntime/core/session/onnxruntime_c_api.h of the pinned source, required to be 27 for v1.27.1, and recorded in build-manifest.json and provenance.json. The app owns its Rust `ort` crate version (rust_ort_crate_version was removed from this lock)."
   },
+  "deps": {
+    "entries": {
+      "abseil_cpp": {
+        "sha1": "a9eb1d648cbca4d4d788737e971a6a7a63726b07",
+        "url": "https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip"
+      },
+      "coremltools": {
+        "sha1": "0e9b1a9a9a9fe283ac1a0c9261420075d5574dd1",
+        "url": "https://github.com/apple/coremltools/archive/refs/tags/9.0.zip"
+      },
+      "cpp_client_telemetry": {
+        "sha1": "e97ee8f91c9348551d35873da33a18b4e50cf0db",
+        "url": "https://github.com/microsoft/cpp_client_telemetry/archive/refs/tags/v3.10.279.1.zip"
+      },
+      "cudnn_frontend": {
+        "sha1": "1e4c9a464d3437e388ab0163f3be068dba783c08",
+        "url": "https://github.com/NVIDIA/cudnn-frontend/archive/refs/tags/v1.27.0.zip"
+      },
+      "curl": {
+        "sha1": "c3b4712175609f1e1662e716efd4fd48901e863d",
+        "url": "https://github.com/curl/curl/releases/download/curl-8_21_0/curl-8.21.0.tar.xz"
+      },
+      "cutlass": {
+        "sha1": "51d4f1ba4b9977b94606e23bbc307463a6741383",
+        "url": "https://github.com/NVIDIA/cutlass/archive/refs/tags/v4.7.0.zip"
+      },
+      "cxxopts": {
+        "sha1": "6c6ca7f8480b26c8d00476e0e24b7184717fe4f0",
+        "url": "https://github.com/jarro2783/cxxopts/archive/3c73d91c0b04e2b59462f0a741be8c07024c1bc0.zip"
+      },
+      "date": {
+        "sha1": "2dac0c81dc54ebdd8f8d073a75c053b04b56e159",
+        "url": "https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip"
+      },
+      "dawn": {
+        "sha1": "514e914f23a0787213c89eed879f74b5e275690d",
+        "url": "https://github.com/google/dawn/archive/refs/tags/v20260916.214021.zip"
+      },
+      "dawn_agility_sdk": {
+        "sha1": "fa5f5fc8d0c8c209cfbb530be634960d20595841",
+        "url": "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.721.3-preview"
+      },
+      "deep_gemm": {
+        "sha1": "76a0076386991cac8e5d32c3e7e74d9bb8102115",
+        "url": "https://github.com/deepseek-ai/DeepGEMM/archive/559d79fb6994a58b8a15b4b93bf13ccc16edf247.tar.gz"
+      },
+      "directx_headers": {
+        "sha1": "47653509a3371eabb156360f42faf582f314bf2e",
+        "url": "https://github.com/microsoft/DirectX-Headers/archive/refs/tags/v1.613.1.zip"
+      },
+      "dlpack": {
+        "sha1": "e499c86e4e5c5268a87661d7ea39c27fae10907c",
+        "url": "https://github.com/dmlc/dlpack/archive/5c210da409e7f1e51ddf445134a4376fdbd70d7d.zip"
+      },
+      "eigen": {
+        "sha1": "05b19b49e6fbb91246be711d801160528c135e34",
+        "url": "https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip"
+      },
+      "extensions": {
+        "sha1": "239063aee4946a9af147b473a4c3da78ba7413b4",
+        "url": "https://github.com/microsoft/onnxruntime-extensions/archive/c24b7bab0c12f53da76d0c31b03b9f0f8ec8f3b4.zip"
+      },
+      "flatbuffers": {
+        "sha1": "59422c3b5e573dd192fead2834d25951f1c1670c",
+        "url": "https://github.com/google/flatbuffers/archive/refs/tags/v23.5.26.zip"
+      },
+      "fp16": {
+        "sha1": "b985f6985a05a1c03ff1bb71190f66d8f98a1494",
+        "url": "https://github.com/Maratyszcza/FP16/archive/0a92994d729ff76a58f692d3028ca1b64b145d91.zip"
+      },
+      "fxdiv": {
+        "sha1": "a5658f4036402dbca7cebee32be57fb8149811e1",
+        "url": "https://github.com/Maratyszcza/FXdiv/archive/63058eff77e11aa15bf531df5dd34395ec3017c8.zip"
+      },
+      "google_benchmark": {
+        "sha1": "e56e2dbb8f5bef7e943883a34f40bc29f63efae6",
+        "url": "https://github.com/google/benchmark/archive/refs/tags/v1.9.5.zip"
+      },
+      "googletest": {
+        "sha1": "f638fa0e724760e2ba07ff8cfba32cd644e1ce28",
+        "url": "https://github.com/google/googletest/archive/refs/tags/v1.17.0.zip"
+      },
+      "googlexnnpack": {
+        "sha1": "6f6bbba627241f89463ca845febaf063982b34fe",
+        "url": "https://github.com/google/XNNPACK/archive/3cf85e705098622d59056dcb8f5f963ea7bb0a00.zip"
+      },
+      "json": {
+        "sha1": "5e88795165cc8590138d1f47ce94ee567b85b4d6",
+        "url": "https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.zip"
+      },
+      "kleidiai": {
+        "sha1": "36aebdd5bd28c40b1943eb93498ae42e703510e5",
+        "url": "https://github.com/ARM-software/kleidiai/archive/refs/tags/v1.30.0.tar.gz"
+      },
+      "kleidiai-qmx": {
+        "sha1": "5e855730a2d69057a569f43dd7532db3b2d2a05c",
+        "url": "https://github.com/qualcomm/kleidiai/archive/2f10c9a8d32f81ffeeb6d4885a29cc35d2b0da87.zip"
+      },
+      "mbedtls": {
+        "sha1": "e892e98cff90cf7e0736c525bf357626a2513c4c",
+        "url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2"
+      },
+      "microsoft_gsl": {
+        "sha1": "1094e3bb7a8af763dcb136ccd676e6e75e614eec",
+        "url": "https://github.com/microsoft/GSL/archive/refs/tags/v4.2.1.zip"
+      },
+      "microsoft_wil": {
+        "sha1": "826c8bd47c2258ec61b8b218e031e5b33d27f761",
+        "url": "https://github.com/microsoft/wil/archive/refs/tags/v1.0.250325.1.zip"
+      },
+      "mimalloc": {
+        "sha1": "d5ee7d34223d0567892db5179849939c8769dc41",
+        "url": "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.1.zip"
+      },
+      "mp11": {
+        "sha1": "9bc9e01dffb64d9e0773b2e44d2f22c51aace063",
+        "url": "https://github.com/boostorg/mp11/archive/refs/tags/boost-1.82.0.zip"
+      },
+      "onnx": {
+        "sha1": "2b2cd58ac7a26df5371266149e0c76776330cdf1",
+        "url": "https://github.com/onnx/onnx/archive/refs/tags/v1.22.0.zip"
+      },
+      "onnx_tensorrt": {
+        "sha1": "01114d3b67650857281fa50faa2e412130a63b69",
+        "url": "https://github.com/onnx/onnx-tensorrt/archive/d5dce67db7c2e64b07e055571f5ec06f7f254de2.zip"
+      },
+      "protobuf": {
+        "sha1": "051fee744fcca04dab37eb009d49aa3e9546acda",
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.6/protobuf-33.6.tar.gz"
+      },
+      "protoc_linux_aarch64": {
+        "sha1": "b7ec3edf45c31fed5318f65693ce5f14c850a72f",
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.6/protoc-33.6-linux-aarch_64.zip"
+      },
+      "protoc_linux_x64": {
+        "sha1": "44c6aeb3f494e4f8e46d283b05e087c47cf6369d",
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.6/protoc-33.6-linux-x86_64.zip"
+      },
+      "protoc_linux_x86": {
+        "sha1": "6a4b46fa6b090ff8e64f03bdd4a865ea504fa261",
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.6/protoc-33.6-linux-x86_32.zip"
+      },
+      "protoc_mac_universal": {
+        "sha1": "3c2f883c5f828ae184550763ab8ae9dc642d5d97",
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.6/protoc-33.6-osx-universal_binary.zip"
+      },
+      "protoc_win32": {
+        "sha1": "127b589423e076fe5f9724e61b2aa9e91eab3936",
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.6/protoc-33.6-win32.zip"
+      },
+      "protoc_win64": {
+        "sha1": "9f43a76f18e37325079f772bd47673f9d2f06385",
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.6/protoc-33.6-win64.zip"
+      },
+      "psimd": {
+        "sha1": "1f5454b01f06f9656b77e4a5e2e31d7422487013",
+        "url": "https://github.com/Maratyszcza/psimd/archive/072586a71b55b7f8c584153d223e95687148a900.zip"
+      },
+      "pthreadpool": {
+        "sha1": "533a77943203ef15ca608bcd9dbe2c94da7451d2",
+        "url": "https://github.com/google/pthreadpool/archive/dcc9f28589066af0dbd4555579281230abbf74dd.zip"
+      },
+      "pybind11": {
+        "sha1": "a064e663b4d7a337ac291d1bef7337ef4e60a1ae",
+        "url": "https://github.com/pybind/pybind11/archive/refs/tags/v3.0.2.zip"
+      },
+      "pytorch_cpuinfo": {
+        "sha1": "6e2be17c110e4f4184b059303c722b3c5bd080a6",
+        "url": "https://github.com/pytorch/cpuinfo/archive/66ee79c038d70dad9f08705b2c9b3e58f6d8f512.zip"
+      },
+      "re2": {
+        "sha1": "646e1728269cde7fcef990bf4a8e87b047882e88",
+        "url": "https://github.com/google/re2/archive/refs/tags/2024-07-02.zip"
+      },
+      "safeint": {
+        "sha1": "23f252040ff6cb9f1fd18575b32fa8fb5928daac",
+        "url": "https://github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip"
+      },
+      "tensorboard": {
+        "sha1": "67b833913605a4f3f499894ab11528a702c2b381",
+        "url": "https://github.com/tensorflow/tensorboard/archive/373eb09e4c5d2b3cc2493f0949dc4be6b6a45e81.zip"
+      },
+      "vulkan_headers": {
+        "sha1": "57bc528ef7c4a3f7bfbb59e64a187e3734bd29d8",
+        "url": "https://codeload.github.com/KhronosGroup/Vulkan-Headers/tar.gz/refs/tags/v1.4.344"
+      }
+    },
+    "note": "Dependency archives downloaded by ORT's CMake superbuild from cmake/deps.txt at the pinned upstream commit. The sha1 values are the SHA-1 hashes of the downloaded archives, verified by ORT's CMake. These are not git commit SHAs."
+  },
   "lock_version": "openkara.ort-source-lock/v1",
   "note_on_submodules": "Git submodules pinned at the ORT upstream commit. The expected_sha values are the exact commit SHAs recorded in the ORT git tree at the pinned upstream commit_sha. The build script verifies these after checkout and records them in the build manifest.",
+  "reduced_build": {
+    "config_path": "ort/required-operators.config",
+    "config_sidecar_path": "ort/required-operators.json",
+    "extra_cmake_args": [
+      "-Donnxruntime_DISABLE_ML_OPS=ON"
+    ],
+    "note": "Reduced-operator build. The config is generated by scripts/generate_required_operators.py from the stable catalog models (union of every model's operator set). It is consumed by ORT's reduce_op_kernels.py after cmake configure. This is NOT a minimal build: ONNX-format models, runtime graph optimization, and execution-provider partitioning are all retained. Only unused operator kernels are removed, so the CPU fallback path retains every kernel the model's operator set requires.",
+    "reduce_op_kernels_script": "tools/ci_build/reduce_op_kernels.py"
+  },
   "submodules": {
     "cmake/external/emsdk": {
       "expected_sha": "c0bb220cb6e6f4e0fabb6f6db9efd53390ef5e56",
@@ -14,37 +212,8 @@
       "repo": "google/libprotobuf-mutator"
     },
     "cmake/external/onnx": {
-      "expected_sha": "be2b5fde82d9c8874f3d19328bdfe3b6962dc67b",
+      "expected_sha": "2bb50465112feca9003e1ed654d77f01ff1415ca",
       "repo": "onnx/onnx"
-    }
-  },
-  "deps": {
-    "note": "Dependency archives downloaded by ORT's CMake superbuild from cmake/deps.txt at the pinned upstream commit. The sha1 values are the SHA-1 hashes of the downloaded archives, verified by ORT's CMake. These are not git commit SHAs.",
-    "entries": {
-      "abseil_cpp": {
-        "sha1": "a9eb1d648cbca4d4d788737e971a6a7a63726b07",
-        "url": "https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip"
-      },
-      "eigen": {
-        "sha1": "05b19b49e6fbb91246be711d801160528c135e34",
-        "url": "https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip"
-      },
-      "googlexnnpack": {
-        "sha1": "6f6bbba627241f89463ca845febaf063982b34fe",
-        "url": "https://github.com/google/XNNPACK/archive/3cf85e705098622d59056dcb8f5f963ea7bb0a00.zip"
-      },
-      "onnx": {
-        "sha1": "321d4acc807c8e0fb0bbcc0424a143dffde1e846",
-        "url": "https://github.com/onnx/onnx/archive/refs/tags/v1.21.0.zip"
-      },
-      "protobuf": {
-        "sha1": "7cf2733949036c7d52fda017badcab093fe73bfa",
-        "url": "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip"
-      },
-      "re2": {
-        "sha1": "646e1728269cde7fcef990bf4a8e87b047882e88",
-        "url": "https://github.com/google/re2/archive/refs/tags/2024-07-02.zip"
-      }
     }
   },
   "targets": {
@@ -233,20 +402,11 @@
     "visual_studio_version": "2022",
     "xcode_version": "16.0"
   },
-  "reduced_build": {
-    "config_path": "ort/required-operators.config",
-    "config_sidecar_path": "ort/required-operators.json",
-    "note": "Reduced-operator build. The config is generated by scripts/generate_required_operators.py from the stable catalog models (union of every model's operator set). It is consumed by ORT's reduce_op_kernels.py after cmake configure. This is NOT a minimal build: ONNX-format models, runtime graph optimization, and execution-provider partitioning are all retained. Only unused operator kernels are removed, so the CPU fallback path retains every kernel the model's operator set requires.",
-    "reduce_op_kernels_script": "tools/ci_build/reduce_op_kernels.py",
-    "extra_cmake_args": [
-      "-Donnxruntime_DISABLE_ML_OPS=ON"
-    ]
-  },
   "upstream": {
-    "commit_sha": "df2ba1cf8108aa63627cf4cdf8f807880b938616",
+    "commit_sha": "402979ac1bef89dcd55add41eaa7277c407599eb",
     "project": "onnxruntime",
-    "release_url": "https://github.com/microsoft/onnxruntime/releases/tag/v1.27.1",
+    "release_url": "https://github.com/microsoft/onnxruntime/releases/tag/v1.31.0",
     "repo": "microsoft/onnxruntime",
-    "tag": "v1.27.1"
+    "tag": "v1.31.0"
   }
 }
