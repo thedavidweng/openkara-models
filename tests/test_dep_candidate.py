@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -217,11 +218,14 @@ def test_reduced_job_uses_the_locked_python_and_resolvable_deps():
     native = (ROOT / ".github/workflows/ort-build.yml").read_text()
     lock = json.loads((ROOT / "ort/source-lock.json").read_text())
     locked_python = lock["toolchain"]["python_version"]
+    # The reduced job runs inside the manylinux container, so the interpreter
+    # comes from the image's CPython tree instead of actions/setup-python.
+    locked_interpreter = "/opt/python/cp" + locked_python.replace(".", "") + "-cp" + locked_python.replace(".", "")
 
     reduced = native.split("  reduced-build-and-compare:", 1)[1].split(
         "  benchmark-x86_64-unknown-linux-gnu:", 1
     )[0]
-    assert f'python-version: "{locked_python}"' in reduced
+    assert locked_interpreter + "/bin/python" in reduced
     # NumPy 2.5+ is unavailable on the locked interpreter; requiring it would
     # fail resolution before the build ever starts.
     assert "numpy>=2.5" not in reduced
@@ -229,6 +233,301 @@ def test_reduced_job_uses_the_locked_python_and_resolvable_deps():
     # The operator config needs the pinned flatbuffers and a current onnx.
     assert 'flatbuffers==25.12.19' in reduced
     assert "onnx>=1.23.2" in reduced
+
+
+def test_linux_build_jobs_pin_the_manylinux_glibc_floor():
+    """Every Linux artifact must be built inside the controlled manylinux image.
+
+    A shared library's glibc symbol floor comes from the environment it is
+    built in, so a distro runner silently raises the floor above OpenKara's
+    ubuntu-22.04 baseline (glibc 2.35). The x86_64 reduced and aarch64 jobs did
+    exactly that (GLIBC_2.38); each Linux job must therefore run in the pinned
+    manylinux_2_28 container and assert the floor on its own artifact.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    publish = (ROOT / ".github/workflows/ort-publish.yml").read_text()
+
+    def job_block(workflow: str, name: str) -> str:
+        match = re.search(r"(?:^|\n)  " + re.escape(name) + r":\n(.*?)(?=\n  \S|\Z)", workflow, re.DOTALL)
+        assert match is not None, f"job {name} not found"
+        return match.group(1)
+
+    expected_abi_floor = {
+        "max-glibc": "2.35",
+        "max-glibcxx": "3.4.30",
+        "max-cxxabi": "1.3.13",
+    }
+
+    for workflow, jobs in (
+        (native, (
+            "build-x86_64-unknown-linux-gnu",
+            "build-aarch64-unknown-linux-gnu",
+            "reduced-build-and-compare",
+        )),
+        (publish, ("build-x86_64-linux", "build-aarch64-linux")),
+    ):
+        for job in jobs:
+            body = job_block(workflow, job)
+            assert "container:" in body, f"{job} must run in a container"
+            assert "quay.io/pypa/manylinux_2_28_" in body, job
+            assert "@sha256:" in body, f"{job} must pin the image digest"
+
+            steps = re.split(r"\n    - |\n      - ", body)[1:]
+            abi_runs = []
+            for step in steps:
+                run_match = re.search(r"(?:^|\n)\s*run:\s*[>|]?(.*)", step, re.DOTALL)
+                if not run_match:
+                    continue
+                code_lines = [l for l in run_match.group(1).splitlines() if not l.strip().startswith("#")]
+                code = " ".join(code_lines)
+                if "check_linux_abi_floor.py" in code:
+                    abi_runs.append(code)
+            assert len(abi_runs) == 1, f"{job} must have exactly one check_linux_abi_floor.py run step"
+            code = abi_runs[0]
+            m_glibc = re.search(r"--max-glibc\s+([^\s\\]+)", code)
+            m_glibcxx = re.search(r"--max-glibcxx\s+([^\s\\]+)", code)
+            m_cxxabi = re.search(r"--max-cxxabi\s+([^\s\\]+)", code)
+            assert m_glibc is not None, f"{job} missing --max-glibc"
+            assert m_glibcxx is not None, f"{job} missing --max-glibcxx"
+            assert m_cxxabi is not None, f"{job} missing --max-cxxabi"
+            parsed_args = {
+                "max-glibc": m_glibc.group(1),
+                "max-glibcxx": m_glibcxx.group(1),
+                "max-cxxabi": m_cxxabi.group(1),
+            }
+            assert parsed_args == expected_abi_floor, (
+                f"{job} ABI floor arguments mismatch: {parsed_args} != {expected_abi_floor}"
+            )
+
+
+def test_publish_job_depends_on_all_linux_producers_and_downloads_arm64():
+    """Publish must depend on all runtime producers and its pattern must cover arm64.
+
+    If publish drops build-aarch64-linux (or build-x86_64-linux), it runs in
+    parallel with uncompleted builds and cuts an incomplete release. The
+    download-artifact pattern must cover ort-aarch64-unknown-linux-gnu.
+    """
+    import fnmatch
+
+    publish = (ROOT / ".github/workflows/ort-publish.yml").read_text()
+    match = re.search(r"(?:^|\n)  publish:\n(.*?)(?=\n  \S|\Z)", publish, re.DOTALL)
+    assert match is not None, "publish job not found"
+    body = match.group(1)
+
+    needs_match = re.search(r"^\s*needs:\s*\[(.*?)\]", body, re.MULTILINE)
+    if needs_match:
+        needs = [n.strip() for n in needs_match.group(1).split(",") if n.strip()]
+    else:
+        needs_list_match = re.search(r"^\s*needs:\s*\n((?:\s+-\s+\S+\n?)+)", body, re.MULTILINE)
+        assert needs_list_match is not None, "publish job must specify needs list"
+        needs = [re.sub(r"^\s+-\s+", "", line).strip() for line in needs_list_match.group(1).splitlines() if line.strip()]
+    assert needs == ["build", "build-x86_64-linux", "build-aarch64-linux"]
+
+    pattern_match = re.search(r"actions/download-artifact.*?pattern:\s*(\S+)", body, re.DOTALL)
+    assert pattern_match is not None, "publish job must use actions/download-artifact with pattern"
+    pattern = pattern_match.group(1).strip()
+    assert fnmatch.fnmatch("ort-aarch64-unknown-linux-gnu", pattern), (
+        f"download-artifact pattern '{pattern}' does not cover ort-aarch64-unknown-linux-gnu"
+    )
+
+
+def test_linux_only_dispatch_skips_non_linux_jobs():
+    """A linux_only dispatch must not rebuild the Apple or Windows targets.
+
+    Rebuilding the two affected Linux archives is the only work a fix needs; a
+    full six-target dispatch would burn native runner minutes re-verifying
+    artifacts that did not change. The non-Linux jobs are gated on the input and
+    the Linux jobs tolerate their `needs` being skipped.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    inputs = native.split("  workflow_dispatch:\n", 1)[1].split("  pull_request:", 1)[0]
+    assert "linux_only:" in inputs
+    assert "type: boolean" in inputs
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    for job in (
+        "build-aarch64-apple-darwin",
+        "build-x86_64-apple-darwin",
+        "build-x86_64-pc-windows-msvc",
+        "build-x86_64-pc-windows-msvc-cpu",
+    ):
+        body = job_block(job)
+        assert "!inputs.linux_only" in body, f"{job} must be skipped by linux_only"
+    for job in ("build-x86_64-unknown-linux-gnu", "build-aarch64-unknown-linux-gnu"):
+        body = job_block(job)
+        assert "inputs.linux_only" in body, f"{job} must run on linux_only"
+        assert "!cancelled()" in body, f"{job} must tolerate skipped Apple needs"
+
+
+def test_linux_only_dispatch_rebuilds_the_abi_affected_archives():
+    """A linux_only dispatch must rebuild both ABI-affected archives.
+
+    The two bad archives are the x86_64 Linux reduced archive and the aarch64
+    Linux reduced archive. The x86_64 reduced archive is produced by
+    reduced-build-and-compare, not by build-x86_64-unknown-linux-gnu (which is
+    the full, already-qualified build). So the dispatch must run that reduced
+    job, and the full build as its comparison baseline; only benchmark, which
+    consumes the reduced archive and emits a report, may stay skipped.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    reduced = job_block("reduced-build-and-compare")
+    assert "!inputs.linux_only" not in reduced, "reduced job produces a bad archive"
+    assert "inputs.candidate_lock_artifact == ''" in reduced, "dispatch gate stays"
+    # The reduced job must not depend on the scheduler's implicit success():
+    # a skipped Apple ancestor propagates through the DAG (runner #2205 shape),
+    # so both DIRECT needs are pinned to explicit success, with the run-level
+    # cancel guard. Static shape only; it cannot prove server scheduling.
+    assert "!cancelled()" in reduced, "reduced job must keep the cancel guard"
+    assert "needs.validate-source-lock.result == 'success'" in reduced, (
+        "reduced job must require validate success explicitly"
+    )
+    assert "needs.build-x86_64-unknown-linux-gnu.result == 'success'" in reduced, (
+        "reduced job must require the full baseline success explicitly"
+    )
+    assert "github.event_name == 'workflow_dispatch'" in reduced, "event gate stays"
+
+    benchmark = job_block("benchmark-x86_64-unknown-linux-gnu")
+    assert "!inputs.linux_only" in benchmark, "benchmark may stay skipped"
+
+
+def test_reduced_job_gate_runs_only_on_healthy_direct_needs():
+    """Static truth table for the reduced job gate (shape check, not a proof).
+
+    Evaluates the reduced job's ``if:`` conjunction over dispatch/call,
+    linux_only true/false, candidate gate set/empty, and success/failed/
+    skipped/cancelled direct needs. This pins the intended scheduler contract
+    in-repo; only a real dispatch can confirm GitHub's server evaluation.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    reduced = job_block("reduced-build-and-compare")
+    assert "inputs.linux_only" not in reduced, (
+        "reduced job must not branch on linux_only at all"
+    )
+    gate = next(
+        line.split("if:", 1)[1].strip()
+        for line in reduced.splitlines()
+        if line.strip().startswith("if:")
+    )
+
+    def holds(event, candidate_artifact, validate, full, cancelled):
+        """Evaluate each && atom of the gate against one static context."""
+        context = {
+            "!cancelled()": not cancelled,
+            "github.event_name == 'workflow_dispatch'": event == "workflow_dispatch",
+            "inputs.candidate_lock_artifact == ''": candidate_artifact == "",
+            "needs.validate-source-lock.result == 'success'": validate == "success",
+            "needs.build-x86_64-unknown-linux-gnu.result == 'success'": full == "success",
+        }
+        atoms = [atom.strip().strip("${} ") for atom in gate.split("&&")]
+        assert atoms, "reduced gate must be a non-empty conjunction"
+        for atom in atoms:
+            assert atom in context, f"gate gained an unmodelled atom: {atom}"
+            if not context[atom]:
+                return False
+        return True
+
+    healthy = dict(event="workflow_dispatch", candidate_artifact="",
+                   validate="success", full="success", cancelled=False)
+    # linux_only true AND false dispatch with healthy needs: both run.
+    assert holds(**healthy) is True
+    # workflow_call never enters the reduced job (unchanged contract).
+    assert holds(**{**healthy, "event": "workflow_call"}) is False
+    assert holds(**{**healthy, "event": "pull_request"}) is False
+    # A candidate lock artifact present: candidate path takes over.
+    assert holds(**{**healthy, "candidate_artifact": "ort-x86_64-unknown-linux-gnu"}) is False
+    # Either direct need failed or skipped: must not run.
+    for bad in ("failure", "skipped"):
+        assert holds(**{**healthy, "validate": bad}) is False
+        assert holds(**{**healthy, "full": bad}) is False
+    # Cancelled run: the guard stops the job.
+    assert holds(**{**healthy, "cancelled": True}) is False
+
+
+def test_reduced_job_is_the_x86_64_reduced_producer():
+    """Pin which job produces which archive, so the selector cannot drift.
+
+    build-x86_64-unknown-linux-gnu builds the full library (no --reduced);
+    reduced-build-and-compare builds the reduced one and uploads it under
+    ort-x86_64-unknown-linux-gnu-reduced, consuming the full artifact as its
+    comparison baseline. A selector that skipped the reduced job would leave
+    the bad x86_64 reduced archive unbuilt while rebuilding the good full one.
+    """
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+
+    def job_block(name: str) -> str:
+        """Body of one top-level job: from its name to the next 2-space key."""
+        return re.split(r"\n  (?=\S)", native.split(f"\n  {name}:\n", 1)[1], maxsplit=1)[0]
+
+    def build_lines(body: str) -> list[str]:
+        return [line for line in body.splitlines() if "build_runtime.py --" in line]
+
+    full = job_block("build-x86_64-unknown-linux-gnu")
+    assert any("--target x86_64-unknown-linux-gnu" in line for line in build_lines(full))
+    assert not any("--reduced" in line for line in build_lines(full)), (
+        "the full build must not be the reduced producer"
+    )
+
+    reduced = job_block("reduced-build-and-compare")
+    reduced_builds = build_lines(reduced)
+    assert reduced_builds, "reduced job must build an archive"
+    for line in reduced_builds:
+        assert "--target x86_64-unknown-linux-gnu" in line, line.strip()
+        assert "--reduced" in line, f"reduced job must pass --reduced: {line.strip()}"
+        assert "--locked" in line, f"reduced build must pass --locked: {line.strip()}"
+    assert "name: ort-x86_64-unknown-linux-gnu-reduced" in reduced, (
+        "reduced job must upload the reduced archive under its own name"
+    )
+    # The full artifact is the reduced job's comparison baseline.
+    assert "needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]" in reduced
+    assert "name: ort-x86_64-unknown-linux-gnu\n" in reduced, (
+        "reduced job must download the full artifact as its baseline"
+    )
+
+
+def test_reduced_job_preserves_baseline_and_uploads_bound_smoke():
+    native = (ROOT / ".github/workflows/ort-build.yml").read_text()
+    job = native.split("\n  reduced-build-and-compare:\n", 1)[1].split(
+        "\n  benchmark-x86_64-unknown-linux-gnu:", 1
+    )[0]
+    reduced_glob = "ort/packages/onnxruntime-*-x86_64-unknown-linux-gnu-reduced.tar.gz"
+
+    def check(body):
+        supply = body.split("- name: Generate supply-chain records for reduced runtime", 1)[1].split("\n      - ", 1)[0]
+        assert f"REDUCED=$(ls {reduced_glob})" in supply
+        assert 'generate_runtime_supply_chain.py --archive "$REDUCED"' in supply
+        assert "--all" not in supply
+        smoke = body.split("- name: Run reduced native smoke harness (CPU + XNNPACK)", 1)[1].split("\n      - ", 1)[0]
+        assert f"RUNTIME=$(ls {reduced_glob})" in smoke
+        assert "for PROV in cpu xnnpack" in smoke
+        assert '--runtime "$RUNTIME"' in smoke
+        assert '--report "smoke-x86_64-unknown-linux-gnu-reduced-${PROV}.json"' in smoke
+        upload = body.split("name: smoke-x86_64-unknown-linux-gnu-reduced\n", 1)[1].split("\n      - ", 1)[0]
+        assert "smoke-x86_64-unknown-linux-gnu-reduced-cpu.json" in upload
+        assert "smoke-x86_64-unknown-linux-gnu-reduced-xnnpack.json" in upload
+        assert "if-no-files-found: error" in upload
+        comparison = body.split("- name: Compare full vs reduced (size + inference)", 1)[1].split("\n      - ", 1)[0]
+        assert '--full "$FULL" --reduced "$REDUCED"' in comparison
+        assert f"REDUCED=$(ls {reduced_glob})" in comparison
+
+    check(job)
+    import pytest
+    with pytest.raises(AssertionError):
+        check(job.replace(f"RUNTIME=$(ls {reduced_glob})", "RUNTIME=full.tar.gz"))
+    with pytest.raises(AssertionError):
+        check(job.replace("smoke-x86_64-unknown-linux-gnu-reduced-xnnpack.json", "missing.json"))
 
 
 def _numpy_floor() -> tuple[int, ...]:
