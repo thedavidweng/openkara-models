@@ -123,6 +123,31 @@ The runtime-side contract is now:
   - The native benchmark matrix (PR 4) verifies the runtime can load every
     supported model at 343980 frames with finite output and correct shape.
 
+### Telemetry build behavior (ORT v1.31.0)
+
+ORT v1.31.0's `cmake/CMakeLists.txt` declares
+`onnxruntime_USE_TELEMETRY` OFF by default and
+`onnxruntime_TELEMETRY_BACKEND` AUTO. AUTO only selects 1DS when telemetry
+itself is ON; `onnxruntime_TELEMETRY_BACKEND=WINDOWS` (or the deprecated
+`onnxruntime_USE_WINDOWS_TELEMETRY`) forces `onnxruntime_USE_TELEMETRY=ON`.
+`cmake/onnxruntime_common.cmake` defines `USE_1DS_TELEMETRY` or
+`USE_WINDOWS_TELEMETRY` only when telemetry is ON. With neither define,
+`WindowsEnv` instantiates the base no-op `Telemetry` class.
+
+The pinned target `cmake_args` set no telemetry option, and the v1.31.0
+candidate build manifest (run 40999157757) records those same args, so the
+resolved setting is OFF. Caveat: `core/platform/windows/telemetry.cc` is
+compiled on Windows regardless of the option, so the DLL contains the ETW
+provider name/GUID even when the no-op stub is used — binary strings are not
+evidence of telemetry. The archives do not ship `CMakeCache.txt`, so the
+resolved cache could not be read back for that candidate. New builds record
+the resolved values under `build.cmake_cache_values` in the packaged
+`build-manifest.json` (`onnxruntime_USE_TELEMETRY`,
+`onnxruntime_TELEMETRY_BACKEND`, `onnxruntime_USE_WINDOWS_TELEMETRY`, and
+whether a tenant token was set — never its value), and
+`scripts/verify_runtime_package.py` rejects a packaged runtime whose recorded
+`onnxruntime_USE_TELEMETRY` is not OFF.
+
 OpenKara consumes the runtime via the catalog entry's `download_url` +
 `archive_digest`, loading the shared library dynamically. The Rust `ort`
 crate's C API level must be compatible with the runtime's

@@ -306,6 +306,41 @@ def _version_ge(actual: str, required: str) -> bool:
     return _key(actual) >= _key(required)
 
 
+_TELEMETRY_CACHE_KEYS = (
+    "onnxruntime_USE_TELEMETRY",
+    "onnxruntime_TELEMETRY_BACKEND",
+    "onnxruntime_USE_WINDOWS_TELEMETRY",
+)
+_TELEMETRY_TOKEN_KEY = "ONNXRUNTIME_TELEMETRY_TENANT_TOKEN"
+
+
+def _record_cmake_cache(build_dir: Path) -> dict[str, str]:
+    """Record the resolved telemetry options from CMakeCache.txt.
+
+    ORT v1.31.0 compiles Windows telemetry sources unconditionally, so the
+    archive's strings do not prove whether telemetry was enabled. The cache
+    values do: with ``onnxruntime_USE_TELEMETRY=OFF`` no ``USE_1DS_TELEMETRY`` /
+    ``USE_WINDOWS_TELEMETRY`` compile definition is set and the platform Env
+    instantiates the no-op ``Telemetry`` stub. Historical archives predate this
+    field; new builds carry the resolved values instead of only cmake_args.
+    The tenant token value is never recorded, only whether it was set.
+    """
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line or line.startswith("//") or line.startswith("#") or ":" not in line:
+            continue
+        key, rest = line.split(":", 1)
+        _, _, value = rest.partition("=")
+        if key == _TELEMETRY_TOKEN_KEY:
+            values["ONNXRUNTIME_TELEMETRY_TENANT_TOKEN_SET"] = "true" if value else "false"
+        elif key in _TELEMETRY_CACHE_KEYS:
+            values[key] = value.strip()
+    return values
+
+
 def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
                   build_dir: Path, *, reduced: bool = False) -> dict[str, Any]:
     target_config = lock["targets"][target]
@@ -386,6 +421,9 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
     if reduced:
         meta["reduced_build"] = True
         meta["ops_config_sha256"] = _sha256_file(ROOT / reduced_cfg["config_path"])[1]
+    cache_values = _record_cmake_cache(build_dir)
+    if cache_values:
+        meta["cmake_cache_values"] = cache_values
     return meta
 
 

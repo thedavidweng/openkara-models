@@ -118,15 +118,21 @@ def _compute_pytorch_reference(model_name: str, inp: np.ndarray) -> np.ndarray:
     includes the leading batch dim). Fixtures longer than the model window
     are stitched with the product's overlap-add semantics.
 
-    ``htdemucs_ft`` is a four-model ``BagOfModels`` ensemble. The shipped
-    spectral graph is a plain average of all four sub-models, and
-    ``validate_spectral_contract.torch_references`` already averages them, so
-    this reference MUST average them too. Using ``demucs_loader.load()`` here
-    would silently unwrap to sub-model 0 and compare the candidate against a
-    different model, producing a false quality verdict for the ensemble.
+    ``htdemucs_ft`` is a four-model ``BagOfModels`` ensemble whose pinned
+    configuration uses a per-source weight matrix (the 4x4 identity: drums
+    from sub-model 0, bass from 1, other from 2, vocals from 3). The exporter
+    merges the sub-models with the same weights, so this reference MUST apply
+    them too. Using ``demucs_loader.load()`` here would silently unwrap to
+    sub-model 0 and compare the candidate against a different model, and a
+    plain average would not match upstream ``apply_model`` either.
     """
     import torch
-    from demucs_loader import iter_sub_models, load
+    from demucs_loader import (
+        accumulate_weighted,
+        iter_sub_models,
+        load,
+        normalize_weighted,
+    )
 
     def run_model(model, seg: int) -> np.ndarray:
         def run_window(chunk: np.ndarray) -> np.ndarray:
@@ -138,18 +144,18 @@ def _compute_pytorch_reference(model_name: str, inp: np.ndarray) -> np.ndarray:
         return _stitch_windows(run_window, inp, window=seg)
 
     if model_name == "htdemucs_ft":
-        n_models, _, sub_models = iter_sub_models(model_name)
-        if n_models < 1:
+        n_models, _, weights, sub_models = iter_sub_models(model_name)
+        if n_models < 1 or len(weights) != n_models:
             raise ValueError("htdemucs_ft ensemble has no sub-models")
         acc: np.ndarray | None = None
-        for sub_model, seg, _index in sub_models:
+        for sub_model, seg, index in sub_models:
             out = run_model(sub_model, seg).astype(np.float64)
-            acc = out if acc is None else acc + out
+            acc = accumulate_weighted(acc, out, weights[index])
             del sub_model, out
             gc.collect()
         if acc is None:
             raise ValueError("htdemucs_ft ensemble produced no reference output")
-        return (acc / n_models).astype(np.float32)
+        return normalize_weighted(acc, weights).astype(np.float32)
 
     model, seg = load(model_name)
     result = run_model(model, seg)

@@ -192,10 +192,19 @@ stable pointer atomically:
 
 Stable execution requires qualified, immutable per-edge evidence and one complete
 frozen current-default baseline per target/provider (see the envelope contract
-below). Missing, duplicate, placeholder, incomplete or non-finite entries stop
-execution before network writes. Candidate publication remains available for
-collecting evidence. `validate_release_evidence.py` enforces this prerequisite;
-measured reports remain tracked in #21.
+below) **for any model, weight or artifact change**. Missing, duplicate,
+placeholder, incomplete or non-finite entries stop execution before network
+writes. Candidate publication remains available for collecting evidence.
+`validate_release_evidence.py` enforces this prerequisite; measured reports
+remain tracked in #21.
+
+A release whose model artifacts are byte-identical to the current stable release
+may instead promote under the runtime-only gate described in
+`docs/runtime-only-promotion.md`: an external
+`catalog/qualifications/<release-id>.json` record, per-edge native old/new
+measurements and OpenKara app-integration reports. The strict baseline/corpus
+requirement is not waived for model changes, and the runtime-only path fails
+closed when any per-edge evidence is missing or unmeasured.
 
 1. **Dry-run (default):** verifies the manifest validates, supply-chain records
    match local files, every referenced artifact asset URL resolves to an
@@ -203,6 +212,14 @@ measured reports remain tracked in #21.
    generation is monotonic. Exits 0 for valid integrity, without qualifying
    release evidence. No `--skip-asset-check`
    escape hatch exists — every asset must be reachable and verifiable.
+Pull requests that edit `catalog/channels/stable.json` are additionally checked
+by `scripts/verify_stable_pointer_change.py`: the transition must bind the
+promoted-from stable release, the release must be published (not a draft), and its remote
+`release-manifest.json` asset must exist with the exact local byte size and
+SHA-256, and the release must carry
+either a committed runtime-only qualification record or strict release
+evidence. The dry run alone never authorises a pointer advance.
+
 2. **Execute (`--execute`):**
    1. Creates a draft GitHub release tagged `infra-<release-id>`.
    2. Uploads the manifest + supply-chain files as release assets.
@@ -271,6 +288,10 @@ PR/push still run the lightweight lock, API, packaging and smoke unit checks.
 
 ### Stable evidence envelope contract
 
+The three `gates` envelopes below are the strict gate. A byte-identical-model
+release may instead use the external runtime-only qualification record; see
+`docs/runtime-only-promotion.md`. Both paths fail closed.
+
 Stable `--execute` loads all three `gates` report refs before publication writes.
 Each ref binds URL, actual byte length, SHA-256, report ID and schema version;
 malformed, missing or changed bytes fail closed. Historical dry-run integrity
@@ -323,4 +344,9 @@ Runtime package API verification uses the C header at the exact immutable
 include `onnxruntime_c_api.h` in the digested manifest. Verification fetches
 only that small upstream header and fails closed on fetch failure, API mismatch,
 or substituted header bytes. Historical packages without the header require a
-new candidate build; this does not rewrite historical release assets.
+new candidate build for a strict (model/weight) promotion; this does not rewrite
+historical release assets. Runtime-only promotion may measure a historical
+stable archive using the committed `ort/pinned-headers.json` closure for its
+recorded upstream commit and API level (or the archive's own packaged closure
+when present), as described in `docs/runtime-only-promotion.md`; a package
+whose header source cannot be verified still fails closed.

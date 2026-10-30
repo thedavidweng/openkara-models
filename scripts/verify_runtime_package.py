@@ -179,6 +179,18 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
             "reproducibility (hostname varies per build host)"
         )
 
+    # Telemetry provenance: builds that record resolved CMake cache values must
+    # show telemetry disabled. Windows telemetry sources are compiled even when
+    # telemetry is off, so binary strings alone never prove the setting.
+    cache_values = build_meta.get("cmake_cache_values")
+    if isinstance(cache_values, dict) and "onnxruntime_USE_TELEMETRY" in cache_values:
+        use_telemetry = str(cache_values["onnxruntime_USE_TELEMETRY"]).strip().upper()
+        if use_telemetry not in {"OFF", "0", "FALSE", "NO"}:
+            errors.append(
+                "onnxruntime_USE_TELEMETRY must be OFF for published runtimes; "
+                f"cache={cache_values['onnxruntime_USE_TELEMETRY']!r}"
+            )
+
     # Submodule verification: every submodule in the lock must be present in
     # the build manifest with the expected SHA.
     expected_submodules = lock.get("submodules", {})

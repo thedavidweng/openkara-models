@@ -216,12 +216,14 @@ def test_pytorch_nonfinite_rejected_by_runner_and_validator(flag):
     assert v.validate_report(report)
 
 
-def test_ensemble_reference_averages_every_sub_model(monkeypatch) -> None:
-    """Regression: htdemucs_ft is a four-model BagOfModels.
+def test_ensemble_reference_uses_per_source_weights(monkeypatch) -> None:
+    """Regression: htdemucs_ft is a four-model BagOfModels with identity weights.
 
-    The shipped spectral graph is a plain average of all sub-models. The
-    strict quality reference must average them too; using demucs_loader.load()
-    unwraps to sub-model 0 and compares against the wrong model.
+    Upstream ``apply_model`` multiplies each sub-model's source output by the
+    pinned weight matrix (4x4 identity: one sub-model per source) and divides
+    by the per-source total. The strict quality reference must do the same;
+    using demucs_loader.load() unwraps to sub-model 0, and a plain average is
+    also a different model.
     """
     import contextlib
     import sys
@@ -261,7 +263,11 @@ def test_ensemble_reference_averages_every_sub_model(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(
         demucs_loader, "iter_sub_models",
-        lambda _name: (2, 4, iter([(Model(2.0), 4, 0), (Model(4.0), 4, 1)])),
+        lambda _name: (
+            2, 4,
+            [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 1.0, 1.0]],
+            iter([(Model(2.0), 4, 0), (Model(4.0), 4, 1)]),
+        ),
     )
     monkeypatch.setattr(
         demucs_loader, "load",
@@ -270,4 +276,15 @@ def test_ensemble_reference_averages_every_sub_model(monkeypatch) -> None:
 
     out = q._compute_pytorch_reference("htdemucs_ft", np.zeros((2, 4), np.float32))
     assert out.shape == (1, 4, 2, 4)
-    assert np.allclose(out, 3.0), out
+    np.testing.assert_allclose(out[0, :, 0, 0], [2.0, 4.0, 4.0, 4.0])
+
+
+def test_normalize_weighted_rejects_zero_source_total() -> None:
+    """A source with zero total weight is undefined, never NaN."""
+    import demucs_loader
+
+    with pytest.raises(ValueError, match="positive total"):
+        demucs_loader.normalize_weighted(
+            np.zeros((1, 4, 2, 4), dtype=np.float64),
+            [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
+        )

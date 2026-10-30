@@ -450,6 +450,46 @@ class ExecutePathTests(unittest.TestCase):
                          "pointer must not advance on verification failure")
 
 
+    def _run_runtime_only(self, gh, qualify_result, runtime_result=None):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            record = Path(td) / f"{RELEASE_ID}.json"
+            record.write_text("{}", encoding="utf-8")
+            argv = ["publish_catalog_release.py", "--release", RELEASE_ID,
+                    "--channel", "stable", "--execute"]
+            with mock.patch.object(sys, "argv", argv):
+                with mock.patch.object(pub, "_gh", gh):
+                    with mock.patch.object(pub, "_download_asset_sha256", self.fake_download_sha):
+                        with mock.patch.object(pub, "QUALIFICATIONS_DIR", Path(td)):
+                            with mock.patch.object(pub, "qualify_release", return_value=qualify_result):
+                                with mock.patch("validate_runtime_only.load_record", return_value={}):
+                                    with mock.patch(
+                                        "validate_runtime_only.qualify_runtime_only",
+                                        return_value=runtime_result or [],
+                                    ):
+                                        out = io.StringIO()
+                                        err = io.StringIO()
+                                        with redirect_stdout(out), redirect_stderr(err):
+                                            code = pub.main()
+        return code, out.getvalue(), err.getvalue()
+
+    def test_stable_execute_accepts_runtime_only_qualification(self):
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=list(self.infra_assets_complete))
+        code, out, err = self._run_runtime_only(gh, ["strict gate failed"], [])
+        self.assertEqual(code, 0, err)
+        self.assertIn("runtime-only qualification accepted", out)
+        stable = json.loads((pub.CHANNELS_DIR / "stable.json").read_text())
+        self.assertEqual(stable["release_id"], RELEASE_ID)
+
+    def test_stable_execute_rejects_failed_runtime_only_qualification(self):
+        gh = _ExecuteGh(self.artifact_assets, infra_assets=list(self.infra_assets_complete))
+        code, _, err = self._run_runtime_only(gh, ["strict gate failed"], ["app reports do not cover"])
+        self.assertEqual(code, 1)
+        self.assertIn("app reports do not cover", err)
+        self.assertFalse((pub.CHANNELS_DIR / "stable.json").exists())
+
+
 class ChannelPointerTests(unittest.TestCase):
     """_advance_channel_pointer writes the selected channel file only."""
 

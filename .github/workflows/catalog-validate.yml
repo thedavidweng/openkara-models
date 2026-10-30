@@ -18,10 +18,19 @@ on:
       - "scripts/generate_supply_chain.py"
       - "scripts/verify_supply_chain.py"
       - "scripts/publish_catalog_release.py"
+      - "scripts/validate_runtime_only.py"
+      - "scripts/verify_stable_pointer_change.py"
+      - "scripts/assemble_runtime_only_qualification.py"
+      - "scripts/runtime_headers.py"
+      - "scripts/runtime_interfaces.py"
+      - "scripts/native_host.py"
+      - "ort/pinned-headers.json"
+      - "quality/budgets.json"
       - "tests/test_catalog_validation.py"
       - "tests/test_catalog_generator.py"
       - "tests/test_supply_chain.py"
       - "tests/test_publish_catalog.py"
+      - "tests/test_runtime_only.py"
 
 permissions:
   contents: read
@@ -40,6 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -50,7 +60,7 @@ jobs:
             .github/workflows/catalog-validate.yml
 
       - name: Install validator deps (no torch)
-        run: pip install "jsonschema>=4.20" "pytest>=8.0"
+        run: pip install "jsonschema>=4.20" "pytest>=8.0" "numpy>=2.4" "onnx>=1.23.2"
 
       - name: Validate all fixtures
         run: python scripts/validate_catalog.py --all-fixtures
@@ -66,9 +76,26 @@ jobs:
 
       - name: Verify supply-chain records
         run: python scripts/verify_supply_chain.py --all
+      - name: Verify runtime-only qualification records
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          for record in catalog/qualifications/*.json; do
+            release_id="$(basename "$record" .json)"
+            python scripts/validate_runtime_only.py --release "$release_id" --historical
+          done
 
-      - name: Catalog unit + generator + supply-chain + publish tests
-        run: python -m pytest tests/test_catalog_validation.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py tests/test_release_evidence.py -q
+      - name: Verify stable pointer changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/verify_stable_pointer_change.py \
+            --base-ref "${{ github.event.pull_request.base.sha }}"
+
+      - name: Catalog unit + generator + supply-chain + publish + runtime-only tests
+        run: python -m pytest tests/test_catalog_validation.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py tests/test_release_evidence.py tests/test_runtime_only.py -q
 
       - name: Fixtures are fresh (regenerate + git diff)
         run: |
@@ -98,4 +125,4 @@ jobs:
           python scripts/publish_catalog_release.py --release "$release_id"
 
       - name: Syntax check catalog scripts
-        run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py scripts/generate_catalog_release.py scripts/generate_supply_chain.py scripts/verify_supply_chain.py scripts/publish_catalog_release.py
+        run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py scripts/generate_catalog_release.py scripts/generate_supply_chain.py scripts/verify_supply_chain.py scripts/publish_catalog_release.py scripts/validate_runtime_only.py scripts/verify_stable_pointer_change.py scripts/assemble_runtime_only_qualification.py scripts/runtime_headers.py scripts/runtime_interfaces.py scripts/native_host.py

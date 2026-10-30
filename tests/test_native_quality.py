@@ -90,7 +90,7 @@ def test_native_process_failure_cannot_qualify(tmp_path, monkeypatch, exit_code,
         assert command[command.index('--lib') + 1] == '/runtime'
         return SimpleNamespace(stdout=json.dumps(report), returncode=exit_code, stderr='failure')
     monkeypatch.setattr(native.subprocess, 'run', run)
-    monkeypatch.setattr(native, 'validation_failures', lambda r, p: ['exit'] if r['harness_exit_code'] else [])
+    monkeypatch.setattr(native, 'validation_failures', lambda r, p, expected=None: ['exit'] if r['harness_exit_code'] else [])
     with pytest.raises(ValueError, match='native measure'):
         rt._window(Path('model'), np.zeros((2, 4), np.float32), 0, 1)
 
@@ -122,7 +122,7 @@ def test_native_window_transfers_input_and_composes_both_raw_outputs(tmp_path, m
             'output_shape': '[1,4,2,4];[1,4,2,4]', 'warm_latencies_s': [0.1],
             'cold_load_s': 0.2, 'first_window_s': 0.3, 'peak_rss_kb': 10, 'rss_delta_kb': 1}))
     monkeypatch.setattr(native.subprocess, 'run', run)
-    monkeypatch.setattr(native, 'validation_failures', lambda report, provider: [])
+    monkeypatch.setattr(native, 'validation_failures', lambda report, provider, expected=None: [])
     output = rt._window(Path('candidate'), chunk, 0, 1)
     np.testing.assert_array_equal(output, np.full((1, 4, 2, 4), 5, np.float32))
     assert len(rt.raw_outputs) == 2
@@ -141,3 +141,30 @@ def test_benchmark_routes_archive_to_native_measurement(tmp_path, monkeypatch):
     result = bench.benchmark_model(Path('archive-lib'), Path('candidate'), 4, 1, 2, native=Measured())
     assert result['interface'] == 'spectral'
     assert len(result['output_shape']) == 2
+
+
+def test_runtime_initializes_window_state_for_measure_raw(tmp_path, monkeypatch):
+    path = archive(tmp_path, monkeypatch)
+    rt = native.NativeRuntime(path, None, 'target', 'cpu', tmp_path / 'work')
+    assert rt.windows == []
+    assert rt.raw_outputs == []
+
+    rt.windows = [{'stale': True}]
+    outputs = [np.zeros((1, 4, 2, 4), np.float32)]
+    report = {
+        'warm_latencies_s': [0.1], 'cold_load_s': 0.2, 'first_window_s': 0.3,
+        'peak_rss_kb': 10, 'rss_delta_kb': 1, 'provider_assignment': 'cpu',
+        'used_fallback': False, 'provider_node_count': 1, 'total_node_count': 1,
+        'fallback_node_count': 1, 'finite_output': True,
+    }
+    monkeypatch.setattr(
+        rt, '_run_window',
+        lambda model, inputs, expected, warmup, iters: (report, outputs),
+    )
+    _outputs, metrics, _report = rt.measure_raw(
+        tmp_path / 'model.onnx', {'mix': np.zeros((1, 2, 4), np.float32)},
+        [[1, 4, 2, 4]], 4, 0, 1,
+    )
+    assert rt.windows == []
+    assert metrics['warm_iters'] == 1
+    assert metrics['output_shapes'] == [[1, 4, 2, 4]]
