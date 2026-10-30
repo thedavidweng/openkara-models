@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: false
+      full_only:
+        description: "Build only the full (non-reduced) runtime archives missing from the 11-family candidate set"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
@@ -99,7 +104,7 @@ jobs:
         run: python -m compileall -q scripts/build_runtime.py scripts/verify_runtime_package.py scripts/validate_source_lock.py scripts/generate_required_operators.py scripts/native_quality.py scripts/compare_runtime_builds.py scripts/generate_runtime_supply_chain.py scripts/run_runtime_benchmarks.py scripts/validate_benchmark_report.py scripts/generate_runtime_catalog_entries.py scripts/archive_utils.py scripts/ort_api_version.py scripts/run_native_smoke.py scripts/download_stable_model.py scripts/runtime_inputs.py
 
   build-aarch64-apple-darwin:
-    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
+    if: ${{ inputs.full_only != true && ((github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call') }}
     needs: validate-source-lock
     runs-on: macos-15
     timeout-minutes: 120
@@ -154,7 +159,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-apple-darwin:
-    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
+    if: ${{ inputs.full_only != true && ((github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call') }}
     needs: validate-source-lock
     runs-on: macos-15-intel
     timeout-minutes: 120
@@ -213,7 +218,7 @@ jobs:
     # those jobs, so the condition tolerates them being skipped while still
     # requiring validate-source-lock; !cancelled() is what lets a job run
     # when its `needs` were skipped.
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.validate-source-lock.result == 'success' && (inputs.linux_only || (needs.build-aarch64-apple-darwin.result == 'success' && needs.build-x86_64-apple-darwin.result == 'success')) }}
+    if: ${{ inputs.full_only != true && !cancelled() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.validate-source-lock.result == 'success' && (inputs.linux_only || (needs.build-aarch64-apple-darwin.result == 'success' && needs.build-x86_64-apple-darwin.result == 'success')) }}
     needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]
     runs-on: ubuntu-latest
     # manylinux_2_28 container: the artifact's glibc symbol floor is set by
@@ -302,7 +307,7 @@ jobs:
     # those jobs, so the condition tolerates them being skipped while still
     # requiring validate-source-lock; !cancelled() is what lets a job run
     # when its `needs` were skipped.
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.validate-source-lock.result == 'success' && (inputs.linux_only || (needs.build-aarch64-apple-darwin.result == 'success' && needs.build-x86_64-apple-darwin.result == 'success')) }}
+    if: ${{ inputs.full_only != true && !cancelled() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.validate-source-lock.result == 'success' && (inputs.linux_only || (needs.build-aarch64-apple-darwin.result == 'success' && needs.build-x86_64-apple-darwin.result == 'success')) }}
     needs: [validate-source-lock, build-aarch64-apple-darwin, build-x86_64-apple-darwin]
     runs-on: ubuntu-24.04-arm
     # manylinux_2_28 arm64 container for the same reason as the x86_64 Linux
@@ -381,7 +386,7 @@ jobs:
           retention-days: 14
 
   build-x86_64-pc-windows-msvc:
-    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
+    if: ${{ inputs.full_only != true && ((github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call') }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 120
@@ -464,7 +469,7 @@ jobs:
   # import, so it loads on any Windows host. Built reduced to match the
   # DirectML reduced runtime the publish flow ships.
   build-x86_64-pc-windows-msvc-cpu:
-    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call' }}
+    if: ${{ inputs.full_only != true && ((github.event_name == 'workflow_dispatch' && !inputs.linux_only) || github.event_name == 'workflow_call') }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu, build-aarch64-unknown-linux-gnu]
     runs-on: windows-2022
     timeout-minutes: 120
@@ -531,7 +536,7 @@ jobs:
   # archive size + inference output. Fails if the reduced runtime cannot load
   # the model (a required kernel was pruned) or output diverges.
   reduced-build-and-compare:
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' && needs.validate-source-lock.result == 'success' && needs.build-x86_64-unknown-linux-gnu.result == 'success' }}
+    if: ${{ inputs.full_only != true && !cancelled() && github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' && needs.validate-source-lock.result == 'success' && needs.build-x86_64-unknown-linux-gnu.result == 'success' }}
     needs: [validate-source-lock, build-x86_64-unknown-linux-gnu]
     # Must run in the same manylinux_2_28 container as the full build above.
     # The glibc symbol floor of a shared library is fixed by the headers and
@@ -660,7 +665,7 @@ jobs:
   # the model cannot load, output contains NaN/Inf, or shape mismatches. The
   # report is validated against ort/benchmark-report-v1.json and uploaded.
   benchmark-x86_64-unknown-linux-gnu:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' && !inputs.linux_only }}
+    if: ${{ inputs.full_only != true && github.event_name == 'workflow_dispatch' && inputs.candidate_lock_artifact == '' && !inputs.linux_only }}
     needs: [validate-source-lock, reduced-build-and-compare]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -708,3 +713,224 @@ jobs:
           name: benchmark-x86_64-unknown-linux-gnu
           path: benchmark-x86_64-unknown-linux-gnu.json
           retention-days: 30
+
+  # Full (non-reduced) counterparts for the 11-family candidate set. The
+  # reduced builds above cover the spectral operator set; these jobs build the
+  # same source lock without --reduced so the candidate manifest can preserve
+  # every stable runtime target/reduced family. They only run on a
+  # full_only workflow_dispatch.
+  build-full-aarch64-apple-darwin:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_only == true }}
+    needs: validate-source-lock
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      - name: Build full ORT for aarch64-apple-darwin
+        run: python scripts/build_runtime.py --locked --target aarch64-apple-darwin
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-08-12-001.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Run native smoke harness (CPU + CoreML)
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-apple-darwin.tar.gz)
+          for PROV in cpu coreml; do
+            python scripts/run_native_smoke.py \
+              --runtime "$RUNTIME" \
+              --model models/htdemucs.spectral.onnx \
+              --target aarch64-apple-darwin \
+              --provider "$PROV" \
+              --ort-source ort/source \
+              --report "smoke-full-aarch64-apple-darwin-${PROV}.json"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ort-full-aarch64-apple-darwin
+          path: |
+            ort/packages/onnxruntime-*-aarch64-apple-darwin.tar.gz
+            smoke-full-aarch64-apple-darwin-*.json
+          retention-days: 14
+
+  build-full-x86_64-apple-darwin:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_only == true }}
+    needs: validate-source-lock
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      - name: Build full ORT for x86_64-apple-darwin
+        run: python scripts/build_runtime.py --locked --target x86_64-apple-darwin
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-08-12-001.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Run native smoke harness (CPU + XNNPACK)
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-apple-darwin.tar.gz)
+          for PROV in cpu xnnpack; do
+            python scripts/run_native_smoke.py \
+              --runtime "$RUNTIME" \
+              --model models/htdemucs.spectral.onnx \
+              --target x86_64-apple-darwin \
+              --provider "$PROV" \
+              --ort-source ort/source \
+              --report "smoke-full-x86_64-apple-darwin-${PROV}.json"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ort-full-x86_64-apple-darwin
+          path: |
+            ort/packages/onnxruntime-*-x86_64-apple-darwin.tar.gz
+            smoke-full-x86_64-apple-darwin-*.json
+          retention-days: 14
+
+  build-full-aarch64-unknown-linux-gnu:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_only == true }}
+    needs: validate-source-lock
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: quay.io/pypa/manylinux_2_28_aarch64@sha256:a3e02308c822fb6ce0d12248b0c941817ba5e1a1bc9e7bb5929f29c50eaa40a9
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install build deps (gcc-toolset-13 + cmake + python 3.11)
+        run: |
+          dnf -y install gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils
+          /opt/python/cp311-cp311/bin/python -m pip install "cmake>=3.28" "onnx>=1.22.0" "flatbuffers" "numpy>=1.24"
+          {
+            echo "/opt/rh/gcc-toolset-13/root/usr/bin"
+            echo "/opt/python/cp311-cp311/bin"
+          } >> "$GITHUB_PATH"
+      - name: Verify toolchain floor
+        run: |
+          gcc --version | head -1
+          as --version | head -1
+          cmake --version | head -1
+          python --version
+          ldd --version | head -1
+      - name: Build full ORT for aarch64-unknown-linux-gnu
+        run: python scripts/build_runtime.py --locked --target aarch64-unknown-linux-gnu
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
+      - name: Verify ABI floor against the release baseline
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu.tar.gz)
+          python scripts/check_linux_abi_floor.py \
+            --archive "$RUNTIME" \
+            --max-glibc 2.35 --max-glibcxx 3.4.30 --max-cxxabi 1.3.13
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-08-12-001.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Run native smoke harness (CPU + XNNPACK)
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu.tar.gz)
+          for PROV in cpu xnnpack; do
+            python scripts/run_native_smoke.py \
+              --runtime "$RUNTIME" \
+              --model models/htdemucs.spectral.onnx \
+              --target aarch64-unknown-linux-gnu \
+              --provider "$PROV" \
+              --ort-source ort/source \
+              --report "smoke-full-aarch64-unknown-linux-gnu-${PROV}.json"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ort-full-aarch64-unknown-linux-gnu
+          path: |
+            ort/packages/onnxruntime-*-aarch64-unknown-linux-gnu.tar.gz
+            smoke-full-aarch64-unknown-linux-gnu-*.json
+          retention-days: 14
+
+  build-full-x86_64-pc-windows-msvc:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_only == true }}
+    needs: validate-source-lock
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      PATCH_EXECUTABLE: C:/msys64/usr/bin/patch.exe
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+      - name: Install Python deps (onnx for required-operator config)
+        run: python -m pip install "onnx>=1.22.0" flatbuffers "numpy>=1.24"
+      - name: Install GNU patch >= 2.8 via MSYS2
+        shell: bash
+        run: |
+          C:/msys64/usr/bin/pacman.exe -S --noconfirm --needed patch
+          C:/msys64/usr/bin/patch.exe --version
+      - name: Build full ORT for x86_64-pc-windows-msvc
+        run: python scripts/build_runtime.py --locked --target x86_64-pc-windows-msvc
+      - name: Generate supply-chain records (SBOM + provenance)
+        run: python scripts/generate_runtime_supply_chain.py --all
+      - name: Verify package (incl. supply-chain)
+        run: python scripts/verify_runtime_package.py --all
+      - name: Download stable model from catalog
+        run: >
+          python scripts/download_stable_model.py
+          --catalog catalog/releases/2026-08-12-001.json
+          --artifact htdemucs.spectral.fp32.onnx
+          --dest models/htdemucs.spectral.onnx
+      - name: Run native smoke harness (CPU + DirectML)
+        shell: bash
+        run: |
+          RUNTIME=$(ls ort/packages/onnxruntime-*-x86_64-pc-windows-msvc.zip)
+          python scripts/run_native_smoke.py \
+            --runtime "$RUNTIME" \
+            --model models/htdemucs.spectral.onnx \
+            --target x86_64-pc-windows-msvc \
+            --provider cpu \
+            --ort-source ort/source \
+            --report "smoke-full-x86_64-pc-windows-msvc-cpu.json"
+          python scripts/run_native_smoke.py \
+            --runtime "$RUNTIME" \
+            --model models/htdemucs.spectral.onnx \
+            --target x86_64-pc-windows-msvc \
+            --provider directml \
+            --ort-source ort/source \
+            --report "smoke-full-x86_64-pc-windows-msvc-directml.json" \
+            --allow-skip-no-gpu
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ort-full-x86_64-pc-windows-msvc
+          path: |
+            ort/packages/onnxruntime-*-x86_64-pc-windows-msvc.zip
+            smoke-full-x86_64-pc-windows-msvc-*.json
+          retention-days: 14
