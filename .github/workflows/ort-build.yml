@@ -407,7 +407,7 @@ jobs:
       - name: Install GNU patch >= 2.8 via MSYS2
         shell: bash
         run: |
-          C:/msys64/usr/bin/pacman.exe -S --noconfirm --needed patch || C:/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed patch
+          C:/msys64/usr/bin/pacman.exe -S --noconfirm --needed patch
           C:/msys64/usr/bin/patch.exe --version
       # Reduced build: derive the operator set from the spectral stable model,
       # then prune every other kernel (matches the ort-publish.yml template, so
@@ -490,7 +490,7 @@ jobs:
       - name: Install GNU patch >= 2.8 via MSYS2
         shell: bash
         run: |
-          C:/msys64/usr/bin/pacman.exe -S --noconfirm --needed patch || C:/msys64/usr/bin/pacman.exe -Sy --noconfirm --needed patch
+          C:/msys64/usr/bin/pacman.exe -S --noconfirm --needed patch
           C:/msys64/usr/bin/patch.exe --version
       - name: Download stable model from catalog
         run: >

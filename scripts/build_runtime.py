@@ -144,23 +144,13 @@ def _get_submodule_state(source_dir: Path) -> dict[str, str]:
 
 
 def _find_windows_patch() -> Path | None:
-    """Locate the GNU patch executable on Windows.
+    """The GNU patch selected for Windows builds via PATCH_EXECUTABLE.
 
-    Checks PATCH_EXECUTABLE or Patch_EXECUTABLE in the environment first,
-    falling back to MSYS2's default install location (C:\\msys64\\usr\\bin\\patch.exe)
-    or PATH.
+    Never falls back to whatever patch is on PATH: Git for Windows ships
+    patch 2.7.6, which rejects ORT's onnx.patch.
     """
-    for env_var in ("PATCH_EXECUTABLE", "Patch_EXECUTABLE"):
-        val = os.environ.get(env_var)
-        if val:
-            return Path(val)
-    msys = Path(r"C:\msys64\usr\bin\patch.exe")
-    if msys.is_file():
-        return msys
-    which = shutil.which("patch")
-    if which:
-        return Path(which)
-    return None
+    val = os.environ.get("PATCH_EXECUTABLE")
+    return Path(val) if val else None
 
 
 def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
@@ -285,29 +275,19 @@ def _assert_toolchain(lock: dict[str, Any], target: str) -> None:
         patch_exe = _find_windows_patch()
         if patch_exe is None or not patch_exe.is_file():
             errors.append(
-                f"patch: not found (GNU patch >= {required_patch} required on Windows; "
-                "set PATCH_EXECUTABLE or install MSYS2 patch)"
+                f"patch: not found (set PATCH_EXECUTABLE to GNU patch >= "
+                f"{required_patch})"
             )
         else:
-            try:
-                r = subprocess.run(
-                    [str(patch_exe), "--version"],
-                    capture_output=True, text=True,
+            r = subprocess.run([str(patch_exe), "--version"],
+                               capture_output=True, text=True)
+            m = re.search(r"(\d+(?:\.\d+)+)", r.stdout)
+            ver = m.group(1) if r.returncode == 0 and m else "0"
+            if not _version_ge(ver, required_patch):
+                errors.append(
+                    f"patch version: expected >= {required_patch}, "
+                    f"got {ver} from {patch_exe}"
                 )
-                if r.returncode != 0:
-                    errors.append(f"patch: failed to execute {patch_exe}")
-                else:
-                    first = r.stdout.strip().splitlines()[0] if r.stdout.strip().splitlines() else ""
-                    m = re.search(r"(\d+(?:\.\d+)+)", first)
-                    ver = m.group(1) if m else "0"
-                    if not _version_ge(ver, required_patch):
-                        errors.append(
-                            f"patch version: expected >= {required_patch}, "
-                            f"got {ver} from {patch_exe} (GNU patch >= {required_patch} "
-                            "is required to apply ORT onnx.patch cleanly)"
-                        )
-            except Exception as ex:
-                errors.append(f"patch: error probing {patch_exe}: {ex}")
 
     if errors:
         for e in errors:
@@ -344,10 +324,7 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
 
     # On Windows targets, pass -DPatch_EXECUTABLE to ensure CMake uses GNU patch >= 2.8.
     if "windows" in target:
-        if not any(arg.startswith("-DPatch_EXECUTABLE=") for arg in cmake_args):
-            patch_exe = _find_windows_patch()
-            if patch_exe:
-                cmake_args.append(f"-DPatch_EXECUTABLE={patch_exe.as_posix()}")
+        cmake_args.append(f"-DPatch_EXECUTABLE={_find_windows_patch().as_posix()}")
 
     # The source header, not the release tag, defines the API level.
     ort_api_version_value = ort_api_version.parse_ort_api_version(source_dir)

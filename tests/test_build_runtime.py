@@ -307,16 +307,10 @@ class WindowsPatchToolchainTests(unittest.TestCase):
         with mock.patch.dict(br.os.environ, {"PATCH_EXECUTABLE": r"D:\custom\patch.exe"}):
             self.assertEqual(br._find_windows_patch(), Path(r"D:\custom\patch.exe"))
 
-    def test_find_windows_patch_checks_msys2_default(self):
+    def test_find_windows_patch_never_falls_back_to_path(self):
         with mock.patch.dict(br.os.environ, {}, clear=True):
-            with mock.patch.object(Path, "is_file", return_value=True):
-                self.assertEqual(br._find_windows_patch(), Path(r"C:\msys64\usr\bin\patch.exe"))
-
-    def test_find_windows_patch_falls_back_to_path(self):
-        with mock.patch.dict(br.os.environ, {}, clear=True):
-            with mock.patch.object(Path, "is_file", return_value=False):
-                with mock.patch.object(br.shutil, "which", return_value=r"C:\bin\patch.exe"):
-                    self.assertEqual(br._find_windows_patch(), Path(r"C:\bin\patch.exe"))
+            with mock.patch.object(br.shutil, "which", return_value=r"C:\bin\patch.exe"):
+                self.assertIsNone(br._find_windows_patch())
 
     def test_windows_toolchain_rejects_missing_patch(self):
         lock = {
