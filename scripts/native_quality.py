@@ -33,7 +33,7 @@ class NativeRuntime:
         if manifest["target"] != target:
             raise ValueError("native measurement target differs from runtime archive")
         packaged_source = work / "headers"
-        for name in required_headers(headers[0].read_bytes()):
+        for name in required_headers(headers[0].read_bytes(), lambda name: headers[0].with_name(name).read_bytes()):
             raw = headers[0].with_name(name).read_bytes()
             record = manifest["files"][name]
             if len(raw) != record["size"] or hashlib.sha256(raw).hexdigest() != record["sha256"]:

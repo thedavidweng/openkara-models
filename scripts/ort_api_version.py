@@ -24,11 +24,18 @@ from pathlib import Path
 HEADER_REL = "include/onnxruntime/core/session/onnxruntime_c_api.h"
 
 
-def required_headers(header: bytes) -> list[str]:
-    """The main API header includes the EP API header on newer ORT versions."""
+def required_headers(header: bytes, read_header) -> list[str]:
+    """Resolve every same-directory quoted C API header, including transitive includes."""
     names = ["onnxruntime_c_api.h"]
-    if re.search(rb'^\s*#\s*include\s*"onnxruntime_ep_c_api.h"', header, re.MULTILINE):
-        names.append("onnxruntime_ep_c_api.h")
+    pending = [header]
+    while pending:
+        for raw in re.findall(rb'^\s*#\s*include\s*"([^"]+)"', pending.pop(), re.MULTILINE):
+            name = raw.decode("ascii")
+            if not re.fullmatch(r"onnxruntime_[A-Za-z0-9_]+\.h", name):
+                raise ValueError(f"unsupported C API header include: {name}")
+            if name not in names:
+                names.append(name)
+                pending.append(read_header(name))
     return names
 
 # Regex matching:  #define ORT_API_VERSION 27
@@ -78,7 +85,7 @@ def pinned_header(upstream: dict, name: str = "onnxruntime_c_api.h") -> bytes:
         raise ValueError("upstream commit_sha must be a full immutable commit")
     if upstream["repo"] != "microsoft/onnxruntime":
         raise ValueError("unexpected ORT upstream repository")
-    if name not in ("onnxruntime_c_api.h", "onnxruntime_ep_c_api.h"):
+    if not re.fullmatch(r"onnxruntime_[A-Za-z0-9_]+\.h", name):
         raise ValueError("unexpected ORT API header")
     rel = str(Path(HEADER_REL).with_name(name)).replace("\\", "/")
     url = f"https://raw.githubusercontent.com/microsoft/onnxruntime/{commit}/{rel}"

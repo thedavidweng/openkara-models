@@ -30,8 +30,8 @@ only and cannot pass the release benchmark gate. Quality/runtime producer
 reports bind actual model and runtime SHA256/size as well as target/provider;
 the publisher checks these against each exact compatibility edge.
 
-New packages include the pinned C API header and its EP header when included,
-with manifest digests. The small harness builds from these packaged headers;
+New packages include the pinned C API header and its transitive quoted header
+dependencies, with manifest digests. The small harness builds from these packaged headers;
 `--ort-source` optionally cross-checks explicit source bytes. Historical packages
 missing required headers must be rebuilt, not silently substituted. This
 compiles only the harness, never a full ORT build, with at most two jobs.
