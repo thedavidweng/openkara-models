@@ -408,7 +408,7 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     staging.mkdir(parents=True)
 
     header = source_dir / ort_api_version.HEADER_REL
-    for name in ort_api_version.required_headers(header.read_bytes()):
+    for name in ort_api_version.required_headers(header.read_bytes(), lambda name: header.with_name(name).read_bytes()):
         shutil.copy2(header.with_name(name), staging / name)
 
     # Copy runtime library.

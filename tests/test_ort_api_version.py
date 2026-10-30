@@ -88,6 +88,19 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_api_header_dependency_is_explicit():
-    assert ort_api_version.required_headers(b'#define ORT_API_VERSION 27\n') == ['onnxruntime_c_api.h']
-    assert ort_api_version.required_headers(b'#include "onnxruntime_ep_c_api.h"\n') == ['onnxruntime_c_api.h', 'onnxruntime_ep_c_api.h']
+def test_api_headers_include_transitive_dependencies_without_cycles():
+    headers = {
+        "onnxruntime_ep_c_api.h": b'#include "onnxruntime_c_api.h"\n#include "onnxruntime_extra.h"\n',
+        "onnxruntime_extra.h": b"",
+        "onnxruntime_error_code.h": b"",
+    }
+    root = b'#include "onnxruntime_error_code.h"\n#include "onnxruntime_ep_c_api.h"\n'
+    assert set(ort_api_version.required_headers(root, headers.__getitem__)) == {
+        "onnxruntime_c_api.h", "onnxruntime_error_code.h", "onnxruntime_ep_c_api.h", "onnxruntime_extra.h"
+    }
+
+
+def test_api_header_rejects_unsafe_include():
+    import pytest
+    with pytest.raises(ValueError, match="unsupported C API header include"):
+        ort_api_version.required_headers(b'#include "../escape.h"\n', lambda name: b"")

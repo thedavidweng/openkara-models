@@ -127,8 +127,13 @@ def verify_archive(archive: Path, lock: dict[str, Any]) -> list[str]:
             errors.append("packaged C API header differs from pinned upstream commit")
         if "onnxruntime_c_api.h" not in manifest.get("files", {}):
             errors.append("build manifest missing C API header digest")
-        for name in ort_api_version.required_headers(header)[1:]:
-            if files.get(name) != ort_api_version.pinned_header(lock["upstream"], name):
+        pinned = {}
+        def read_dependency(name):
+            pinned[name] = ort_api_version.pinned_header(lock["upstream"], name)
+            return pinned[name]
+
+        for name in ort_api_version.required_headers(header, read_dependency)[1:]:
+            if files.get(name) != pinned[name]:
                 errors.append(f"packaged {name} differs from pinned upstream commit")
             if name not in manifest.get("files", {}):
                 errors.append(f"build manifest missing {name} digest")
