@@ -11,9 +11,10 @@ responsibilities:
    structural contract gate: exact tensor interface, no transform ops, no
    dense DFT filter-bank initializer signatures, contract version metadata.
 3. ``build_spectral_core_ensemble`` — multi-input/multi-output ensemble
-   merge for htdemucs_ft spectral cores. ISTFT is linear, so averaging the
-   pre-ISTFT and time-branch outputs is exactly equivalent to averaging the
-   sub-models' waveforms.
+   merge for htdemucs_ft spectral cores using the BagOfModels per-source
+   weights. ISTFT is linear, so weighting/applying the pre-ISTFT and
+   time-branch outputs is exactly equivalent to weighting the sub-models'
+   waveforms.
 
 Contract: docs/spectral-core-contract.md (``openkara.spectral-contract/v1``).
 """
@@ -25,6 +26,8 @@ import hashlib
 import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper, shape_inference
+
+from demucs_loader import validate_weight_matrix
 
 SPECTRAL_CONTRACT_VERSION = "openkara.spectral-contract/v1"
 SPECTRAL_CONTRACT_METADATA = "openkara.spectral_contract"
@@ -316,19 +319,26 @@ def _deduplicate_initializers(nodes, initializers):
     return nodes, deduped
 
 
-def build_spectral_core_ensemble(sub_models, n_models,
+def build_spectral_core_ensemble(sub_models, n_models, weights,
                                  graph_name="htdemucs_ft_spectral_core_ensemble"):
-    """Merge spectral-core sub-models into one averaging ensemble graph.
+    """Merge spectral-core sub-models using the BagOfModels per-source weights.
 
-    The contract inputs are fed to every sub-model unchanged, each contract
-    output is averaged across sub-models via Sum + Mul (no stacked
-    intermediate), all other tensors are namespaced per sub-model, and
-    identical initializers are deduplicated. Averaging the pre-ISTFT and
-    time-branch tensors is exactly the waveform average by linearity of the
-    ISTFT and the final crop.
+    The contract inputs are fed to every sub-model unchanged. Each sub-model's
+    contract output is multiplied by its per-source weight vector, summed, and
+    divided by each source's total weight — exactly ``demucs.apply.apply_model``
+    for a ``BagOfModels``. The shipped ``htdemucs_ft`` configuration is the 4x4
+    identity, so each source comes from its own sub-model; a plain average
+    would be a different model. All other tensors are namespaced per sub-model
+    and identical initializers are deduplicated.
+
+    Weighting the pre-ISTFT and time-branch tensors is exactly equivalent to
+    weighting the waveforms, by linearity of the ISTFT and the final crop.
     """
     if len(sub_models) != n_models:
         raise ValueError(f"expected {n_models} sub-models, got {len(sub_models)}")
+
+    n_sources = CONTRACT_OUTPUTS[0][1][1]
+    weights, totals = validate_weight_matrix(weights, n_models, n_sources)
 
     input_names = {name for name, _ in CONTRACT_INPUTS}
     output_names = [name for name, _ in CONTRACT_OUTPUTS]
@@ -346,8 +356,8 @@ def build_spectral_core_ensemble(sub_models, n_models,
 
     all_initializers = []
     all_nodes = []
-    # output name -> list of per-sub prefixed tensor names
-    sub_outputs = {name: [] for name in output_names}
+    # output name -> list of per-sub weighted tensor names
+    weighted_outputs = {name: [] for name in output_names}
 
     for i, m in enumerate(sub_models):
         prefix = f"sub{i}_"
@@ -377,23 +387,36 @@ def build_spectral_core_ensemble(sub_models, n_models,
                 new_node.attribute.append(attr)
             all_nodes.append(new_node)
 
-        for name in output_names:
-            sub_outputs[name].append(prefix + name)
+        for name, shape in CONTRACT_OUTPUTS:
+            broadcast = [1, n_sources] + [1] * (len(shape) - 2)
+            weight_name = f"sub{i}_ensemble_weight_{name}"
+            all_initializers.append(numpy_helper.from_array(
+                np.array(weights[i], dtype=np.float32).reshape(broadcast),
+                name=weight_name,
+            ))
+            weighted = f"sub{i}_weighted_{name}"
+            all_nodes.append(helper.make_node(
+                "Mul",
+                inputs=[prefix + name, weight_name],
+                outputs=[weighted],
+            ))
+            weighted_outputs[name].append(weighted)
 
-    scale = numpy_helper.from_array(
-        np.array([1.0 / n_models], dtype=np.float32), name="ensemble_scale"
-    )
-    all_initializers.append(scale)
-
-    for name in output_names:
+    for name, shape in CONTRACT_OUTPUTS:
+        broadcast = [1, n_sources] + [1] * (len(shape) - 2)
         all_nodes.append(helper.make_node(
             "Sum",
-            inputs=sub_outputs[name],
+            inputs=weighted_outputs[name],
             outputs=[f"ensemble_sum_{name}"],
         ))
+        totals_name = f"ensemble_totals_{name}"
+        all_initializers.append(numpy_helper.from_array(
+            np.array(totals, dtype=np.float32).reshape(broadcast),
+            name=totals_name,
+        ))
         all_nodes.append(helper.make_node(
-            "Mul",
-            inputs=[f"ensemble_sum_{name}", "ensemble_scale"],
+            "Div",
+            inputs=[f"ensemble_sum_{name}", totals_name],
             outputs=[name],
         ))
 

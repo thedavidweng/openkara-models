@@ -276,10 +276,22 @@ class AssertSpectralCoreMetadataTests(unittest.TestCase):
         assert_spectral_core_metadata(add_metadata(make_contract_stub()))
 
 
+# Valid two-model matrix over four sources: sub-model 0 supplies drums, and
+# sub-model 1 supplies bass/other/vocals. A 2x4 identity is invalid because
+# sources 2 and 3 would have zero total weight.
+TWO_MODEL_WEIGHTS = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 1.0, 1.0]]
+FOUR_MODEL_IDENTITY = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+]
+
+
 class BuildSpectralCoreEnsembleTests(unittest.TestCase):
     def test_merged_graph_structure(self):
         ensemble = build_spectral_core_ensemble(
-            [make_contract_stub(1.0), make_contract_stub(3.0)], 2
+            [make_contract_stub(1.0), make_contract_stub(3.0)], 2, TWO_MODEL_WEIGHTS
         )
         onnx.checker.check_model(ensemble)
         assert_spectral_core_graph(ensemble)
@@ -292,26 +304,31 @@ class BuildSpectralCoreEnsembleTests(unittest.TestCase):
 
         ops = [n.op_type for n in ensemble.graph.node]
         self.assertEqual(ops.count("Sum"), 2)  # one per contract output
-        self.assertNotIn("ReduceMean", ops)
+        self.assertEqual(ops.count("Div"), 2)
+        self.assertEqual(ops.count("ReduceMean"), 0)
 
-        scale = next(
-            i for i in ensemble.graph.initializer if i.name == "ensemble_scale"
+        totals = next(
+            i for i in ensemble.graph.initializer if i.name == "ensemble_totals_time_out"
         )
-        np.testing.assert_allclose(numpy_helper.to_array(scale), [0.5])
+        np.testing.assert_allclose(numpy_helper.to_array(totals).ravel(), [1.0] * 4)
+        weights = numpy_helper.to_array(next(
+            i for i in ensemble.graph.initializer if i.name == "sub1_ensemble_weight_time_out"
+        ))
+        np.testing.assert_allclose(weights.ravel(), [0.0, 1.0, 1.0, 1.0])
 
         # Identical initializers across sub-models are deduplicated (the
-        # stubs share spec_shape/axes; scale differs between subs).
+        # stubs share spec_shape/axes; sub scale differs between subs).
         init_names = [i.name for i in ensemble.graph.initializer]
         self.assertIn("sub0_spec_shape", init_names)
         self.assertNotIn("sub1_spec_shape", init_names)
         self.assertIn("sub0_scale", init_names)
         self.assertIn("sub1_scale", init_names)
 
-    def test_merged_graph_averages_numerically(self):
+    def test_merged_graph_applies_per_source_weights(self):
         import onnxruntime as ort
 
         ensemble = build_spectral_core_ensemble(
-            [make_contract_stub(1.0), make_contract_stub(3.0)], 2
+            [make_contract_stub(1.0), make_contract_stub(3.0)], 2, TWO_MODEL_WEIGHTS
         )
         sess = ort.InferenceSession(
             ensemble.SerializeToString(), providers=["CPUExecutionProvider"]
@@ -322,13 +339,33 @@ class BuildSpectralCoreEnsembleTests(unittest.TestCase):
         spectral_out, time_out = sess.run(
             None, {"spectral": spectral, "mix": mix}
         )
-        # average of 1x and 3x = 2x of the stub's per-sub output
-        expected_time = np.concatenate([mix[:, None]] * 4, axis=1) * 2.0
+        per_source = np.array([1.0, 3.0, 3.0, 3.0], dtype=np.float32)
+        expected_time = np.concatenate([mix[:, None]] * 4, axis=1) * per_source[None, :, None, None]
         np.testing.assert_allclose(time_out, expected_time, atol=1e-5)
         expected_spec = np.concatenate(
             [spectral.reshape(1, 1, 2, 2, 2048, 336)] * 4, axis=1
-        ) * 2.0
+        ) * per_source[None, :, None, None, None, None]
         np.testing.assert_allclose(spectral_out, expected_spec, atol=1e-5)
+
+    def test_four_model_identity_weights_are_structurally_exact(self):
+        ensemble = build_spectral_core_ensemble(
+            [make_contract_stub(float(i + 1)) for i in range(4)],
+            4, FOUR_MODEL_IDENTITY,
+        )
+        onnx.checker.check_model(ensemble)
+        assert_spectral_core_graph(ensemble)
+        totals = numpy_helper.to_array(next(
+            i for i in ensemble.graph.initializer if i.name == "ensemble_totals_time_out"
+        ))
+        np.testing.assert_allclose(totals.ravel(), [1.0] * 4)
+        for model_index in range(4):
+            weights = numpy_helper.to_array(next(
+                i for i in ensemble.graph.initializer
+                if i.name == f"sub{model_index}_ensemble_weight_time_out"
+            ))
+            expected = np.zeros(4, dtype=np.float32)
+            expected[model_index] = 1.0
+            np.testing.assert_allclose(weights.ravel(), expected)
 
     def test_rejects_wrong_sub_model_interface(self):
         bad = make_contract_stub()
@@ -338,11 +375,18 @@ class BuildSpectralCoreEnsembleTests(unittest.TestCase):
                 if name == "spectral":
                     node.input[i] = "audio"
         with self.assertRaises(SpectralCoreContractError):
-            build_spectral_core_ensemble([bad, make_contract_stub()], 2)
+            build_spectral_core_ensemble([bad, make_contract_stub()], 2, TWO_MODEL_WEIGHTS)
 
     def test_rejects_wrong_count(self):
         with self.assertRaises(ValueError):
-            build_spectral_core_ensemble([make_contract_stub()], 2)
+            build_spectral_core_ensemble([make_contract_stub()], 2, TWO_MODEL_WEIGHTS)
+
+    def test_rejects_zero_source_total(self):
+        with self.assertRaises(ValueError):
+            build_spectral_core_ensemble(
+                [make_contract_stub(), make_contract_stub()], 2,
+                [[0.0] * 4, [0.0] * 4],
+            )
 
 
 if __name__ == "__main__":

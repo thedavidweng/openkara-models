@@ -1,0 +1,25 @@
+{
+  "schema_version": "openkara.ort-pinned-headers/v1",
+  "note": "Exact C API header closure for published runtime archives that predate header packaging (before #161). Bytes are fetched from the pinned upstream commit and verified against size/SHA-256 before use. They compile only the measurement harness; they never replace the runtime library or its packaged manifest.",
+  "headers": {
+    "v1.27.1": {
+      "upstream": {
+        "project": "onnxruntime",
+        "repo": "microsoft/onnxruntime",
+        "tag": "v1.27.1",
+        "commit_sha": "df2ba1cf8108aa63627cf4cdf8f807880b938616"
+      },
+      "ort_api_version": 27,
+      "files": {
+        "onnxruntime_c_api.h": {
+          "sha256": "523131bab81173fe287c578f7dda344e1dc5c749fa3f70b55fbbf8f210850313",
+          "size": 392401
+        },
+        "onnxruntime_ep_c_api.h": {
+          "sha256": "f65ac849718cabe3ff4902698dd2de643c3b3dbe0010242b2b0407548e7ee00c",
+          "size": 149810
+        }
+      }
+    }
+  }
+}

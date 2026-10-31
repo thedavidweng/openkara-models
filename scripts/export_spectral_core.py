@@ -42,7 +42,7 @@ from onnx_runtime_contract import (
     make_contract_compliant_session,
     upsert_metadata_prop,
 )
-from demucs_loader import SUPPORTED_MODELS, load, load_sub_model
+from demucs_loader import SUPPORTED_MODELS, load, load_bag_weights, load_sub_model
 from spectral_core_patch import (
     SpectralCoreModule,
     SpectralCoreTracePatch,
@@ -163,7 +163,7 @@ def optimize_and_annotate(raw_path, output_path):
 
 def export_single_sub_model(model_name, index, output_path):
     """Export one spectral-core sub-model to raw ONNX (for parallel CI)."""
-    sub_model, segment_frames, n_models = load_sub_model(model_name, index)
+    sub_model, segment_frames, n_models, _weights = load_sub_model(model_name, index)
     print(f"\nSub-model {index}/{n_models - 1}, segment_frames={segment_frames}")
 
     os.makedirs(output_path.parent or Path("."), exist_ok=True)
@@ -172,8 +172,12 @@ def export_single_sub_model(model_name, index, output_path):
     print(f"\nSpectral-core sub-model {index} export complete: {output_path}")
 
 
-def merge_and_finalize(sub_model_dir, output_path):
-    """Merge spectral-core sub-models, optimize, annotate, gate."""
+def merge_and_finalize(sub_model_dir, output_path, weights):
+    """Merge spectral-core sub-models with their per-source weights, then finalize.
+
+    ``weights`` is the pinned BagOfModels matrix (one row per sub-model, one
+    column per source). The merged graph must reproduce ``apply_model``.
+    """
     import onnx
 
     sub_paths = sorted(
@@ -195,7 +199,7 @@ def merge_and_finalize(sub_model_dir, output_path):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         raw_output_path = Path(tmpdir) / "spectral_core.raw.onnx"
-        ensemble = build_spectral_core_ensemble(sub_models, n_models)
+        ensemble = build_spectral_core_ensemble(sub_models, n_models, weights)
         del sub_models
         gc.collect()
         onnx.save(ensemble, str(raw_output_path))
@@ -215,7 +219,7 @@ def merge_and_finalize(sub_model_dir, output_path):
 
 def convert_ensemble(model_name, output_path):
     """Single-job ensemble path: export sub-cores one at a time, then merge."""
-    model_0, segment_frames, n_models = load_sub_model(model_name, 0)
+    model_0, segment_frames, n_models, weights = load_sub_model(model_name, 0)
     del model_0
     gc.collect()
     print(f"\nEnsemble has {n_models} sub-models, segment_frames={segment_frames}")
@@ -226,12 +230,12 @@ def convert_ensemble(model_name, output_path):
             print(f"Exporting spectral-core sub-model {i + 1}/{n_models}")
             print(f"{'=' * 60}")
 
-            sub_model, _, _ = load_sub_model(model_name, i)
+            sub_model, _, _, _ = load_sub_model(model_name, i)
             export_spectral_core_onnx(sub_model, Path(tmpdir) / f"sub_{i}.onnx")
             del sub_model
             gc.collect()
 
-        merge_and_finalize(Path(tmpdir), output_path)
+        merge_and_finalize(Path(tmpdir), output_path, weights)
 
 
 def default_output(model_name):
@@ -292,7 +296,7 @@ def main():
             sys.exit(1)
         output = args.output or default_output(model_name)
         os.makedirs(output.parent, exist_ok=True)
-        merge_and_finalize(args.merge_from, output)
+        merge_and_finalize(args.merge_from, output, load_bag_weights(model_name))
         return
 
     output_path = args.output or default_output(model_name)

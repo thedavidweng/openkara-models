@@ -111,25 +111,54 @@ def _stitch_windows(run_window, inp: np.ndarray, window: int = SEGMENT_FRAMES) -
 
 
 def _compute_pytorch_reference(model_name: str, inp: np.ndarray) -> np.ndarray:
-    """Run the PyTorch Demucs ensemble reference.
+    """Run the PyTorch Demucs reference used by the strict model gate.
 
     Returns the output with the batch dimension preserved, matching the ONNX
     output shape and the corpus manifest's ``expected_output_shape`` (which
     includes the leading batch dim). Fixtures longer than the model window
     are stitched with the product's overlap-add semantics.
+
+    ``htdemucs_ft`` is a four-model ``BagOfModels`` ensemble whose pinned
+    configuration uses a per-source weight matrix (the 4x4 identity: drums
+    from sub-model 0, bass from 1, other from 2, vocals from 3). The exporter
+    merges the sub-models with the same weights, so this reference MUST apply
+    them too. Using ``demucs_loader.load()`` here would silently unwrap to
+    sub-model 0 and compare the candidate against a different model, and a
+    plain average would not match upstream ``apply_model`` either.
     """
     import torch
-    from demucs_loader import load
-    # demucs_loader.load() returns (model, segment_frames) — unpack it.
+    from demucs_loader import (
+        accumulate_weighted,
+        iter_sub_models,
+        load,
+        normalize_weighted,
+    )
+
+    def run_model(model, seg: int) -> np.ndarray:
+        def run_window(chunk: np.ndarray) -> np.ndarray:
+            with torch.no_grad():
+                t = torch.from_numpy(chunk).unsqueeze(0)
+                out = model(t)
+            return out.detach().cpu().numpy()
+
+        return _stitch_windows(run_window, inp, window=seg)
+
+    if model_name == "htdemucs_ft":
+        n_models, _, weights, sub_models = iter_sub_models(model_name)
+        if n_models < 1 or len(weights) != n_models:
+            raise ValueError("htdemucs_ft ensemble has no sub-models")
+        acc: np.ndarray | None = None
+        for sub_model, seg, index in sub_models:
+            out = run_model(sub_model, seg).astype(np.float64)
+            acc = accumulate_weighted(acc, out, weights[index])
+            del sub_model, out
+            gc.collect()
+        if acc is None:
+            raise ValueError("htdemucs_ft ensemble produced no reference output")
+        return normalize_weighted(acc, weights).astype(np.float32)
+
     model, seg = load(model_name)
-
-    def run_window(chunk: np.ndarray) -> np.ndarray:
-        with torch.no_grad():
-            t = torch.from_numpy(chunk).unsqueeze(0)
-            out = model(t)
-        return out.detach().cpu().numpy()
-
-    result = _stitch_windows(run_window, inp, window=seg)
+    result = run_model(model, seg)
     del model
     gc.collect()
     return result

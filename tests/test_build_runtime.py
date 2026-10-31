@@ -410,5 +410,34 @@ class WindowsPatchToolchainTests(unittest.TestCase):
         self.assertIn("-DPatch_EXECUTABLE=C:/msys64/usr/bin/patch.exe", configure_cmd)
 
 
+    def test_records_resolved_telemetry_cache_without_token_value(self):
+        with tempfile.TemporaryDirectory() as td:
+            build_dir = Path(td)
+            (build_dir / "CMakeCache.txt").write_text(
+                "//comment\n"
+                "onnxruntime_USE_TELEMETRY:BOOL=OFF\n"
+                "onnxruntime_TELEMETRY_BACKEND:STRING=AUTO\n"
+                "onnxruntime_USE_WINDOWS_TELEMETRY:BOOL=OFF\n"
+                "ONNXRUNTIME_TELEMETRY_TENANT_TOKEN:STRING=\n"
+                "CMAKE_BUILD_TYPE:STRING=Release\n",
+                encoding="utf-8",
+            )
+            values = br._record_cmake_cache(build_dir)
+        self.assertEqual(values["onnxruntime_USE_TELEMETRY"], "OFF")
+        self.assertEqual(values["onnxruntime_TELEMETRY_BACKEND"], "AUTO")
+        self.assertEqual(values["ONNXRUNTIME_TELEMETRY_TENANT_TOKEN_SET"], "false")
+        self.assertNotIn("CMAKE_BUILD_TYPE", values)
+
+    def test_telemetry_token_value_is_never_recorded(self):
+        with tempfile.TemporaryDirectory() as td:
+            build_dir = Path(td)
+            (build_dir / "CMakeCache.txt").write_text(
+                "ONNXRUNTIME_TELEMETRY_TENANT_TOKEN:STRING=secret-token\n",
+                encoding="utf-8",
+            )
+            raw = json.dumps(br._record_cmake_cache(build_dir))
+        self.assertEqual(json.loads(raw)["ONNXRUNTIME_TELEMETRY_TENANT_TOKEN_SET"], "true")
+        self.assertNotIn("secret-token", raw)
+
 if __name__ == "__main__":
     unittest.main()

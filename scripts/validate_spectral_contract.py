@@ -131,11 +131,17 @@ def torch_references(model_name, mix_np, spectral_np):
     The waveform reference comes from the ORIGINAL unpatched model; the core
     references come from the same weights traced at the spectral boundary.
     For htdemucs_ft each sub-model is loaded once and both forwards run
-    before it is released (ensemble = plain average, matching the shipped
-    waveform ensemble graph).
+    before it is released; the outputs are combined with the pinned
+    per-source BagOfModels weights, matching ``demucs.apply.apply_model``
+    and ``build_spectral_core_ensemble``.
     """
     import torch
-    from demucs_loader import iter_sub_models, load
+    from demucs_loader import (
+        accumulate_weighted,
+        iter_sub_models,
+        load,
+        normalize_weighted,
+    )
     from spectral_core_patch import SpectralCoreModule, SpectralCoreTracePatch
 
     mix_t = torch.from_numpy(mix_np)
@@ -151,19 +157,18 @@ def torch_references(model_name, mix_np, spectral_np):
         return y.numpy(), zout.numpy(), time.numpy()
 
     if model_name == "htdemucs_ft":
-        n_models, _, sub_models = iter_sub_models(model_name)
+        n_models, _, weights, sub_models = iter_sub_models(model_name)
         acc = None
         for sub_model, _, i in sub_models:
             print(f"  torch reference: sub-model {i}...")
             outs = both_forwards(sub_model)
             if acc is None:
-                acc = list(outs)
-            else:
-                for j, o in enumerate(outs):
-                    acc[j] += o
+                acc = [None] * len(outs)
+            for j, o in enumerate(outs):
+                acc[j] = accumulate_weighted(acc[j], o, weights[i])
             del sub_model, outs
             gc.collect()
-        return tuple(a / n_models for a in acc)
+        return tuple(normalize_weighted(a, weights) for a in acc)
 
     model, _ = load(model_name)
     outs = both_forwards(model)

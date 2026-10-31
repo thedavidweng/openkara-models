@@ -214,3 +214,77 @@ def test_pytorch_nonfinite_rejected_by_runner_and_validator(flag):
     report['results'][0][flag] = True
     assert q.gate_failures(report['results'], report['mse_threshold'])
     assert v.validate_report(report)
+
+
+def test_ensemble_reference_uses_per_source_weights(monkeypatch) -> None:
+    """Regression: htdemucs_ft is a four-model BagOfModels with identity weights.
+
+    Upstream ``apply_model`` multiplies each sub-model's source output by the
+    pinned weight matrix (4x4 identity: one sub-model per source) and divides
+    by the per-source total. The strict quality reference must do the same;
+    using demucs_loader.load() unwraps to sub-model 0, and a plain average is
+    also a different model.
+    """
+    import contextlib
+    import sys
+    import types
+
+    import demucs_loader
+    import run_quality_suite as q
+
+    class Tensor:
+        def __init__(self, arr):
+            self.arr = np.asarray(arr, dtype=np.float32)
+
+        def unsqueeze(self, axis):
+            return Tensor(np.expand_dims(self.arr, axis))
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return self.arr
+
+    class Model:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, tensor):
+            frames = tensor.arr.shape[-1]
+            return Tensor(np.full((1, 4, 2, frames), self.value, dtype=np.float32))
+
+    fake_torch = types.SimpleNamespace(
+        from_numpy=lambda arr: Tensor(arr),
+        no_grad=lambda: contextlib.nullcontext(),
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(
+        demucs_loader, "iter_sub_models",
+        lambda _name: (
+            2, 4,
+            [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 1.0, 1.0]],
+            iter([(Model(2.0), 4, 0), (Model(4.0), 4, 1)]),
+        ),
+    )
+    monkeypatch.setattr(
+        demucs_loader, "load",
+        lambda _name: pytest.fail("ensemble path must not unwrap to one sub-model"),
+    )
+
+    out = q._compute_pytorch_reference("htdemucs_ft", np.zeros((2, 4), np.float32))
+    assert out.shape == (1, 4, 2, 4)
+    np.testing.assert_allclose(out[0, :, 0, 0], [2.0, 4.0, 4.0, 4.0])
+
+
+def test_normalize_weighted_rejects_zero_source_total() -> None:
+    """A source with zero total weight is undefined, never NaN."""
+    import demucs_loader
+
+    with pytest.raises(ValueError, match="positive total"):
+        demucs_loader.normalize_weighted(
+            np.zeros((1, 4, 2, 4), dtype=np.float64),
+            [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
+        )

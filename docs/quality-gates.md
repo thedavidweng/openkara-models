@@ -33,7 +33,11 @@ the publisher checks these against each exact compatibility edge.
 New packages include the pinned C API header and its transitive quoted header
 dependencies, with manifest digests. The small harness builds from these packaged headers;
 `--ort-source` optionally cross-checks explicit source bytes. Historical packages
-missing required headers must be rebuilt, not silently substituted. This
+missing required headers must be rebuilt, not silently substituted in a strict
+(model/weight) promotion. Runtime-only promotion measures the exact stable
+archive with a packaged or committed pinned header closure verified against
+the archive's recorded commit/API (see `docs/runtime-only-promotion.md`);
+an unverifiable header source still fails closed. This
 compiles only the harness, never a full ORT build, with at most two jobs.
 
 `cold_load_s` sums per-window native session load; `first_window_s` times the

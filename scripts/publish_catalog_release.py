@@ -51,6 +51,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import jsonschema
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -60,6 +62,7 @@ from validate_release_evidence import qualify_release  # noqa: E402
 RELEASES_DIR = ROOT / "catalog" / "releases"
 CHANNELS_DIR = ROOT / "catalog" / "channels"
 SC_DIR = ROOT / "catalog" / "supply-chain"
+QUALIFICATIONS_DIR = ROOT / "catalog" / "qualifications"
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -94,6 +97,20 @@ def _parse_release_url(url: str) -> tuple[str, str] | None:
     repo = parts[0][len("https://github.com/"):]
     tag = parts[1].split("/")[0]
     return repo, tag
+
+
+def _release_state(repo: str, tag: str) -> dict[str, Any] | None:
+    """Return release state (draft/publishedAt) or None if it cannot be queried."""
+    r = _gh(
+        ["release", "view", tag, "--repo", repo, "--json", "isDraft,publishedAt"],
+        check=False,
+    )
+    if r.returncode != 0:
+        return None
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None
 
 
 def _release_assets(repo: str, tag: str) -> list[dict[str, Any]] | None:
@@ -347,10 +364,35 @@ def main() -> int:
             return 1
         errors = qualify_release(manifest, _download_report)
         if errors:
-            print("ERROR: stable publication requires qualified immutable evidence and frozen measured baselines:", file=sys.stderr)
-            for error in errors:
-                print(f"  {error}", file=sys.stderr)
-            return 1
+            from validate_runtime_only import load_record, qualify_runtime_only
+
+            record_path = QUALIFICATIONS_DIR / f"{args.release}.json"
+            if not record_path.is_file():
+                print("ERROR: stable publication requires qualified immutable evidence and frozen measured baselines:", file=sys.stderr)
+                for error in errors:
+                    print(f"  {error}", file=sys.stderr)
+                print(f"  runtime-only qualification record not found: {record_path}", file=sys.stderr)
+                return 1
+            try:
+                record = load_record(args.release)
+                runtime_only_errors = qualify_runtime_only(
+                    manifest, manifest_path.read_bytes(), record, _download_report
+                )
+            except (OSError, ValueError, jsonschema.ValidationError) as exc:
+                runtime_only_errors = [f"runtime-only qualification: {exc}"]
+            if runtime_only_errors:
+                print("ERROR: stable publication evidence failed:", file=sys.stderr)
+                print("  strict release gate:", file=sys.stderr)
+                for error in errors:
+                    print(f"    {error}", file=sys.stderr)
+                print("  runtime-only qualification:", file=sys.stderr)
+                for error in runtime_only_errors:
+                    print(f"    {error}", file=sys.stderr)
+                return 1
+            print(
+                "OK: runtime-only qualification accepted "
+                "(model bytes identical; per-edge native and app evidence verified)."
+            )
 
     # Step 1: pre-publication verification (manifest, supply-chain, assets, monotonicity).
     errors = _verify_manifest(manifest)
