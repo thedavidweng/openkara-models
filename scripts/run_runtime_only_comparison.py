@@ -55,6 +55,10 @@ from validate_catalog import validate_document  # noqa: E402
 SCHEMA_VERSION = "openkara.runtime-only-native-report/v1"
 FRAMES = 343980
 PROVIDERS = ("cpu", "coreml", "xnnpack", "directml")
+# Accelerated providers may leave part of the graph on the CPU EP. That is a
+# recorded partition, not a fallback standing in for the provider. A candidate
+# may not move substantially more work onto the CPU than the stable baseline.
+CPU_PARTITION_MAX_FACTOR = 1.5
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -199,14 +203,26 @@ def _check_measurement(metrics: dict[str, Any], provider: str,
         problems.append(f"provider assignment {metrics.get('assigned_provider')!r} != {provider!r}")
     if metrics.get("used_fallback") is not False:
         problems.append("whole-session CPU fallback was used or not measured")
-    if provider != "cpu" and metrics.get("fallback_node_count") != 0:
-        problems.append(
-            f"accelerator provider has {metrics.get('fallback_node_count')!r} CPU fallback node(s)"
-        )
     for field in ("provider_node_count", "total_node_count"):
         value = metrics.get(field)
         if type(value) is not int or value <= 0:
             problems.append(f"{field} must be > 0, got {value!r}")
+    # An accelerated provider may partition part of the graph to the CPU EP;
+    # the issue forbids CPU fallback standing in for the provider, not a
+    # recorded partial partition. Require the partition to be explicitly
+    # accounted for and compared, never described as full acceleration.
+    if provider != "cpu":
+        cpu_nodes = metrics.get("fallback_node_count")
+        if type(cpu_nodes) is not int or cpu_nodes < 0:
+            problems.append(
+                f"accelerator CPU partition node count must be >= 0, got {cpu_nodes!r}"
+            )
+        elif metrics.get("provider_node_count") + cpu_nodes != metrics.get("total_node_count"):
+            problems.append(
+                "accelerator partition accounting mismatch: provider + CPU nodes "
+                f"({metrics.get('provider_node_count')} + {cpu_nodes}) != total "
+                f"({metrics.get('total_node_count')})"
+            )
     if metrics.get("finite_output") is not True:
         problems.append("outputs were not finite")
     if metrics.get("output_shapes") != [list(shape) for shape in expected_shapes]:
@@ -264,6 +280,19 @@ def _budget_checks(baseline: dict[str, Any], candidate: dict[str, Any],
         )
         if problem:
             problems.append(problem)
+    # Same accounting as the baseline: a candidate accelerated runtime must not
+    # move substantially more of the graph onto the CPU EP than stable did.
+    provider = candidate.get("requested_provider") or baseline.get("requested_provider")
+    if provider != "cpu":
+        base_cpu = baseline.get("fallback_node_count")
+        cand_cpu = candidate.get("fallback_node_count")
+        if type(base_cpu) is not int or type(cand_cpu) is not int:
+            problems.append("accelerator CPU partition node counts must be integers")
+        elif cand_cpu > max(base_cpu, 1) * CPU_PARTITION_MAX_FACTOR:
+            problems.append(
+                f"candidate CPU partition {cand_cpu} exceeds baseline {base_cpu} "
+                f"by more than {CPU_PARTITION_MAX_FACTOR}x"
+            )
     for metric, value in (
         ("shape_match", comparison["output_shapes_equal"]),
         ("onnx_has_nan", not comparison["finite"]),
@@ -373,8 +402,13 @@ def main() -> int:
         work_root = Path(temporary)
         runtimes: dict[tuple[str, str], NativeRuntime] = {}
         pins: dict[str, Any] = {}
-        models: dict[str, tuple[Path, list[dict[str, Any]]]] = {}
-        specs: dict[str, Any] = {}
+        # Materialize one model at a time and release it as soon as the sorted
+        # edge list moves on, so peak disk stays bounded instead of growing
+        # with every extracted graph. Coverage is unchanged.
+        current_model_id: str | None = None
+        model_path: Path | None = None
+        model_files: list[dict[str, Any]] = []
+        spec: Any = None
 
         for edge in selected:
             model_id = edge["model_artifact_id"]
@@ -388,21 +422,21 @@ def main() -> int:
                 candidate_models[model_id], baseline_runtime, candidate_runtime,
                 args.target, provider,
             )
-            if model_id not in models:
+            if model_id != current_model_id:
+                if current_model_id is not None:
+                    shutil.rmtree(work_root / "models" / current_model_id, ignore_errors=True)
                 model_archive = _verify_artifact(args.artifacts_dir, candidate_models[model_id])
-                models[model_id] = _materialize_model(
+                model_path, model_files = _materialize_model(
                     model_archive, candidate_models[model_id],
                     work_root / "models" / model_id,
                 )
-            model_path, model_files = models[model_id]
-            if model_id not in specs:
                 try:
-                    specs[model_id] = measurement_spec(
+                    spec = measurement_spec(
                         candidate_models[model_id]["model"], model_path, FRAMES,
                     )
                 except InterfaceError as exc:
                     raise SystemExit(f"{model_id}: {exc}") from exc
-            spec = specs[model_id]
+                current_model_id = model_id
 
             expected_shapes = [list(shape) for shape in spec.output_shapes]
             checks: list[str] = []

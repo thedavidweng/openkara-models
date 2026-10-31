@@ -13,9 +13,13 @@ stable release. It is authorised only by:
    every supported compatibility edge exactly once with strict provider
    assignment, no fallback, exact output shapes, finite outputs, numeric
    old/new deltas and the existing non-regression budgets;
-3. immutable OpenKara app-integration reports covering the same edges with
-   the loaded library digest, provider assignment, output shapes and finite
-   audio-pipeline output.
+3. immutable OpenKara app-integration reports covering every app-applicable
+   edge (non-deprecated spectral-core, the only production path in
+   OpenKara#172) with the loaded library digest, provider assignment, output
+   shapes and finite audio-pipeline output, and explicitly listing every
+   non-applicable supported edge in ``skipped_edges``. Native reports still
+   cover every supported edge, so waveform model↔runtime capability is never
+   dropped.
 
 Missing, duplicate, stale, synthetic or unmeasured evidence fails closed. The
 record itself only carries refs; report bytes are downloaded and verified.
@@ -58,6 +62,13 @@ CHANNELS_DIR = ROOT / "catalog" / "channels"
 NATIVE_SCHEMA_VERSION = "openkara.runtime-only-native-report/v1"
 APP_SCHEMA_VERSION = "openkara.openkara-app-integration/v1"
 LIBRARY_NAMES = {"libonnxruntime.so", "libonnxruntime.dylib", "onnxruntime.dll"}
+# OpenKara's production separation path is spectral-core only: the waveform
+# graph path was removed in OpenKara#172. A catalog waveform edge still
+# describes model<->runtime capability, not app loadability. App reports cover
+# only supported edges whose model is non-deprecated and uses one of these
+# interfaces; every other supported edge must be listed explicitly in the
+# report's skipped_edges instead of being silently dropped.
+APP_LOADABLE_TENSOR_INTERFACES = frozenset({"spectral-core"})
 
 
 def _defs() -> dict[str, Any]:
@@ -274,13 +285,26 @@ def _check_metrics(metrics: dict[str, Any], provider: str, expected_shapes: list
         problems.append(f"provider assignment {metrics['assigned_provider']!r} != {provider!r}")
     if metrics["used_fallback"] is not False:
         problems.append("whole-session CPU fallback was used or not measured")
-    if provider != "cpu" and metrics["fallback_node_count"] != 0:
-        problems.append(
-            f"accelerator provider has {metrics['fallback_node_count']!r} CPU fallback node(s)"
-        )
     for field in ("provider_node_count", "total_node_count"):
         if type(metrics[field]) is not int or metrics[field] <= 0:
             problems.append(f"{field} must be > 0")
+    # An accelerated provider may keep part of the graph on the CPU EP; the
+    # issue forbids CPU fallback standing in for the provider, not a recorded
+    # partial partition. Require the partition to be explicit and accounted for.
+    if provider != "cpu":
+        cpu_nodes = metrics["fallback_node_count"]
+        if type(cpu_nodes) is not int or cpu_nodes < 0:
+            problems.append(
+                f"accelerator CPU partition node count must be >= 0, got {cpu_nodes!r}"
+            )
+        elif type(metrics["provider_node_count"]) is int and \
+                type(metrics["total_node_count"]) is int and \
+                metrics["provider_node_count"] + cpu_nodes != metrics["total_node_count"]:
+            problems.append(
+                "accelerator partition accounting mismatch: provider + CPU nodes "
+                f"({metrics['provider_node_count']} + {cpu_nodes}) != total "
+                f"({metrics['total_node_count']})"
+            )
     if metrics["finite_output"] is not True:
         problems.append("outputs were not finite")
     if metrics["output_shapes"] != expected_shapes:
@@ -468,6 +492,25 @@ def _native_checks(manifest: dict[str, Any], baseline: dict[str, Any],
     return errors, seen
 
 
+def _app_applicable_edges(manifest: dict[str, Any],
+                          supported: dict[tuple, dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
+    """Return supported edges the current OpenKara production path can load.
+
+    OpenKara resolves only non-deprecated spectral-core models. The remaining
+    supported edges stay in the candidate for native API compatibility, but
+    they are not app-applicable and must be reported as explicit skips.
+    """
+    models = {a["artifact_id"]: a for a in manifest["artifacts"]["models"]}
+    applicable: dict[tuple, dict[str, Any]] = {}
+    for key, edge in supported.items():
+        model = models[key[0]]
+        if model.get("deprecation", {}).get("deprecated"):
+            continue
+        if model.get("model", {}).get("tensor_interface") in APP_LOADABLE_TENSOR_INTERFACES:
+            applicable[key] = edge
+    return applicable
+
+
 def _app_checks(manifest: dict[str, Any], record: dict[str, Any],
                 supported: dict[tuple, dict[str, Any]],
                 native_shapes: dict[tuple, list[list[int]]],
@@ -475,7 +518,9 @@ def _app_checks(manifest: dict[str, Any], record: dict[str, Any],
     errors: list[str] = []
     candidate_models = {a["artifact_id"]: a for a in manifest["artifacts"]["models"]}
     candidate_runtimes = {a["artifact_id"]: a for a in manifest["artifacts"]["runtimes"]}
+    applicable = _app_applicable_edges(manifest, supported)
     seen: set[tuple] = set()
+    skipped_seen: dict[tuple, dict[str, Any]] = {}
 
     for doc in docs:
         if doc["candidate_release_id"] != manifest["release_id"] or \
@@ -485,6 +530,53 @@ def _app_checks(manifest: dict[str, Any], record: dict[str, Any],
             continue
         if doc["status"] != "passed":
             errors.append(f"{doc['report_id']}: app report status is {doc['status']!r}")
+        for skipped in doc["skipped_edges"]:
+            key = (skipped["model_artifact_id"], skipped["runtime_artifact_id"],
+                   skipped["target_triple"], skipped["execution_provider"])
+            if key in skipped_seen:
+                errors.append(f"{doc['report_id']}: duplicate skipped edge {key}")
+                continue
+            if key in seen:
+                errors.append(f"{doc['report_id']}: edge is both measured and skipped: {key}")
+                continue
+            if key not in supported:
+                errors.append(
+                    f"{doc['report_id']}: skipped edge is not supported by the candidate: {key}"
+                )
+                continue
+            if key in applicable:
+                errors.append(
+                    f"{doc['report_id']}: app-applicable edge was skipped: {key}"
+                )
+                continue
+            if skipped["target_triple"] != doc["target_triple"]:
+                errors.append(
+                    f"{doc['report_id']}: skipped edge target differs from the report target"
+                )
+            model = candidate_models[key[0]]
+            interface = model.get("model", {}).get("tensor_interface")
+            deprecated = model.get("deprecation", {}).get("deprecated")
+            if skipped["tensor_interface"] != interface:
+                errors.append(
+                    f"{doc['report_id']}: skipped edge {key} declares tensor_interface "
+                    f"{skipped['tensor_interface']!r} but the candidate model is {interface!r}"
+                )
+            if skipped["deprecated"] is not deprecated:
+                errors.append(
+                    f"{doc['report_id']}: skipped edge {key} declares deprecated "
+                    f"{skipped['deprecated']!r} but the candidate model is {deprecated!r}"
+                )
+            in_scope = {
+                "interface": interface not in APP_LOADABLE_TENSOR_INTERFACES,
+                "deprecated": deprecated is True,
+            }
+            if in_scope.get(skipped["scope"]) is not True:
+                errors.append(
+                    f"{doc['report_id']}: skipped edge {key} declares scope "
+                    f"{skipped['scope']!r}, which the candidate manifest does not support "
+                    f"(interface {interface!r}, deprecated {deprecated!r})"
+                )
+            skipped_seen[key] = skipped
         for edge in doc["edges"]:
             identity = edge["identity"]
             key = (identity["model_artifact_id"], identity["runtime_artifact_id"],
@@ -492,8 +584,16 @@ def _app_checks(manifest: dict[str, Any], record: dict[str, Any],
             if key in seen:
                 errors.append(f"{doc['report_id']}: duplicate edge {key}")
                 continue
+            if key in skipped_seen:
+                errors.append(f"{doc['report_id']}: edge is both skipped and measured: {key}")
+                continue
             if key not in supported:
                 errors.append(f"{doc['report_id']}: edge is not supported by the candidate: {key}")
+                continue
+            if key not in applicable:
+                errors.append(
+                    f"{doc['report_id']}: app measured a non-applicable edge: {key}"
+                )
                 continue
             if identity["target_triple"] != doc["target_triple"]:
                 errors.append(f"{doc['report_id']}: edge target differs from the report target")
@@ -532,14 +632,20 @@ def _app_checks(manifest: dict[str, Any], record: dict[str, Any],
                 errors.append(f"{doc['report_id']}: provider assignment mismatch")
             if provider["used_fallback"] is not False:
                 errors.append(f"{doc['report_id']}: app used whole-session CPU fallback")
-            if key[3] != "cpu" and provider["fallback_node_count"] != 0:
-                errors.append(
-                    f"{doc['report_id']}: app accelerator edge has "
-                    f"{provider['fallback_node_count']!r} CPU fallback node(s)"
-                )
             if type(provider["provider_node_count"]) is not int or provider["provider_node_count"] <= 0 or \
                     type(provider["total_node_count"]) is not int or provider["total_node_count"] <= 0:
                 errors.append(f"{doc['report_id']}: provider node counts must be > 0")
+            elif key[3] != "cpu":
+                cpu_nodes = provider["fallback_node_count"]
+                if type(cpu_nodes) is not int or cpu_nodes < 0:
+                    errors.append(
+                        f"{doc['report_id']}: app CPU partition node count must be >= 0"
+                    )
+                elif provider["provider_node_count"] + cpu_nodes != provider["total_node_count"]:
+                    errors.append(
+                        f"{doc['report_id']}: app accelerator partition accounting "
+                        "mismatch: provider + CPU nodes != total"
+                    )
             if edge["finite_output"] is not True:
                 errors.append(f"{doc['report_id']}: app output was not finite")
             if edge["output_shapes"] != native_shapes.get(key):
@@ -555,9 +661,25 @@ def _app_checks(manifest: dict[str, Any], record: dict[str, Any],
                 errors.extend(f"{doc['report_id']}: {problem}" for problem in edge["checks"])
             seen.add(key)
 
-    missing = set(supported) - seen
+    missing = set(applicable) - seen
     if missing:
-        errors.append(f"app reports do not cover {len(missing)} supported edge(s), e.g. {sorted(missing)[0]}")
+        errors.append(
+            f"app reports do not cover {len(missing)} app-applicable edge(s), "
+            f"e.g. {sorted(missing)[0]}"
+        )
+    non_applicable = set(supported) - set(applicable)
+    unaccounted = non_applicable - set(skipped_seen)
+    if unaccounted:
+        errors.append(
+            f"app reports do not explicitly skip {len(unaccounted)} non-applicable edge(s), "
+            f"e.g. {sorted(unaccounted)[0]}"
+        )
+    extra_skipped = set(skipped_seen) - non_applicable
+    if extra_skipped:
+        errors.append(
+            f"app reports skip {len(extra_skipped)} edge(s) that are not non-applicable, "
+            f"e.g. {sorted(extra_skipped)[0]}"
+        )
     return errors
 
 

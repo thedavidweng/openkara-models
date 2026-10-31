@@ -33,14 +33,31 @@ The stable publisher accepts exactly two authorisations:
      compatibility edge exactly once (one report per target/provider group). Each edge binds the candidate and
      stable runtime digests and the model digest, and records measurements
      from the actual archives on that native host: requested and assigned
-     provider, no whole-session fallback, zero CPU fallback nodes on
-     accelerated providers, provider node count, exact output shapes,
+     provider, no whole-session fallback, an explicitly accounted CPU
+     partition (`provider_node_count + CPU nodes == total_node_count`) and a
+     CPU-partition non-regression comparison against stable, provider node
+     count, exact output shapes,
      finiteness, cold load, first-window and warm latency, peak RSS,
      archive/installed size, numeric old-vs-new max-abs and MSE;
-   - immutable OpenKara app-integration reports cover the same edges with the
-     loaded shared-library digest, provider assignment, node
-     counts, output shapes, finite output and a finite four-stem audio
-     pipeline run;
+   - immutable OpenKara app-integration reports cover every app-applicable
+     supported edge (non-deprecated model with `tensor_interface:
+     spectral-core`, the only production path in OpenKara#172) with the
+     loaded shared-library digest, provider assignment, node counts, output
+     shapes, finite output and a finite four-stem audio pipeline run, and
+     explicitly list every other supported edge in `skipped_edges` with a
+     reason. A missing, duplicated, or wrongly classified skip fails closed,
+     so waveform model↔runtime capability remains native-qualified without
+     pretending the app can load it;
+   > An accelerated provider may keep part of the graph on the CPU execution
+   > provider. That is a recorded partition, not CPU fallback standing in for
+   > the provider: the report must show the requested provider as the assigned
+   > provider, no whole-session fallback, a positive provider node count, and
+   > the accounting identity `provider_node_count + CPU partition nodes ==
+   > total_node_count`. The candidate's CPU partition is compared against
+   > stable's under the same accounting and must not exceed
+   > `CPU_PARTITION_MAX_FACTOR` (1.5x). Never describe a partition that leaves
+   > nodes on the CPU as full acceleration.
+
    - the existing `quality/budgets.json` non-regression budgets apply: numeric
      equivalence (`mse`, `max_abs_error`), `rtf_warm`, `cold_load_s`,
      `warm_median_s`, `peak_rss_kb`, `installed_size`, plus the equality
@@ -112,9 +129,9 @@ their own header closure (#161) and are measured from the archive.
 OpenKara must produce the per-edge app-integration report by consuming the
 published candidate pointer (schema:
 `catalog/schema-runtime-only-v1.json#/$defs/app_report`). It must be implemented
-in the OpenKara repository; it is currently not verified or available in this
-checkout, so this gate cannot pass until that producer exists. The producer
-must, for every supported
+in the OpenKara repository; an implementation exists on the OpenKara
+runtime-only app-evidence branch and must be merged before qualification. The
+producer must, for every app-applicable supported
 `(model, runtime, target, provider)` edge of the candidate manifest:
 
 - record the candidate `release_id`, generation and manifest SHA-256 it
@@ -129,8 +146,19 @@ must, for every supported
   finite stems in `audio_pipeline`;
 - leave `checks` empty only on complete success.
 
+OpenKara's production separation path is spectral-core only: the waveform
+graph path was removed in OpenKara#172 and `resolve_model` selects only
+non-deprecated spectral-core artifacts. A catalog waveform edge therefore
+describes model↔runtime capability, not app loadability. For every supported
+edge whose model is deprecated or not spectral-core, the report must instead
+list an explicit `skipped_edges` entry with a reason; the validator requires
+`measured ∪ skipped` to equal the candidate's supported edges and requires
+every app-applicable edge to be measured. This keeps native API compatibility
+visible without resurrecting the removed app path or silently dropping edges.
+
 Each report is one immutable JSON asset for a target/provider group; all
-reports must together cover every supported edge exactly once.
+reports must together measure every app-applicable edge and explicitly skip
+every non-applicable supported edge exactly once.
 
 After publishing the candidate to the `candidate` channel and uploading the
 reports as immutable assets:

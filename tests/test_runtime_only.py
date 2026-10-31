@@ -243,7 +243,7 @@ def _fixture(tmp_path: Path) -> tuple[dict, bytes, dict, dict[str, bytes]]:
     payloads: dict[str, bytes] = {}
     native_refs, app_refs = [], []
     for (target, provider), edges in sorted(groups.items()):
-        native_edges, app_edges = [], []
+        native_edges, app_edges, skipped_edges = [], [], []
         for edge in edges:
             model_id = edge["model_artifact_id"]
             candidate_runtime = candidate_runtimes[edge["runtime_artifact_id"]]
@@ -288,7 +288,7 @@ def _fixture(tmp_path: Path) -> tuple[dict, bytes, dict, dict[str, bytes]]:
                 name for name in candidate_runtime["extracted_file_digests"]
                 if name.rsplit("/", 1)[-1].lower() in validator.LIBRARY_NAMES
             )
-            app_edges.append({
+            app_edge = {
                 "identity": {
                     "model_artifact_id": model_id,
                     "runtime_artifact_id": candidate_runtime["artifact_id"],
@@ -320,7 +320,26 @@ def _fixture(tmp_path: Path) -> tuple[dict, bytes, dict, dict[str, bytes]]:
                     "finite": True,
                 },
                 "checks": [],
-            })
+            }
+            if not model.get("deprecation", {}).get("deprecated") and \
+                    model["model"]["tensor_interface"] in validator.APP_LOADABLE_TENSOR_INTERFACES:
+                app_edges.append(app_edge)
+            else:
+                interface = model["model"]["tensor_interface"]
+                deprecated = bool(model.get("deprecation", {}).get("deprecated"))
+                skipped_edges.append({
+                    "model_artifact_id": model_id,
+                    "runtime_artifact_id": candidate_runtime["artifact_id"],
+                    "target_triple": target,
+                    "execution_provider": provider,
+                    "tensor_interface": interface,
+                    "deprecated": deprecated,
+                    "scope": (
+                        "deprecated"
+                        if interface in validator.APP_LOADABLE_TENSOR_INTERFACES and deprecated
+                        else "interface"
+                    ),
+                })
 
         slug = f"{target}-{provider}"
         native_report = {
@@ -349,6 +368,7 @@ def _fixture(tmp_path: Path) -> tuple[dict, bytes, dict, dict[str, bytes]]:
             "target_triple": target,
             "status": "passed",
             "edges": app_edges,
+            "skipped_edges": skipped_edges,
         }
         for kind, report, refs in (
             ("native", native_report, native_refs),
@@ -419,6 +439,75 @@ def test_app_fallback_cannot_qualify(tmp_path) -> None:
 
     errors = _qualify(tmp_path, mutate)
     assert any("fallback" in error for error in errors)
+
+
+def test_app_report_must_explicitly_skip_non_applicable_edges(tmp_path) -> None:
+    def mutate(_candidate, record, payloads):
+        url = next(url for url in payloads if "/app-" in url)
+        doc = json.loads(payloads[url])
+        assert doc["skipped_edges"], "fixture must contain non-applicable waveform edges"
+        doc["skipped_edges"].pop()
+        _replace_payload(record, payloads, url, doc)
+
+    errors = _qualify(tmp_path, mutate)
+    assert any("do not explicitly skip" in error for error in errors)
+
+
+def test_app_report_cannot_skip_app_applicable_edge(tmp_path) -> None:
+    def mutate(_candidate, record, payloads):
+        url = next(
+            url for url in payloads
+            if "/app-" in url and len(json.loads(payloads[url])["edges"]) > 1
+        )
+        doc = json.loads(payloads[url])
+        edge = doc["edges"].pop()
+        identity = edge["identity"]
+        doc["skipped_edges"].append({
+            "model_artifact_id": identity["model_artifact_id"],
+            "runtime_artifact_id": identity["runtime_artifact_id"],
+            "target_triple": identity["target_triple"],
+            "execution_provider": identity["execution_provider"],
+            "tensor_interface": "spectral-core",
+            "deprecated": False,
+            "scope": "interface",
+        })
+        _replace_payload(record, payloads, url, doc)
+
+    errors = _qualify(tmp_path, mutate)
+    assert any("app-applicable edge was skipped" in error for error in errors)
+
+
+def test_app_report_cannot_measure_non_applicable_edge(tmp_path) -> None:
+    def mutate(_candidate, record, payloads):
+        url = next(
+            url for url in payloads
+            if "/app-" in url and json.loads(payloads[url])["skipped_edges"]
+        )
+        doc = json.loads(payloads[url])
+        skipped = doc["skipped_edges"].pop()
+        edge = copy.deepcopy(doc["edges"][0])
+        edge["identity"].update({
+            "model_artifact_id": skipped["model_artifact_id"],
+            "runtime_artifact_id": skipped["runtime_artifact_id"],
+            "target_triple": skipped["target_triple"],
+            "execution_provider": skipped["execution_provider"],
+        })
+        doc["edges"].append(edge)
+        _replace_payload(record, payloads, url, doc)
+
+    errors = _qualify(tmp_path, mutate)
+    assert any("app measured a non-applicable edge" in error for error in errors)
+
+
+def test_app_report_requires_skipped_edges_field(tmp_path) -> None:
+    def mutate(_candidate, record, payloads):
+        url = next(url for url in payloads if "/app-" in url)
+        doc = json.loads(payloads[url])
+        doc.pop("skipped_edges")
+        _replace_payload(record, payloads, url, doc)
+
+    errors = _qualify(tmp_path, mutate)
+    assert any("skipped_edges" in error for error in errors)
 
 
 def test_manifest_binding_mismatch_fails(tmp_path) -> None:
@@ -555,7 +644,27 @@ def test_stable_pointer_transition_requires_evidence(tmp_path) -> None:
     ), "pointer lineage must match the promoted-from stable release"
 
 
-def test_accelerator_fallback_nodes_cannot_qualify(tmp_path) -> None:
+def test_accelerator_explicit_cpu_partition_is_allowed(tmp_path) -> None:
+    def mutate(_candidate, record, payloads):
+        changed = False
+        for url in [item for item in payloads if "/native-" in item]:
+            doc = json.loads(payloads[url])
+            for edge in doc["edges"]:
+                if edge["identity"]["execution_provider"] == "cpu":
+                    continue
+                for label in ("baseline", "candidate"):
+                    edge[label]["provider_node_count"] = 7
+                    edge[label]["fallback_node_count"] = 3
+                    edge[label]["total_node_count"] = 10
+                changed = True
+            if changed:
+                _replace_payload(record, payloads, url, doc)
+        assert changed, "fixture has no accelerated native edge"
+
+    assert _qualify(tmp_path, mutate) == [], "an explicit, accounted CPU partition must qualify"
+
+
+def test_accelerator_partition_accounting_mismatch_fails(tmp_path) -> None:
     def mutate(_candidate, record, payloads):
         for url in [item for item in payloads if "/native-" in item]:
             doc = json.loads(payloads[url])
@@ -565,16 +674,18 @@ def test_accelerator_fallback_nodes_cannot_qualify(tmp_path) -> None:
                 None,
             )
             if edge is not None:
-                edge["candidate"]["fallback_node_count"] = 3
+                edge["candidate"]["provider_node_count"] = 7
+                edge["candidate"]["fallback_node_count"] = 5
+                edge["candidate"]["total_node_count"] = 10
                 _replace_payload(record, payloads, url, doc)
                 return
         raise AssertionError("fixture has no accelerated native edge")
 
     errors = _qualify(tmp_path, mutate)
-    assert any("CPU fallback node" in error for error in errors), errors
+    assert any("partition accounting mismatch" in error for error in errors), errors
 
 
-def test_app_fallback_nodes_cannot_qualify(tmp_path) -> None:
+def test_app_accelerator_partition_accounting_mismatch_fails(tmp_path) -> None:
     def mutate(_candidate, record, payloads):
         for url in [item for item in payloads if "/app-" in item]:
             doc = json.loads(payloads[url])
@@ -584,13 +695,15 @@ def test_app_fallback_nodes_cannot_qualify(tmp_path) -> None:
                 None,
             )
             if edge is not None:
-                edge["provider"]["fallback_node_count"] = 2
+                edge["provider"]["provider_node_count"] = 7
+                edge["provider"]["fallback_node_count"] = 5
+                edge["provider"]["total_node_count"] = 10
                 _replace_payload(record, payloads, url, doc)
                 return
         raise AssertionError("fixture has no accelerated app edge")
 
     errors = _qualify(tmp_path, mutate)
-    assert any("CPU fallback node" in error for error in errors), errors
+    assert any("partition accounting" in error for error in errors), errors
 
 
 def test_candidate_cannot_drop_a_stable_supported_edge(tmp_path) -> None:

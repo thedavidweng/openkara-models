@@ -599,6 +599,60 @@
         }
       }
     },
+    "skipped_edge": {
+      "type": "object",
+      "description": "A supported edge the current OpenKara production path cannot load. It remains native-compatible, but app reports must declare it explicitly instead of silently omitting it. The gate recomputes non-loadability from the candidate manifest; tensor_interface and deprecated are the producer's reviewable declaration, not a trusted justification.",
+      "additionalProperties": false,
+      "required": [
+        "model_artifact_id",
+        "runtime_artifact_id",
+        "target_triple",
+        "execution_provider",
+        "tensor_interface",
+        "deprecated",
+        "scope"
+      ],
+      "properties": {
+        "model_artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_triple": {
+          "type": "string",
+          "minLength": 1
+        },
+        "execution_provider": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "coreml",
+            "xnnpack",
+            "directml"
+          ]
+        },
+        "tensor_interface": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Catalog model.tensor_interface of the skipped edge's model."
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Catalog deprecation.deprecated of the skipped edge's model."
+        },
+        "scope": {
+          "type": "string",
+          "description": "Edge families the producer declares non-app-applicable, recomputed by the gate from the candidate manifest. 'interface' = the model's tensor interface is not app-loadable; 'deprecated' = the model is deprecated and OpenKara resolves only non-deprecated models. A skipped edge must match one of the declared scopes.",
+          "enum": [
+            "interface",
+            "deprecated"
+          ]
+        }
+      }
+    },
     "app_edge": {
       "type": "object",
       "additionalProperties": false,
@@ -732,7 +786,8 @@
         "openkara",
         "target_triple",
         "status",
-        "edges"
+        "edges",
+        "skipped_edges"
       ],
       "properties": {
         "schema_version": {
@@ -788,12 +843,36 @@
         },
         "edges": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
+          "description": "Measured app-applicable edges. Empty is allowed only when every supported edge in this group is declared in skipped_edges (see the anyOf below).",
           "items": {
             "$ref": "#/$defs/app_edge"
           }
+        },
+        "skipped_edges": {
+          "type": "array",
+          "description": "Supported edges the app cannot load because the model is deprecated or its tensor interface is not app-loadable. Must equal the non-applicable supported edges for this report's target/provider/runtime group.",
+          "items": {
+            "$ref": "#/$defs/skipped_edge"
+          }
         }
-      }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "edges": {
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "skipped_edges": {
+              "minItems": 1
+            }
+          }
+        }
+      ]
     },
     "qualification": {
       "type": "object",
