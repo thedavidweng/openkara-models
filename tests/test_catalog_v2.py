@@ -9,6 +9,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import publish_catalog_release as publisher
 from publish_catalog_release import _verify_plugin_asset
 from generate_catalog_v2 import extracted_digests
 from validate_catalog import validate_document
@@ -56,5 +57,35 @@ def test_catalog_generation_rejects_escaping_archive_link(tmp_path):
         entry.linkname = "../../outside"
         archive.addfile(entry)
     import pytest
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="traversal target"):
         extracted_digests(archive_path)
+
+
+def test_v2_pointer_advances_without_modifying_legacy_pointer(tmp_path, monkeypatch):
+    channels = tmp_path / "channels"
+    channels.mkdir()
+    original = (ROOT / "catalog/channels/stable.json").read_bytes()
+    (channels / "stable.json").write_bytes(original)
+    manifest = {
+        "release_id": "2026-11-02-001",
+        "generation": 14,
+        "created_at": "2026-11-02T00:00:00Z",
+        "producer": {"repo": "thedavidweng/openkara-models"},
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(publisher, "CHANNELS_DIR", channels)
+    assert publisher._advance_channel_pointer(manifest, manifest_path, "stable-v2") == []
+    assert (channels / "stable.json").read_bytes() == original
+    pointer = json.loads((channels / "stable-v2.json").read_text())
+    assert pointer["schema_version"] == "openkara.catalog/channel-v2"
+    assert pointer["previous_release_id"] == "2026-08-12-001"
+
+
+def test_v2_release_is_rejected_on_legacy_candidate_channel(tmp_path, monkeypatch, capsys):
+    release_id = "2026-11-02-001"
+    (tmp_path / f"{release_id}.json").write_text('{"schema_version":"openkara.catalog/release-v2"}')
+    monkeypatch.setattr(publisher, "RELEASES_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["publish_catalog_release.py", "--release", release_id, "--channel", "candidate"])
+    assert publisher.main() == 1
+    assert "v2 releases require stable-v2" in capsys.readouterr().err

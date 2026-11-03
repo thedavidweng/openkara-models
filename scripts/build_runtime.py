@@ -431,7 +431,7 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
 
     # Compute digests for all staged files.
     for f in sorted(staging.rglob("*")):
-        if f.is_file():
+        if f.is_file() and not f.is_symlink():
             rel = f.relative_to(staging).as_posix()
             size, sha = _sha256_file(f)
             manifest["files"][rel] = {"size": size, "sha256": sha}

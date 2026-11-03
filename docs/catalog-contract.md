@@ -198,7 +198,15 @@ manifest; channel pointers and release manifests are the only contract surfaces.
 publishes a catalog release as an immutable GitHub release and advances the
 candidate pointer atomically:
 
-The v1 `catalog/channels/stable.json` pointer is frozen at `2026-08-12-001` for old clients. The publisher refuses to advance it. A new client channel will be introduced separately.
+The v1 `catalog/channels/stable.json` pointer is frozen at `2026-08-12-001` for old clients. The publisher refuses to advance it.
+
+For v2, the `Publish v2 catalog` workflow runs the native runtime smoke tests
+and the Linux differential and performance checks before publishing. It
+verifies the official package bytes, uploads the Intel runtime and manifest to
+the `infra-<release-id>` release, and emits the verified manifest and
+`stable-v2.json` as a workflow artifact. Commit those generated files to the
+default branch only after the release is public. Publication does not edit the
+frozen v1 pointer.
 
 1. **Dry-run (default):** verifies the manifest validates, supply-chain records
    match local files, every referenced artifact asset URL resolves to an

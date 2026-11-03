@@ -346,8 +346,9 @@ def main() -> int:
         print("ERROR: the v1 stable pointer is frozen for older clients", file=sys.stderr)
         return 1
 
-    if args.channel == "stable-v2" and manifest.get("schema_version") != "openkara.catalog/release-v2":
-        print("ERROR: stable-v2 requires a v2 release manifest", file=sys.stderr)
+    is_v2 = manifest.get("schema_version") == "openkara.catalog/release-v2"
+    if (args.channel == "stable-v2") != is_v2:
+        print("ERROR: v2 releases require stable-v2; stable-v2 requires a v2 release", file=sys.stderr)
         return 1
 
     # Step 1: pre-publication verification (manifest, supply-chain, assets, monotonicity).
