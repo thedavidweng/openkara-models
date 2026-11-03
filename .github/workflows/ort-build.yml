@@ -63,7 +63,8 @@ jobs:
           mkdir runtime-check
           tar -xzf "$archive" -C runtime-check
           library=$(find runtime-check -name 'libonnxruntime.*.dylib' -type f -print -quit)
-          xcrun vtool -show-build "$library" | tee runtime-build-version.txt
+          xcrun vtool -show-build "$library" > runtime-build-version.txt
+          cat runtime-build-version.txt
           grep -Eq 'minos 10\.15([. ]|$)' runtime-build-version.txt
       - name: Download stable model
         run: python scripts/download_stable_model.py --catalog catalog/releases/2026-07-25-005.json --artifact htdemucs.spectral.fp32.onnx --dest models/htdemucs.spectral.onnx
