@@ -22,8 +22,10 @@ jobs:
     uses: ./.github/workflows/official-runtime-smoke.yml
   differential:
     uses: ./.github/workflows/quality-gates.yml
+  contract:
+    uses: ./.github/workflows/runtime-contract.yml
   publish:
-    needs: [intel, official, differential]
+    needs: [intel, official, differential, contract]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
