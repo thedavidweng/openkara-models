@@ -200,18 +200,14 @@ def _numpy_floor() -> tuple[int, ...]:
     raise AssertionError("requirements.txt has no numpy lower bound")
 
 
-def test_candidate_builds_only_intel_and_directml_is_manual():
+def test_candidate_builds_only_intel():
     candidate = (ROOT / ".github/workflows/dep-candidate.yml").read_text()
     native = (ROOT / ".github/workflows/ort-build.yml").read_text()
-    directml = (ROOT / ".github/workflows/ort-directml.yml").read_text()
     assert "uses: ./.github/workflows/ort-build.yml" in candidate
     assert "--target x86_64-apple-darwin" in native
     assert "runs-on: macos-latest" in native
     assert "CMAKE_OSX_ARCHITECTURES=x86_64" in native
     assert "--reduced" not in native
-    assert "workflow_dispatch:" in directml
-    assert "pull_request:" not in directml
-    assert "--target x86_64-pc-windows-msvc" in directml
 
 
 def test_requirements_numpy_floor_keeps_python_311_resolvable():

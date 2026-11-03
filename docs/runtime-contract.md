@@ -101,7 +101,7 @@ Optional: pass `providers=['CoreMLExecutionProvider', 'CPUExecutionProvider']` i
 The v2 catalog references Microsoft's official ORT 1.31.1 packages for Linux,
 Apple Silicon and Windows. Intel macOS uses a full-operator CPU and CoreML
 build cross-compiled from the pinned source on Apple Silicon and tested under
-Rosetta. DirectML is built only by the manual comparison workflow. Windows and
+Rosetta. Windows and
 Apple Silicon can also use the official WebGPU 0.5.0 plugin wheel; Intel macOS
 does not provide this plugin.
 
@@ -123,5 +123,4 @@ the catalog runtime's API level (31 for ORT 1.31.1).
 - `scripts/run_runtime_benchmarks.py` — native compat+perf matrix (issue #19 PR 4)
 - `scripts/generate_runtime_catalog_entries.py` — catalog spec fragment (issue #19 PR 5)
 - `.github/workflows/ort-build.yml` — cached Intel macOS build and Rosetta smoke
-- `.github/workflows/ort-directml.yml` — manual DirectML comparison build
 - `.github/workflows/official-runtime-smoke.yml` — official package smoke tests

@@ -295,7 +295,7 @@ def main() -> int:
                              "If omitted, all compatible models are benchmarked.")
     parser.add_argument("--target", type=str, default=None,
                         help="Target triple for catalog compatibility filtering.")
-    parser.add_argument("--provider", choices=["cpu", "coreml", "xnnpack", "directml"], default="cpu")
+    parser.add_argument("--provider", choices=["cpu", "coreml", "xnnpack"], default="cpu")
     parser.add_argument("--ort-source", type=Path, help="Optional source header cross-check; uses packaged headers.")
     parser.add_argument("--frames", type=int, default=343980,
                         help="Input frame count (default 343980 = full window).")

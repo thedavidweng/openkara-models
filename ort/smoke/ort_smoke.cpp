@@ -35,7 +35,7 @@
 //
 // Usage:
 //   ort_smoke --lib <path-to-libonnxruntime> --model <path-to.onnx> \
-//             --provider <cpu|coreml|xnnpack|directml> [--target <triple>] \
+//             --provider <cpu|coreml|xnnpack> [--target <triple>] \
 //             [--expect-output-shape "<shape-string>"]
 //
 // Build:
@@ -432,57 +432,24 @@ int main(int argc, char** argv) {
         }
         // CPU EP is the default and does not need to be appended explicitly.
         if (prov != "cpu" && prov != "CPUExecutionProvider") {
-            if (prov == "directml" || prov == "DmlExecutionProvider") {
-                // DirectML requires sequential execution and disabled memory
-                // patterns. The source-built Windows runtime exports the DML
-                // provider factory beside OrtGetApiBase.
-                st = api->DisableMemPattern(o);
-                if (!st) st = api->SetSessionExecutionMode(o, ORT_SEQUENTIAL);
-                if (st) {
-                    last_session_error = std::string("configure DirectML session: ") +
-                                         api->GetErrorMessage(st);
-                    api->ReleaseStatus(st);
-                    api->ReleaseSessionOptions(o);
-                    return nullptr;
-                }
-
-                using AppendDmlFn = OrtStatus*(ORT_API_CALL*)(OrtSessionOptions*, int);
-                std::string dml_symbol_error;
-                auto append_dml = lib.sym<AppendDmlFn>(
-                    "OrtSessionOptionsAppendExecutionProvider_DML", dml_symbol_error);
-                if (!append_dml) {
-                    last_session_error = dml_symbol_error;
-                    api->ReleaseSessionOptions(o);
-                    return nullptr;
-                }
-                st = append_dml(o, 0);
-                if (st) {
-                    last_session_error = std::string("AppendExecutionProvider(DML): ") +
-                                         api->GetErrorMessage(st);
-                    api->ReleaseStatus(st);
-                    api->ReleaseSessionOptions(o);
-                    return nullptr;
-                }
+            std::string ep_name;
+            if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
+                ep_name = "CoreMLExecutionProvider";
+            } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
+                ep_name = "XnnpackExecutionProvider";
             } else {
-                std::string ep_name;
-                if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
-                    ep_name = "CoreMLExecutionProvider";
-                } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
-                    ep_name = "XnnpackExecutionProvider";
-                } else {
-                    last_session_error = "unknown provider: " + prov;
-                    api->ReleaseSessionOptions(o);
-                    return nullptr;
-                }
-                st = api->SessionOptionsAppendExecutionProvider(
-                    o, ep_name.c_str(), nullptr, nullptr, 0);
-                if (st) {
-                    last_session_error = std::string("AppendExecutionProvider(") +
-                                         ep_name + "): " + api->GetErrorMessage(st);
-                    api->ReleaseStatus(st);
-                    api->ReleaseSessionOptions(o);
-                    return nullptr;
-                }
+                last_session_error = "unknown provider: " + prov;
+                api->ReleaseSessionOptions(o);
+                return nullptr;
+            }
+            st = api->SessionOptionsAppendExecutionProvider(
+                o, ep_name.c_str(), nullptr, nullptr, 0);
+            if (st) {
+                last_session_error = std::string("AppendExecutionProvider(") +
+                                     ep_name + "): " + api->GetErrorMessage(st);
+                api->ReleaseStatus(st);
+                api->ReleaseSessionOptions(o);
+                return nullptr;
             }
         }
         // Enable profiling so we can measure the fallback node count after
@@ -832,8 +799,6 @@ int main(int argc, char** argv) {
         requested_profile_provider = "CoreMLExecutionProvider";
     } else if (provider == "xnnpack") {
         requested_profile_provider = "XnnpackExecutionProvider";
-    } else if (provider == "directml") {
-        requested_profile_provider = "DmlExecutionProvider";
     }
 
     int provider_node_count = -1;

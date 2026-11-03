@@ -33,9 +33,6 @@ Usage::
 The runtime archive is extracted with archive_utils.safe_extract. The harness
 binary is built into ``ort/smoke/build/`` via CMake.
 
-For DirectML diagnostics, pass ``--allow-skip-no-gpu`` to record the observed
-C0262002 invalid-adapter failure as a skip (not proof of hardware absence). The report
-will contain ``session_creation: "skipped"`` and the script exits 0. This is not release qualification; all other errors fail.
 """
 
 from __future__ import annotations
@@ -167,12 +164,6 @@ def run_smoke(
     return data
 
 
-def hardware_unavailable(provider: str, error: str) -> bool:
-    """Recognize the observed invalid display-adapter diagnostic, not all DML errors."""
-    return (provider == "directml" and "c0262002" in error.lower()
-            and "specified display adapter handle is invalid" in error.lower())
-
-
 def validation_failures(report: dict[str, Any], requested_provider: str,
                         expected_output_shape: str = SPECTRAL_OUTPUT_SHAPE) -> list[str]:
     """Return strict native-smoke gate failures.
@@ -231,7 +222,7 @@ def main() -> int:
     parser.add_argument("--target", required=True,
                         help="Target triple (e.g. aarch64-apple-darwin).")
     parser.add_argument("--provider", required=True,
-                        choices=["cpu", "coreml", "xnnpack", "directml"],
+                        choices=["cpu", "coreml", "xnnpack"],
                         help="Requested execution provider.")
     parser.add_argument("--ort-source", type=Path, default=ROOT / "ort" / "source",
                         help="ORT source checkout (for the C API header).")
@@ -241,11 +232,6 @@ def main() -> int:
                         help="Pre-built harness binary (skip CMake build).")
     parser.add_argument("--report", required=True, type=Path,
                         help="Output JSON report path.")
-    parser.add_argument("--allow-skip-no-gpu", action="store_true",
-                        help="For DirectML diagnostics, "
-                             "record the observed C0262002 invalid-adapter failure "
-                             "as skipped and exit 0, without proving hardware absence. "
-                             "Never qualifies a release.")
     args = parser.parse_args()
 
     if not args.runtime.is_file():
@@ -317,16 +303,6 @@ def main() -> int:
         "used_fallback": result.get("used_fallback"),
         "harness_exit_code": result.get("harness_exit_code"),
     }
-
-    # Only the observed DirectML invalid-adapter error may become a diagnostic skip.
-    if (args.allow_skip_no_gpu
-            and report.get("session_creation") == "failed"
-            and report.get("session_creation_error")):
-        err = report["session_creation_error"]
-        if hardware_unavailable(args.provider, err):
-            report["session_creation"] = "skipped"
-            report["inference"] = "skipped"
-            report["skip_reason"] = "DirectML display adapter handle invalid (C0262002); hardware absence not proven"
 
     failures = validation_failures(report, args.provider, expect_output_shape)
     report["release_qualified"] = not failures
