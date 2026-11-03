@@ -15,7 +15,6 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 LOCK_PATH = ROOT_DIR / "ort" / "source-lock.json"
 
 REQUIRED_TARGETS = {
-    "aarch64-apple-darwin",
     "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
@@ -36,7 +35,7 @@ class SourceLockStructureTests(unittest.TestCase):
         lock = _load_lock()
         self.assertEqual(lock["lock_version"], "openkara.ort-source-lock/v1")
 
-    def test_all_five_targets_present(self):
+    def test_all_targets_present(self):
         lock = _load_lock()
         self.assertEqual(set(lock["targets"].keys()), REQUIRED_TARGETS)
 
@@ -91,11 +90,6 @@ class TargetConfigTests(unittest.TestCase):
             elif "windows" in target:
                 self.assertTrue(art.endswith(".dll"), f"{target}: {art}")
 
-    def test_apple_silicon_has_coreml(self):
-        lock = _load_lock()
-        eps = lock["targets"]["aarch64-apple-darwin"]["execution_providers"]
-        self.assertIn("coreml", eps)
-
     def test_windows_cpu_target_has_no_directml(self):
         """The CPU-only Windows target (issue OpenKara/OpenKara#284) must not
         compile DirectML in nor ship DirectML.dll — that import is what
@@ -118,10 +112,10 @@ class TargetConfigTests(unittest.TestCase):
     def test_intel_macos_cross_compile_and_providers(self):
         lock = _load_lock()
         target = lock["targets"]["x86_64-apple-darwin"]
-        self.assertEqual(target["execution_providers"], ["cpu", "coreml"])
+        self.assertEqual(target["execution_providers"], ["cpu"])
         self.assertIn("-DCMAKE_OSX_ARCHITECTURES=x86_64", target["cmake_args"])
-        self.assertIn("-Donnxruntime_USE_COREML=ON", target["cmake_args"])
-        self.assertEqual(target["deployment_target"], "14.0")
+        self.assertNotIn("-Donnxruntime_USE_COREML=ON", target["cmake_args"])
+        self.assertEqual(target["deployment_target"], "10.15")
 
     def test_training_disabled_for_all_targets(self):
         lock = _load_lock()
@@ -137,7 +131,7 @@ class TargetConfigTests(unittest.TestCase):
 
     def test_macos_deployment_target_set(self):
         lock = _load_lock()
-        for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+        for target in ("x86_64-apple-darwin",):
             dt = lock["targets"][target]["deployment_target"]
             self.assertTrue(dt, f"{target} must set deployment_target")
 

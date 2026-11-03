@@ -89,3 +89,22 @@ def test_v2_release_is_rejected_on_legacy_candidate_channel(tmp_path, monkeypatc
     monkeypatch.setattr(sys, "argv", ["publish_catalog_release.py", "--release", release_id, "--channel", "candidate"])
     assert publisher.main() == 1
     assert "v2 releases require stable-v2" in capsys.readouterr().err
+
+
+def test_generated_catalog_advances_v2_and_marks_intel_cpu_only(tmp_path, monkeypatch):
+    import generate_catalog_v2 as generator
+
+    archive_path = tmp_path / "intel.tar.gz"
+    data = b"runtime"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        entry = tarfile.TarInfo("lib/libonnxruntime.dylib")
+        entry.size = len(data)
+        archive.addfile(entry, io.BytesIO(data))
+    monkeypatch.setattr(generator, "PACKAGES", {})
+    monkeypatch.setattr(generator, "PLUGINS", {})
+    result = generator.generate(tmp_path, archive_path, "2026-11-03-002", "2026-11-03T00:00:00Z", "a" * 40)
+    pointer = json.loads((ROOT / "catalog/channels/stable-v2.json").read_text())
+    assert result["generation"] == pointer["generation"] + 1
+    runtime = result["artifacts"]["runtimes"][0]
+    assert runtime["runtime"]["execution_providers"] == ["cpu"]
+    assert runtime["runtime"]["deployment_target"] == "10.15"

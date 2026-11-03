@@ -26,31 +26,16 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import build_runtime as br  # noqa: E402
 
 
-class IntelAvailabilityTests(unittest.TestCase):
-    def test_only_verified_coreml_lines_are_allowed(self):
-        def command(line):
-            warning = (
-                f"/src/core/providers/coreml/model/model.mm:{line}:3: warning: "
-                "new API [-Wunguarded-availability-new]"
-            )
-            return [sys.executable, "-c", f"print({warning!r})"]
-
-        with redirect_stdout(io.StringIO()):
-            br._run_intel_build(command(411), os.environ.copy())
-            with self.assertRaisesRegex(RuntimeError, "unexpected CoreML"):
-                br._run_intel_build(command(500), os.environ.copy())
-
-
 class LockedFlagTests(unittest.TestCase):
     def test_locked_flag_is_parsed(self):
         """The --locked flag must be accepted by the argument parser."""
         with mock.patch.object(sys, "argv", [
-            "build_runtime.py", "--target", "aarch64-apple-darwin", "--locked",
+            "build_runtime.py", "--target", "x86_64-apple-darwin", "--locked",
         ]):
             with mock.patch.object(br, "_load_lock", return_value={
                 "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
                 "submodules": {},
-                "targets": {"aarch64-apple-darwin": {}},
+                "targets": {"x86_64-apple-darwin": {}},
             }):
                 with mock.patch.object(br, "_clone_source"):
                     with mock.patch.object(br, "_verify_upstream_commit", return_value=True):
@@ -66,13 +51,13 @@ class LockedFlagTests(unittest.TestCase):
         """--locked must call _verify_upstream_commit and fail if it returns False."""
         fake_source = Path("/fake/source")
         with mock.patch.object(sys, "argv", [
-            "build_runtime.py", "--target", "aarch64-apple-darwin",
+            "build_runtime.py", "--target", "x86_64-apple-darwin",
             "--locked", "--skip-clone", "--source-dir", str(fake_source),
         ]):
             with mock.patch.object(br, "_load_lock", return_value={
                 "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
                 "submodules": {},
-                "targets": {"aarch64-apple-darwin": {}},
+                "targets": {"x86_64-apple-darwin": {}},
             }):
                 with mock.patch.object(Path, "exists", return_value=True):
                     with mock.patch.object(br, "_verify_upstream_commit", return_value=False) as mock_verify:
@@ -89,13 +74,13 @@ class LockedFlagTests(unittest.TestCase):
         """Without --locked, verification is skipped."""
         fake_source = Path("/fake/source")
         with mock.patch.object(sys, "argv", [
-            "build_runtime.py", "--target", "aarch64-apple-darwin",
+            "build_runtime.py", "--target", "x86_64-apple-darwin",
             "--skip-clone", "--source-dir", str(fake_source),
         ]):
             with mock.patch.object(br, "_load_lock", return_value={
                 "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
                 "submodules": {},
-                "targets": {"aarch64-apple-darwin": {}},
+                "targets": {"x86_64-apple-darwin": {}},
             }):
                 with mock.patch.object(Path, "exists", return_value=True):
                     with mock.patch.object(br, "_verify_upstream_commit", return_value=True) as mock_verify:
@@ -140,7 +125,7 @@ class ReproducibilityTests(unittest.TestCase):
         lock = {
             "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
             "submodules": {},
-            "targets": {"aarch64-apple-darwin": {"cmake_args": []}},
+            "targets": {"x86_64-apple-darwin": {"cmake_args": []}},
             "toolchain": {"python_version": "3.11", "cmake_minimum_version": "3.28",
                           "xcode_version": "16.0", "gcc_version": "13",
                           "visual_studio_version": "2022"},
@@ -159,7 +144,7 @@ class ReproducibilityTests(unittest.TestCase):
                                     source_dir = Path(td) / "source"
                                     source_dir.mkdir()
                                     build_dir = Path(td) / "build"
-                                    meta = br._build_target(lock, "aarch64-apple-darwin",
+                                    meta = br._build_target(lock, "x86_64-apple-darwin",
                                                             source_dir, build_dir)
         self.assertNotIn("build_host", meta,
                          "build_host must not be in build metadata (reproducibility)")

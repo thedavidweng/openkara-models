@@ -31,7 +31,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     env:
-      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      MACOSX_DEPLOYMENT_TARGET: '10.15'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,11 +57,20 @@ jobs:
       - name: Obtain source headers on cache hit
         if: steps.runtime-cache.outputs.cache-hit == 'true'
         run: python -c 'import sys; sys.path.insert(0, "scripts"); import build_runtime as b; b._clone_source(b._load_lock(), b.SOURCE_DIR)'
+      - name: Check Intel runtime deployment target
+        run: |
+          archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)
+          mkdir runtime-check
+          tar -xzf "$archive" -C runtime-check
+          library=$(find runtime-check -name 'libonnxruntime.*.dylib' -type f -print -quit)
+          xcrun vtool -show-build "$library" > runtime-build-version.txt
+          cat runtime-build-version.txt
+          grep -Eq 'minos 10\.15([. ]|$)' runtime-build-version.txt
       - name: Download stable model
         run: python scripts/download_stable_model.py --catalog catalog/releases/2026-07-25-005.json --artifact htdemucs.spectral.fp32.onnx --dest models/htdemucs.spectral.onnx
       - name: Build x86_64 smoke harness
         run: |
-          cmake -S ort/smoke -B ort/smoke/build -DORT_SOURCE_DIR="$PWD/ort/source" -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_BUILD_TYPE=Release
+          cmake -S ort/smoke -B ort/smoke/build -DORT_SOURCE_DIR="$PWD/ort/source" -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release
           cmake --build ort/smoke/build --parallel 2
           file ort/smoke/build/ort_smoke
       - name: Run full-window smoke under Rosetta
