@@ -373,43 +373,48 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
+    intel_macos = target == "x86_64-apple-darwin"
+    version = lock["upstream"]["tag"].lstrip("v")
+    payload = staging / f"onnxruntime-osx-x64-{version}" if intel_macos else staging
+    payload.mkdir(exist_ok=True)
+    header_dir = payload / "include" if intel_macos else payload
+    header_dir.mkdir(exist_ok=True)
 
     header = source_dir / ort_api_version.HEADER_REL
     for name in ort_api_version.required_headers(header.read_bytes(), lambda name: header.with_name(name).read_bytes()):
-        shutil.copy2(header.with_name(name), staging / name)
+        shutil.copy2(header.with_name(name), header_dir / name)
 
     # Match the official macOS archive layout for the Intel build.
-    if target == "x86_64-apple-darwin":
-        lib_dir = staging / "lib"
+    if intel_macos:
+        lib_dir = payload / "lib"
         lib_dir.mkdir()
-        version = lock["upstream"]["tag"].lstrip("v")
         versioned = f"libonnxruntime.{version}.dylib"
         shutil.copy2(lib_path, lib_dir / versioned)
         (lib_dir / "libonnxruntime.1.dylib").symlink_to(versioned)
         (lib_dir / "libonnxruntime.dylib").symlink_to("libonnxruntime.1.dylib")
     else:
-        shutil.copy2(lib_path, staging / lib_path.name)
+        shutil.copy2(lib_path, payload / lib_path.name)
 
     # Copy companion libraries.
     for comp in companion_libs:
         comp_path = _find_library(build_dir, comp)
         if comp_path:
-            shutil.copy2(comp_path, staging / comp_path.name)
+            shutil.copy2(comp_path, payload / comp_path.name)
 
     # Copy licenses and notices from source.
     license_file = source_dir / "LICENSE"
     if license_file.is_file():
-        shutil.copy2(license_file, staging / "LICENSE.onnxruntime")
+        shutil.copy2(license_file, payload / ("LICENSE" if intel_macos else "LICENSE.onnxruntime"))
     # ORT uses ThirdPartyNotices.txt, not NOTICE
     notice_file = source_dir / "NOTICE"
     if not notice_file.is_file():
         notice_file = source_dir / "ThirdPartyNotices.txt"
     if notice_file.is_file():
-        shutil.copy2(notice_file, staging / "NOTICE.onnxruntime")
+        shutil.copy2(notice_file, payload / ("ThirdPartyNotices.txt" if intel_macos else "NOTICE.onnxruntime"))
     # Third-party licenses
     tp_licenses = source_dir / "cmake" / "external" / "LICENSES"
     if tp_licenses.is_dir():
-        shutil.copytree(tp_licenses, staging / "third-party-licenses", dirs_exist_ok=True)
+        shutil.copytree(tp_licenses, payload / "third-party-licenses", dirs_exist_ok=True)
 
     # Write build manifest.
     manifest = {
@@ -430,13 +435,13 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     }
 
     # Compute digests for all staged files.
-    for f in sorted(staging.rglob("*")):
+    for f in sorted(payload.rglob("*")):
         if f.is_file() and not f.is_symlink():
-            rel = f.relative_to(staging).as_posix()
+            rel = f.relative_to(payload).as_posix()
             size, sha = _sha256_file(f)
             manifest["files"][rel] = {"size": size, "sha256": sha}
 
-    with (staging / "build-manifest.json").open("w", encoding="utf-8") as fh:
+    with (payload / "build-manifest.json").open("w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True, ensure_ascii=False)
         fh.write("\n")
 
@@ -444,7 +449,6 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     # commit date as their mtime so the same source lock + toolchain produces
     # byte-identical archives across different build hosts and times.
     PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
-    version = lock["upstream"]["tag"].lstrip("v")
     archive_base = f"onnxruntime-{version}-openkara-{target}"
     fixed_timestamp = _ort_commit_timestamp(lock)
 

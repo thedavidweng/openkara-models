@@ -92,6 +92,32 @@ class LockedFlagTests(unittest.TestCase):
         mock_verify.assert_not_called()
 
 
+class IntelPackageTests(unittest.TestCase):
+    def test_official_layout_and_relative_links(self):
+        target = "x86_64-apple-darwin"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            header = source / br.ort_api_version.HEADER_REL
+            header.parent.mkdir(parents=True)
+            header.write_text("header")
+            build = root / "build"
+            build.mkdir()
+            (build / "libonnxruntime.dylib").write_bytes(b"library")
+            lock = {"upstream": {"tag": "v1.31.1"}, "toolchain": {}, "targets": {target: {"artifact_name": "libonnxruntime.dylib", "archive_format": "tar.gz"}}}
+            with mock.patch.object(br, "BUILD_DIR", root / "work"), \
+                 mock.patch.object(br, "PACKAGES_DIR", root / "packages"), \
+                 mock.patch.object(br.ort_api_version, "required_headers", return_value=[header.name]):
+                output = br._package_target(lock, target, source, build, {})
+            with tarfile.open(output) as archive:
+                prefix = "onnxruntime-osx-x64-1.31.1/"
+                assert archive.getmember(prefix + "include/onnxruntime_c_api.h").isfile()
+                assert archive.getmember(prefix + "lib/libonnxruntime.1.31.1.dylib").isfile()
+                assert archive.getmember(prefix + "lib/libonnxruntime.dylib").linkname == "libonnxruntime.1.dylib"
+                manifest = json.load(archive.extractfile(prefix + "build-manifest.json"))
+                assert "lib/libonnxruntime.dylib" not in manifest["files"]
+
+
 class ReproducibilityTests(unittest.TestCase):
     def test_build_metadata_has_no_build_host(self):
         """_build_target must not include build_host in the returned metadata."""
