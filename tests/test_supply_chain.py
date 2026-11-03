@@ -124,6 +124,19 @@ class VerifySupplyChainTests(unittest.TestCase):
         r = _run_verify([str(RELEASE)])
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_reused_model_records_are_verified_against_their_source_release(self):
+        import verify_supply_chain
+
+        manifest = _load(RELEASE)
+        manifest["release_id"] = "2099-01-01-001"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "release.json"
+            path.write_text(json.dumps(manifest))
+            self.assertEqual(verify_supply_chain.verify_manifest(path), [])
+            manifest["artifacts"]["models"][0]["supply_chain"]["license"]["sha256"] = "0" * 64
+            path.write_text(json.dumps(manifest))
+            self.assertTrue(any("sha256 mismatch" in error for error in verify_supply_chain.verify_manifest(path)))
+
     def test_verify_detects_tampered_file(self):
         notice = SC_DIR / "NOTICE"
         original = notice.read_bytes()
