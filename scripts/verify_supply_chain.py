@@ -3,7 +3,8 @@
 
 For every supply_chain ref in a release manifest (release-level + per-artifact),
 verifies that the referenced file exists in the local ``catalog/supply-chain/<release-id>/``
-directory and that its size + SHA-256 match the manifest's declared values.
+directory named by the referenced release URL and that its size + SHA-256
+match the manifest's declared values.
 
 Usage::
 
@@ -16,9 +17,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 SC_DIR = ROOT / "catalog" / "supply-chain"
@@ -35,18 +38,17 @@ def _sha256_file(path: Path) -> tuple[int, str]:
     return size, h.hexdigest()
 
 
-def _filename_from_url(url: str) -> str:
-    """Extract the filename from a supply-chain ref URL.
-
-    URLs are GitHub release-asset URLs of the form:
-    https://github.com/<repo>/releases/download/infra-<id>/<filename>
-    """
-    return url.rsplit("/", 1)[-1]
-
-
 def _verify_ref(ref: dict[str, Any], release_id: str, errors: list[str]) -> None:
-    fname = _filename_from_url(ref["url"])
-    local = SC_DIR / release_id / fname
+    url = urlsplit(ref["url"])
+    match = re.fullmatch(
+        r"/thedavidweng/openkara-models/releases/download/infra-([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)/([^/]+)",
+        url.path,
+    )
+    if url.scheme != "https" or url.netloc != "github.com" or not match or url.query or url.fragment:
+        errors.append(f"{release_id}: invalid supply-chain URL: {ref['url']}")
+        return
+    source_release, fname = match.groups()
+    local = SC_DIR / source_release / fname
     if not local.is_file():
         errors.append(f"{release_id}: missing {fname} (url={ref['url']})")
         return
