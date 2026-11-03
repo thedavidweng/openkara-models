@@ -21,22 +21,16 @@ Atomicity contract:
 Verification failures delete only a draft created by this invocation.
 Publication failures leave the pointer unchanged. Once publication is
 attempted, the release is preserved for retry, including on pointer failure.
-Publishing to ``candidate`` never touches ``stable.json``; promoting a
-verified candidate to stable is a separate ``--channel stable`` run against
-the same (already published) release, which skips re-creating the GitHub
-release if the tag already exists and only advances the pointer.
+Publishing to ``candidate`` never touches the frozen ``stable.json``.
 
-This script is a dry-run by default. Use ``--execute`` to actually create the
-GitHub release. Stable execution requires immutable, identity-bound quality/performance/native
-compatibility evidence and a frozen current-default baseline for every supported
-model/runtime/target/provider edge. In dry-run mode, it checks manifest integrity, supply-chain records,
-asset URL resolution + SHA-256, and monotonicity; it does not qualify quality
-evidence or authorize promotion.
+This script is a dry-run by default. Use ``--execute`` to create a candidate
+release after the model and runtime checks pass. The v1 stable pointer is
+frozen for existing clients. Dry runs check manifest integrity, supply-chain
+records, asset URL resolution, SHA-256, size, and generation monotonicity.
 
 Usage::
 
     python scripts/publish_catalog_release.py --release 2026-07-20-001
-    python scripts/publish_catalog_release.py --release 2026-07-20-001 --execute
     python scripts/publish_catalog_release.py --release 2026-07-25-005 \\
         --channel candidate --execute
 """
@@ -55,7 +49,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from validate_catalog import validate_document  # noqa: E402
-from validate_release_evidence import qualify_release  # noqa: E402
 
 RELEASES_DIR = ROOT / "catalog" / "releases"
 CHANNELS_DIR = ROOT / "catalog" / "channels"
@@ -136,22 +129,6 @@ def _download_asset_sha256(repo: str, tag: str, asset_name: str) -> str | None:
         if r.returncode != 0 or not dest.is_file():
             return None
         return _sha256_file(dest)
-
-
-def _download_report(url: str) -> bytes:
-    import tempfile
-    parsed = _parse_release_url(url)
-    if parsed is None:
-        raise ValueError("report must be an immutable GitHub release asset URL")
-    repo, tag = parsed
-    name = url.rsplit("/", 1)[-1]
-    if not name or any(c in name for c in "*?[]\\") or name in {".", ".."}:
-        raise ValueError("report asset must be an exact filename")
-    with tempfile.TemporaryDirectory() as td:
-        result = _gh(["release", "download", tag, "--repo", repo, "--pattern", name, "--dir", td], check=False)
-        if result.returncode:
-            raise ValueError(f"report download failed: {url}")
-        return (Path(td) / name).read_bytes()
 
 
 def _verify_manifest(manifest: dict[str, Any]) -> list[str]:
@@ -339,18 +316,8 @@ def main() -> int:
     manifest = _load(manifest_path)
 
     if args.execute and args.channel == "stable":
-        result = validate_document(manifest, schema="release")
-        if not result.ok:
-            print("ERROR: invalid release manifest:", file=sys.stderr)
-            for error in result.schema_errors + result.invariant_errors:
-                print(f"  {error}", file=sys.stderr)
-            return 1
-        errors = qualify_release(manifest, _download_report)
-        if errors:
-            print("ERROR: stable publication requires qualified immutable evidence and frozen measured baselines:", file=sys.stderr)
-            for error in errors:
-                print(f"  {error}", file=sys.stderr)
-            return 1
+        print("ERROR: the v1 stable pointer is frozen for older clients", file=sys.stderr)
+        return 1
 
     # Step 1: pre-publication verification (manifest, supply-chain, assets, monotonicity).
     errors = _verify_manifest(manifest)
@@ -373,7 +340,7 @@ def main() -> int:
         print(f"  supply-chain files: {SC_DIR / args.release}")
         n_artifacts = sum(len(manifest['artifacts'].get(k, [])) for k in ('models', 'runtimes', 'bundles'))
         print(f"  artifacts: {n_artifacts} (all asset URLs verified, SHA-256 matches)")
-        print("  This integrity check does not qualify release evidence or stable promotion.")
+        print("  This checks asset integrity only; runtime and model checks run separately.")
         return 0
 
     # Execute mode: create the GitHub release, upload, verify, advance pointer.

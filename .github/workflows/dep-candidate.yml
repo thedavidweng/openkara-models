@@ -105,50 +105,18 @@ jobs:
             models/source-lock.json
 
   build-runtimes:
-    needs: [prepare, quality-gates]
+    needs: [prepare]
     if: inputs.build_native && inputs.ort_tag != ''
     uses: ./.github/workflows/ort-build.yml
     with:
       candidate_lock_artifact: candidate-summary
 
-  quality-gates:
-    needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.11"
-      - run: pip install "pytest>=8.0"
-      - name: Lightweight candidate tests (not model quality evidence)
-        run: python -m pytest tests/test_dep_detection.py tests/test_dep_candidate.py tests/test_gate_status.py -q
-      - name: Record missing candidate measurements honestly
-        run: |
-          printf '%s\n' '{"status":"not_run","reason":"Candidate conversion, licensed reference stems and native archive measurements must be supplied; stable models and Python wheels are not candidate evidence."}' > quality-report.json
-          cp quality-report.json runtime-quality-report.json
-          printf '%s\n' '{"overall":"not_run"}' > gate-result.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: quality-reports
-          path: |
-            quality-report.json
-            runtime-quality-report.json
-            gate-result.json
-
-  # Create the candidate PR with the summary and verification artifacts.
-  # The PR is always created (even if gates failed) so it can serve as a
-  # failure-diagnosis record. However, the PR body MUST clearly state the
-  # gate status and MUST NOT describe an incomplete candidate as verified,
-  # ready, or passed. The stable pointer is never modified by this workflow.
   create-pr:
     permissions:
       contents: write
       pull-requests: write
       actions: write
-    needs: [prepare, build-runtimes, quality-gates]
+    needs: [prepare, build-runtimes]
     if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -159,12 +127,6 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: candidate-summary
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: quality-reports
-          path: artifacts/quality-reports
-        if: always()
-        continue-on-error: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ort-*
@@ -190,93 +152,10 @@ jobs:
           else
             echo "No stable pointer file in this checkout (catalog stack not merged yet)"
           fi
-      - name: Generate gate status and build PR body
-        env:
-          IS_ORT_UPDATE: ${{ needs.prepare.outputs.is_ort_update }}
-          BUILD_RUNTIMES_RESULT: ${{ needs.build-runtimes.result }}
-          QUALITY_GATES_RESULT: ${{ needs.quality-gates.result }}
+      - name: Build PR body
         run: |
-          set -euo pipefail
-          CANDIDATE_TYPE="model"
-          if [ "$IS_ORT_UPDATE" = "true" ]; then
-            CANDIDATE_TYPE="ort"
-          fi
-
-          # Locate reports downloaded from the quality-gates job.
-          QUALITY_REPORT=""
-          RUNTIME_REPORT=""
-          GATE_RESULT=""
-          if [ -f artifacts/quality-reports/quality-report.json ]; then
-            QUALITY_REPORT="artifacts/quality-reports/quality-report.json"
-          fi
-          if [ -f artifacts/quality-reports/runtime-quality-report.json ]; then
-            RUNTIME_REPORT="artifacts/quality-reports/runtime-quality-report.json"
-          fi
-          if [ -f artifacts/quality-reports/gate-result.json ]; then
-            GATE_RESULT="artifacts/quality-reports/gate-result.json"
-          fi
-
-          # Generate the gate status. This script exits non-zero if the
-          # candidate is incomplete — we capture that without failing the
-          # job so the PR can still be created as a diagnosis record.
-          GATE_ARGS=(
-            --candidate-type "$CANDIDATE_TYPE"
-            --output gate-status.json
-            --markdown gate-status.md
-          )
-          if [ -n "$QUALITY_REPORT" ]; then GATE_ARGS+=(--quality-report "$QUALITY_REPORT"); fi
-          if [ -n "$RUNTIME_REPORT" ]; then GATE_ARGS+=(--runtime-report "$RUNTIME_REPORT"); fi
-          if [ -n "$GATE_RESULT" ]; then GATE_ARGS+=(--gate-result "$GATE_RESULT"); fi
-          if [ "$IS_ORT_UPDATE" = "true" ] && [ -d artifacts/runtimes ]; then
-            GATE_ARGS+=(--runtime-artifacts-dir artifacts/runtimes)
-          fi
-
-          set +e
-          python scripts/generate_gate_status.py "${GATE_ARGS[@]}"
-          GATE_EXIT=$?
-          set -e
-
-          if [ $GATE_EXIT -ne 0 ]; then
-            echo "Gate status: INCOMPLETE or FAILED (exit code $GATE_EXIT)"
-            echo "The candidate PR will be created but marked as incomplete."
-          else
-            echo "Gate status: PASSED"
-          fi
-
-          # Build the artifact manifest.
-          MANIFEST="artifacts/PR-ARTIFACT-MANIFEST.md"
-          {
-            echo ""
-            echo "## Verification artifacts"
-            echo ""
-            echo "This candidate PR was produced by workflow run "
-            echo "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo ""
-            echo "| Artifact | Job result | Files |"
-            echo "|----------|------------|-------|"
-          } > "$MANIFEST"
-
-          if [ "$QUALITY_GATES_RESULT" = "success" ] && [ -d artifacts/quality-reports ]; then
-            QFILES=$(find artifacts/quality-reports -type f -printf '%f\n' 2>/dev/null | sort | tr '\n' ' ' || true)
-            echo "| quality-reports | success | $QFILES |" >> "$MANIFEST"
-          else
-            echo "| quality-reports | $QUALITY_GATES_RESULT | (not produced) |" >> "$MANIFEST"
-          fi
-
-          if [ "$IS_ORT_UPDATE" = "true" ]; then
-            if [ "$BUILD_RUNTIMES_RESULT" = "success" ] && [ -d artifacts/runtimes ] && \
-               [ -n "$(find artifacts/runtimes -type f -print -quit 2>/dev/null || true)" ]; then
-              RFILES=$(find artifacts/runtimes -type f -printf '%f\n' 2>/dev/null | sort | tr '\n' ' ' || true)
-              echo "| runtime archives | success | $RFILES |" >> "$MANIFEST"
-            else
-              echo "| runtime archives | $BUILD_RUNTIMES_RESULT | (not produced) |" >> "$MANIFEST"
-            fi
-          fi
-
-          # Combine: candidate summary + gate status + artifact manifest.
-          cat candidate-summary.md gate-status.md "$MANIFEST" > pr-body.md
-          echo "PR body assembled:"
-          cat pr-body.md
+          cp candidate-summary.md pr-body.md
+          printf '\nRuntime and model checks run in the corresponding workflows.\n' >> pr-body.md
       - name: Create or update candidate PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -31,7 +31,7 @@ def test_generate_candidate_summary_ort() -> None:
     assert "v1.27.1" in summary
     assert "v1.28.0" in summary
     assert "Rebuild all 6 runtime targets" in summary
-    assert "Quality gates pass" in summary
+    assert "Runtime comparison passes" in summary
 
 
 def test_generate_candidate_summary_model() -> None:
@@ -321,7 +321,7 @@ def test_publish_job_depends_on_all_linux_producers_and_downloads_arm64():
         needs_list_match = re.search(r"^\s*needs:\s*\n((?:\s+-\s+\S+\n?)+)", body, re.MULTILINE)
         assert needs_list_match is not None, "publish job must specify needs list"
         needs = [re.sub(r"^\s+-\s+", "", line).strip() for line in needs_list_match.group(1).splitlines() if line.strip()]
-    assert needs == ["build", "build-x86_64-linux", "build-aarch64-linux"]
+    assert set(needs) == {"build", "build-x86_64-linux", "build-aarch64-linux", "runtime-comparison"}
 
     pattern_match = re.search(r"actions/download-artifact.*?pattern:\s*(\S+)", body, re.DOTALL)
     assert pattern_match is not None, "publish job must use actions/download-artifact with pattern"

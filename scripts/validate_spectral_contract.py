@@ -21,8 +21,7 @@ Numeric validation (``--torch-reference``, conversion-workflow only):
   model's waveform output (end-to-end equivalence), using the same
   MSE < 1e-4 gate as the waveform conversion pipeline.
 
-This is the conversion-pipeline check for spectral-core artifacts — the
-release quality gate remains scripts/run_quality_suite.py (issue #21).
+This conversion-pipeline check enforces export fidelity before model publication.
 
 Usage::
 

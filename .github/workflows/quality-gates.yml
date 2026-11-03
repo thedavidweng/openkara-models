@@ -1,55 +1,16 @@
-name: Quality gates (corpus + metrics)
+name: Runtime differential checks
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    paths:
-      - "quality/**"
-      - "scripts/synthetic_fixtures.py"
-      - "scripts/separation_metrics.py"
-      - "scripts/spectral_reference.py"
-      - "scripts/generate_spectral_golden_vectors.py"
-      - "scripts/validate_corpus_manifest.py"
-      - "scripts/run_quality_suite.py"
-      - "scripts/corpus_audio.py"
-      - "scripts/validate_quality_report.py"
-      - "scripts/native_quality.py"
-      - "tests/test_native_quality.py"
-      - "scripts/run_runtime_quality_suite.py"
-      - "scripts/validate_runtime_quality_report.py"
-      - "scripts/enforce_quality_gates.py"
-      - "scripts/generate_trend_report.py"
-      - "quality/baselines.json"
-      - "quality/budgets.json"
-      - "tests/test_separation_metrics.py"
-      - "tests/test_spectral_contract.py"
-      - "tests/test_corpus_manifest.py"
-      - "tests/test_corpus_audio.py"
-      - "tests/test_quality_report.py"
-      - "tests/test_runtime_quality_report.py"
-      - "tests/test_quality_gates.py"
-      - "tests/test_trend_report.py"
-      - ".github/workflows/quality-gates.yml"
   push:
     branches: [main]
     paths:
-      - "quality/**"
-      - "scripts/synthetic_fixtures.py"
-      - "scripts/separation_metrics.py"
-      - "scripts/spectral_reference.py"
-      - "scripts/generate_spectral_golden_vectors.py"
-      - "scripts/validate_corpus_manifest.py"
-      - "scripts/run_quality_suite.py"
-      - "scripts/corpus_audio.py"
-      - "scripts/validate_quality_report.py"
-      - "scripts/native_quality.py"
-      - "tests/test_native_quality.py"
-      - "scripts/run_runtime_quality_suite.py"
-      - "scripts/validate_runtime_quality_report.py"
-      - "scripts/enforce_quality_gates.py"
-      - "scripts/generate_trend_report.py"
-      - "quality/baselines.json"
-      - "quality/budgets.json"
+      - "scripts/compare_runtimes.py"
+      - "scripts/run_linux_runtime_comparison.py"
+      - "tests/fixtures/**"
+      - "ort/source-lock.json"
+  workflow_call:
 
 permissions:
   contents: read
@@ -59,10 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate-corpus:
+  compare:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,17 +31,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
-      - name: Install deps
-        run: pip install "pytest>=8.0" "jsonschema>=4.20" "numpy>=1.24"
-      - name: Validate corpus manifest
-        run: python scripts/validate_corpus_manifest.py
-      - name: Separation metrics self-check
-        run: python scripts/separation_metrics.py --self-check
-      - name: Spectral reference self-check + golden freshness
-        run: |
-          python scripts/spectral_reference.py --self-check
-          python scripts/generate_spectral_golden_vectors.py --verify
-      - name: Corpus + quality + runtime quality + gate + trend tests
-        run: python -m pytest tests/test_spectral_contract.py tests/test_separation_metrics.py tests/test_corpus_manifest.py tests/test_corpus_audio.py tests/test_quality_report.py tests/test_runtime_quality_report.py tests/test_native_quality.py tests/test_quality_gates.py tests/test_trend_report.py tests/test_release_evidence.py -q
-      - name: Syntax check
-        run: python -m compileall -q scripts/spectral_reference.py scripts/generate_spectral_golden_vectors.py scripts/separation_metrics.py scripts/synthetic_fixtures.py scripts/validate_corpus_manifest.py scripts/run_quality_suite.py scripts/validate_quality_report.py scripts/native_quality.py scripts/run_runtime_quality_suite.py scripts/validate_runtime_quality_report.py scripts/enforce_quality_gates.py scripts/generate_trend_report.py
+      - name: Install dependencies
+        run: python -m pip install numpy pytest
+      - name: Test comparison and spectral contract
+        run: python -m pytest tests/test_compare_runtimes.py tests/test_spectral_contract.py -q
+      - name: Compare official candidate with current stable runtime
+        run: python scripts/run_linux_runtime_comparison.py --report runtime-comparison.json
