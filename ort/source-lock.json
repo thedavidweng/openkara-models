@@ -208,35 +208,6 @@
     }
   },
   "targets": {
-    "aarch64-apple-darwin": {
-      "archive_format": "tar.gz",
-      "artifact_name": "libonnxruntime.dylib",
-      "cmake_args": [
-        "-Donnxruntime_BUILD_SHARED_LIB=ON",
-        "-DORT_ENABLE_TRAINING=OFF",
-        "-DORT_ENABLE_PYTHON=OFF",
-        "-Dbuild_ort_onnx_flaky_tests=OFF",
-        "-Dbuild_ort_perf_tests=OFF",
-        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
-        "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
-        "-Donnxruntime_USE_COREML=ON",
-        "-Donnxruntime_USE_XNNPACK=OFF",
-        "-Donnxruntime_USE_CPU=ON",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
-        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
-        "-DCMAKE_SKIP_INSTALL_RULES=ON"
-      ],
-      "cmake_toolchain": "",
-      "companion_libraries": [],
-      "deployment_target": "15.0",
-      "execution_providers": [
-        "cpu",
-        "coreml"
-      ],
-      "runner": "macos-15",
-      "runner_note": "Apple Silicon native runner. Uses macos-15 (M1) which ships Xcode 16.0+ to satisfy the toolchain xcode_version requirement."
-    },
     "aarch64-unknown-linux-gnu": {
       "archive_format": "tar.gz",
       "artifact_name": "libonnxruntime.so",
@@ -278,19 +249,17 @@
         "-Donnxruntime_PREFER_SYSTEM_LIB=OFF",
         "-Donnxruntime_USE_XNNPACK=OFF",
         "-Donnxruntime_USE_CPU=ON",
-        "-Donnxruntime_USE_COREML=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15",
         "-DCMAKE_OSX_ARCHITECTURES=x86_64",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
-      "deployment_target": "14.0",
+      "deployment_target": "10.15",
       "execution_providers": [
-        "cpu",
-        "coreml"
+        "cpu"
       ],
       "runner": "macos-latest",
       "runner_note": "Cross-compile on Apple Silicon and validate under Rosetta."

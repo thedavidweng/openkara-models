@@ -99,7 +99,7 @@ Optional: pass `providers=['CoreMLExecutionProvider', 'CPUExecutionProvider']` i
 ## Source-built runtime distribution (issue #19)
 
 The v2 catalog references Microsoft's official ORT 1.31.1 packages for Linux,
-Apple Silicon and Windows. Intel macOS uses a full-operator CPU and CoreML
+Apple Silicon and Windows. Intel macOS uses a full-operator CPU-only
 build cross-compiled from the pinned source on Apple Silicon and tested under
 Rosetta. Windows and
 Apple Silicon can also use the official WebGPU 0.5.0 plugin wheel; Intel macOS

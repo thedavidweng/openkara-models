@@ -101,9 +101,9 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
             "upstream": {"project": "microsoft/onnxruntime", "tag": f"v{VERSION}", "commit_sha": COMMIT},
         })
         runtime.pop("supply_chain", None)
-        runtime["runtime"].update({"version": f"v{VERSION}", "ort_c_api_level": "31", "execution_providers": ["cpu", "coreml"] if "apple" in target else ["cpu"], "companion_files": [], "supported_model_artifact_ids": model_ids})
+        runtime["runtime"].update({"version": f"v{VERSION}", "ort_c_api_level": "31", "execution_providers": ["cpu", "coreml"] if target == "aarch64-apple-darwin" else ["cpu"], "companion_files": [], "supported_model_artifact_ids": model_ids})
         if target == "x86_64-apple-darwin":
-            runtime["runtime"]["deployment_target"] = "14.0"
+            runtime["runtime"]["deployment_target"] = "10.15"
         elif target == "aarch64-apple-darwin":
             runtime["runtime"]["deployment_target"] = "14.0"
         runtime["toolchain"] = {"image": "macos-latest" if path == intel else "Microsoft official release", "compiler": "Apple clang" if path == intel else "Microsoft official build", "cmake_flags": []}
@@ -124,7 +124,7 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
         {"model_artifact_id": mid, "runtime_artifact_id": runtime["artifact_id"], "target_triple": runtime["target_triple"], "execution_provider": provider, "status": "supported"}
         for mid in model_ids for runtime in runtimes for provider in runtime["runtime"]["execution_providers"]
     ]
-    manifest = {"schema_version": "openkara.catalog/release-v2", "release_id": release_id, "generation": old["generation"] + 1, "created_at": created_at, "producer": {"repo": "thedavidweng/openkara-models", "commit_sha": producer_commit, "workflow": "Intel macOS runtime", "run_id": "manual"}, "artifacts": {"models": models, "runtimes": runtimes, "bundles": [], "plugins": plugins}, "compatibility": compatibility}
+    manifest = {"schema_version": "openkara.catalog/release-v2", "release_id": release_id, "generation": json.loads((ROOT / "catalog/channels/stable-v2.json").read_text())["generation"] + 1, "created_at": created_at, "producer": {"repo": "thedavidweng/openkara-models", "commit_sha": producer_commit, "workflow": "Intel macOS runtime", "run_id": "manual"}, "artifacts": {"models": models, "runtimes": runtimes, "bundles": [], "plugins": plugins}, "compatibility": compatibility}
     validation = validate_document(manifest)
     if not validation.ok:
         raise ValueError(f"invalid catalog: {validation}")

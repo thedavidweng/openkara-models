@@ -2,7 +2,7 @@
 """Validate the ORT source lock file structure and consistency.
 
 Checks that:
-  - All 5 required targets are present with correct target triples.
+  - All 4 required targets are present with correct target triples.
   - Each target has required fields (runner, cmake_args, artifact_name, etc.).
   - The upstream commit SHA is a 40-char hex string.
   - The C API level is declared.
@@ -24,7 +24,6 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
 
 REQUIRED_TARGETS = {
-    "aarch64-apple-darwin",
     "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
