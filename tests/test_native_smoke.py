@@ -67,16 +67,16 @@ def _valid_smoke_report(provider: str) -> dict[str, object]:
 
 def test_strict_smoke_gate_accepts_requested_provider() -> None:
     assert run_native_smoke.validation_failures(
-        _valid_smoke_report("directml"), "directml"
+        _valid_smoke_report("coreml"), "coreml"
     ) == []
 
 
 def test_strict_smoke_gate_rejects_whole_session_cpu_fallback() -> None:
-    report = _valid_smoke_report("directml")
+    report = _valid_smoke_report("coreml")
     report["provider_assignment"] = "cpu"
     report["used_fallback"] = True
     report["provider_node_count"] = 0
-    failures = run_native_smoke.validation_failures(report, "directml")
+    failures = run_native_smoke.validation_failures(report, "coreml")
     assert any("fallback" in failure for failure in failures)
     assert any("assignment mismatch" in failure for failure in failures)
     assert any("provider_node_count" in failure for failure in failures)
@@ -109,7 +109,7 @@ def test_strict_smoke_gate_rejects_zero_provider_nodes() -> None:
 
 def test_strict_smoke_gate_rejects_skipped_for_hardware_provider() -> None:
     """Hardware absence cannot qualify a release."""
-    for provider in ("directml", "coreml"):
+    for provider in ("coreml", "xnnpack"):
         report = {
             "requested_provider": provider,
             "harness_exit_code": 1,
@@ -259,11 +259,3 @@ def test_benchmark_catalog_resolves_model_artifact_id(tmp_path: Path) -> None:
     # Should fail at download (fake URL), not at model resolution.
     assert r.returncode != 0
     assert "not found in catalog" not in r.stderr
-
-
-def test_hardware_skip_only_matches_exact_directml_no_adapter_hresult():
-    assert run_native_smoke.hardware_unavailable("directml", "C0262002 Specified display adapter handle is invalid.")
-    for error in ("DML failed", "DmlExecutionProvider invalid graph", "not available",
-                  "No suitable kernel", "display adapter driver failure"):
-        assert not run_native_smoke.hardware_unavailable("directml", error)
-    assert not run_native_smoke.hardware_unavailable("coreml", "C0262002")

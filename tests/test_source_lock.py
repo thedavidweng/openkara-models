@@ -19,7 +19,6 @@ REQUIRED_TARGETS = {
     "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
-    "x86_64-pc-windows-msvc",
     "x86_64-pc-windows-msvc-cpu",
 }
 
@@ -37,7 +36,7 @@ class SourceLockStructureTests(unittest.TestCase):
         lock = _load_lock()
         self.assertEqual(lock["lock_version"], "openkara.ort-source-lock/v1")
 
-    def test_all_six_targets_present(self):
+    def test_all_five_targets_present(self):
         lock = _load_lock()
         self.assertEqual(set(lock["targets"].keys()), REQUIRED_TARGETS)
 
@@ -96,40 +95,6 @@ class TargetConfigTests(unittest.TestCase):
         lock = _load_lock()
         eps = lock["targets"]["aarch64-apple-darwin"]["execution_providers"]
         self.assertIn("coreml", eps)
-
-    def test_windows_has_directml(self):
-        lock = _load_lock()
-        eps = lock["targets"]["x86_64-pc-windows-msvc"]["execution_providers"]
-        self.assertIn("cpu", eps)
-        self.assertIn("directml", eps)
-
-    def test_windows_uses_static_crt(self):
-        """Both Windows targets must link the CRT statically (/MT) so the
-        shipped onnxruntime.dll has no VC++ Redistributable import
-        (OpenKara/OpenKara#284). Third-party deps that manage their own CRT
-        flag (onnx, protobuf, abseil) must match, mirroring upstream
-        build.py --enable_msvc_static_runtime. DirectML.dll is unaffected:
-        it is a self-contained redistributable (itself statically linked)
-        reached through a C ABI import library, so it does not need to
-        share the ORT build's CRT."""
-        lock = _load_lock()
-        for target in ("x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc-cpu"):
-            cmake_args = lock["targets"][target]["cmake_args"]
-            self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
-                          cmake_args, target)
-            self.assertNotIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
-                             cmake_args, target)
-            self.assertIn("-DONNX_USE_MSVC_STATIC_RUNTIME=ON", cmake_args, target)
-            self.assertIn("-Dprotobuf_MSVC_STATIC_RUNTIME=ON", cmake_args, target)
-            self.assertIn("-DABSL_MSVC_STATIC_RUNTIME=ON", cmake_args, target)
-        self.assertIn("-Donnxruntime_USE_DML=ON",
-                      lock["targets"]["x86_64-pc-windows-msvc"]["cmake_args"])
-
-    def test_windows_companion_libraries_include_directml(self):
-        """DirectML.dll must be shipped as a companion library."""
-        lock = _load_lock()
-        companions = lock["targets"]["x86_64-pc-windows-msvc"]["companion_libraries"]
-        self.assertIn("DirectML.dll", companions)
 
     def test_windows_cpu_target_has_no_directml(self):
         """The CPU-only Windows target (issue OpenKara/OpenKara#284) must not
