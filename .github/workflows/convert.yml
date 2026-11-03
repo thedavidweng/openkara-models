@@ -155,6 +155,9 @@ jobs:
       - name: Runtime contract (protobuf + ORT CPU session)
         run: python scripts/onnx_runtime_contract.py --model "models/$ARTIFACT" --ort-session
 
+      - name: Compare runtimes using the exported model
+        run: python scripts/run_linux_runtime_comparison.py --model "models/$ARTIFACT" --report runtime-comparison.json
+
       - name: Generate checksum
         run: |
           cd models
@@ -286,6 +289,9 @@ jobs:
         shell: bash
       - name: Runtime contract (protobuf + ORT CPU session)
         run: python scripts/onnx_runtime_contract.py --model "models/$ARTIFACT" --ort-session
+
+      - name: Compare runtimes using the exported model
+        run: python scripts/run_linux_runtime_comparison.py --model "models/$ARTIFACT" --report runtime-comparison.json
 
       - name: Generate checksum
         run: |

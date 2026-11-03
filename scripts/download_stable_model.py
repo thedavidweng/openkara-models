@@ -50,6 +50,9 @@ def main() -> int:
     print(f"downloading {match['download_url']} -> {args.dest}")
     urllib.request.urlretrieve(match["download_url"], args.dest)
 
+    if args.dest.stat().st_size != match["byte_size"]:
+        print("ERROR: model size does not match catalog", file=sys.stderr)
+        return 1
     got = hashlib.sha256(args.dest.read_bytes()).hexdigest()
     want = match["archive_digest"]
     if got != want:

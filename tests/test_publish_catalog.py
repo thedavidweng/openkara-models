@@ -152,15 +152,15 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(code, 0, err.getvalue())
         self.assertIn("DRY-RUN", out.getvalue())
         self.assertIn("integrity verified", out.getvalue())
-        self.assertIn("does not qualify release evidence", out.getvalue())
+        self.assertIn("checks asset integrity only", out.getvalue())
 
-    def test_stable_execute_rejects_unfrozen_baselines_before_network_or_writes(self):
+    def test_stable_execute_rejects_frozen_pointer_before_network_or_writes(self):
         with mock.patch.object(pub, "_gh") as gh:
             code, _, err = _run_main_in_process(
                 ["--release", RELEASE_ID, "--execute"], gh,
             )
         self.assertEqual(code, 1)
-        self.assertIn("quality_report", err)
+        self.assertIn("stable pointer is frozen", err)
         gh.assert_not_called()
 
     def test_dry_run_fails_for_nonexistent_release(self):
@@ -375,8 +375,7 @@ class ExecutePathTests(unittest.TestCase):
                     out = io.StringIO()
                     err = io.StringIO()
                     with redirect_stdout(out), redirect_stderr(err):
-                        with mock.patch.object(pub, "qualify_release", return_value=[]):
-                            code = pub.main()
+                        code = pub.main()
         return code, out.getvalue(), err.getvalue()
 
     def test_execute_creates_release_and_advances_candidate_pointer(self):
@@ -389,15 +388,6 @@ class ExecutePathTests(unittest.TestCase):
         candidate = json.loads((pub.CHANNELS_DIR / "candidate.json").read_text())
         self.assertEqual(candidate["channel"], "candidate")
         self.assertFalse((pub.CHANNELS_DIR / "stable.json").exists())
-
-    def test_execute_promotes_existing_release_without_reuploading(self):
-        gh = _ExecuteGh(self.artifact_assets, infra_assets=list(self.infra_assets_complete))
-        code, out, err = self._run(gh, ["--channel", "stable", "--execute"])
-        self.assertEqual(code, 0, err)
-        self.assertFalse(gh.commands("release", "create"), "promotion must not re-create")
-        self.assertFalse(gh.commands("release", "upload"), "promotion must not re-upload")
-        stable = json.loads((pub.CHANNELS_DIR / "stable.json").read_text())
-        self.assertEqual(stable["release_id"], RELEASE_ID)
 
     def test_publication_precedes_pointer_update(self):
         gh = _ExecuteGh(self.artifact_assets, infra_assets=None)
@@ -442,10 +432,12 @@ class ExecutePathTests(unittest.TestCase):
         # verification must fail WITHOUT deleting the pre-existing release.
         broken = [a for a in self.infra_assets_complete if a["name"] != "release-manifest.json"]
         gh = _ExecuteGh(self.artifact_assets, infra_assets=broken)
-        code, out, err = self._run(gh, ["--channel", "stable", "--execute"])
+        code, out, err = self._run(gh, ["--channel", "candidate", "--execute"])
         self.assertNotEqual(code, 0)
         self.assertFalse(gh.commands("release", "delete"),
                          "a pre-existing release must never be deleted")
+        self.assertFalse((pub.CHANNELS_DIR / "candidate.json").exists(),
+                         "candidate pointer must not advance on verification failure")
         self.assertFalse((pub.CHANNELS_DIR / "stable.json").exists(),
                          "pointer must not advance on verification failure")
 

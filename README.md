@@ -8,7 +8,7 @@ Converts the pretrained [Demucs](https://github.com/adefossez/demucs) PyTorch mo
 
 Standard release ONNX files must load with **official, pre-built ONNX Runtime** on **Linux x64, Windows x64, macOS x64, and macOS arm64** using the **CPU** execution provider (CoreML on macOS is optional). They must **not** embed operator domains that only exist in custom ORT builds—especially **`com.microsoft.nchwc`** from layout optimization at `ORT_ENABLE_ALL`.
 
-Full policy, release gates, and a minimal Apple Silicon smoke-test snippet: **[docs/runtime-contract.md](docs/runtime-contract.md)**.
+Runtime compatibility is documented in [docs/runtime-contract.md](docs/runtime-contract.md); release checks are described in [docs/quality-gates.md](docs/quality-gates.md).
 
 ## Artifact catalog (authoritative)
 
@@ -136,8 +136,8 @@ A weekly check (every Monday) monitors **ONNX Runtime releases** (via `scripts/d
 
 1. Compares the latest stable upstream tag + commit SHA against `ort/source-lock.json`
 2. Opens a tracking issue for review
-3. A maintainer triggers the candidate orchestration workflow (`dep-candidate.yml`) to build all runtime targets, run quality gates, and open a reviewable candidate PR with artifacts
-4. A candidate PR never changes the stable pointer — stable publication remains a separate reviewed action (tag push only)
+3. A maintainer triggers the candidate orchestration workflow (`dep-candidate.yml`) to prepare a candidate PR; runtime builds and checks can be requested explicitly
+4. A candidate PR never changes the frozen v1 stable pointer; candidate publication uses its own channel
 
 See `.github/workflows/dep-detection.yml` for detection, `.github/workflows/dep-candidate.yml` for candidate orchestration, and `.github/workflows/dep-health-monitor.yml` for automation health monitoring. Dependency update ownership is documented in `docs/dependency-update-authorities.md`.
 

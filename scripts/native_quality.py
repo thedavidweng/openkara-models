@@ -14,7 +14,53 @@ import numpy as np
 import archive_utils
 from ort_api_version import HEADER_REL, required_headers
 from run_native_smoke import _build_harness, _find_lib, _sha256_file, SPECTRAL_OUTPUT_SHAPE, validation_failures
-from run_quality_suite import _stitch_windows
+
+SEGMENT_FRAMES = 343980
+
+
+def _sqrt_hann(size: int) -> np.ndarray:
+    """The OpenKara streaming-path chunk window: sqrt-Hann, satisfying the
+    squared constant-overlap-add constraint at 50% overlap."""
+    phase = 2.0 * np.pi * np.arange(size) / size
+    return np.sqrt(0.5 * (1.0 - np.cos(phase)))
+
+
+def _stitch_windows(run_window, inp: np.ndarray, window: int = SEGMENT_FRAMES) -> np.ndarray:
+    """Run fixed-window inference over arbitrary-length input with 50%%
+    overlap and squared-sqrt-Hann overlap-add — the exact stitching semantics
+    of the OpenKara streaming separation path, so chunk-boundary fixtures
+    measure what the product does.
+
+    ``run_window`` maps a ``[C, window]`` array to ``[1, S, C, window]``.
+    Inputs up to one window run as a single (zero-tail-padded) window; the
+    raw model forward cannot take longer inputs at all (fixed ONNX shapes;
+    the torch forward's train-segment handling rejects them too).
+    """
+    channels, n = inp.shape
+    if n <= window:
+        padded = np.zeros((channels, window), dtype=inp.dtype)
+        padded[:, :n] = inp
+        return run_window(padded)[..., :n]
+
+    hop = window // 2
+    w2 = _sqrt_hann(window) ** 2
+    acc: np.ndarray | None = None
+    norm = np.zeros(n, dtype=np.float64)
+    for start in range(0, n, hop):
+        frames = min(window, n - start)
+        chunk = np.zeros((channels, window), dtype=inp.dtype)
+        chunk[:, :frames] = inp[:, start:start + frames]
+        out = run_window(chunk)
+        if acc is None:
+            acc = np.zeros(out.shape[:-1] + (n,), dtype=np.float64)
+        acc[..., start:start + frames] += (
+            out[..., :frames].astype(np.float64) * w2[:frames]
+        )
+        norm[start:start + frames] += w2[:frames]
+    assert acc is not None
+    return (acc / np.maximum(norm, 1e-8)).astype(np.float32)
+
+
 
 
 class NativeRuntime:

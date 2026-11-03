@@ -64,11 +64,11 @@ reviewable candidate PRs. They never auto-merge or auto-promote.
 Some updates require coupled changes that must pass together:
 - An ORT source tag bump requires: updated `ort/source-lock.json`, rebuilt
   runtime archives (all 5 targets), updated catalog runtime entries,
-  re-run quality + runtime quality gates, updated benchmark reports.
+  run native smoke and runtime differential checks.
 - A Demucs package bump requires: re-converted ONNX models, re-run quality
-  gates, updated catalog model entries.
+  runtime checks, updated catalog model entries.
 - A model-weight revision requires: re-converted ONNX models, re-run
-  quality gates, updated catalog model entries.
+  export fidelity and runtime checks, updated catalog model entries.
 
 The candidate build orchestration (PR 3 of this issue) handles these
 coupled changes in a single candidate PR.
@@ -98,5 +98,4 @@ ORT candidates resolve the tag to the requested commit and refresh every
 submodule gitlink and `cmake/deps.txt` archive pin from that exact commit before
 writing the lock. A mismatched tag, incomplete tree, or invalid dependency list
 fails without changing the lock. This preparation is not native compatibility
-or release evidence: supported C API validation, all six runtime builds,
-strict provider reports, and quality gates must still pass before promotion.
+or runtime validation: supported C API validation, native smoke tests, and runtime differential checks must pass before promotion.

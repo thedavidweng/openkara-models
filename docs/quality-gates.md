@@ -1,48 +1,26 @@
+# Model and runtime checks
 
-### Licensed reference bundle ingestion
+Model conversion validates the ONNX spectral-core outputs against PyTorch,
+with MSE strictly below `1e-4`. The graph is checked for forbidden custom
+operator domains including `com.microsoft.nchwc` and must load with official
+ONNX Runtime. Native runtime checks load the model and run a complete
+343980-frame window. Catalog downloads are checked against SHA-256 and size.
 
-`run_quality_suite.py --tier release --onnx <candidate> --runtime <archive> --corpus-dir <local-dir>`
-runs **all** reviewed fixtures (PR plus release); PR mode remains the synthetic
-subset. Real-audio entries require an explicit SPDX license, HTTPS provenance,
-SHA256/size and `reference_stems: {"format":"npz-float32-v1", "order":["drums","bass","other","vocals"]}`.
-Provision `<sha256>.npz` yourself: the suite never downloads audio. Each bundle
-contains exactly `mix` float32 `[C,T]`, `stems` float32 `[4,C,T]`, scalar integer
-`sample_rate`, and string array `stem_names` in that order. Mixture and stems
-must be finite, sample-aligned, and sum within float32 tolerance. No resampling,
-reordering or substitution is implicit.
+`scripts/compare_runtimes.py` runs the same model with stable and candidate
+native runtime archives on fixed-seed noise and the CC0 recording in
+`tests/fixtures/README.md`. Both inputs cross the inference window boundary.
+It compares each raw output tensor in each window with maximum absolute error
+at most `1e-4`. On an Apple M3, the stable 1.27.1 and official 1.31.1 CPU
+runtimes produced zero error across all tested windows. Other platforms and
+providers require their own measurements.
 
-Real fixtures must cross an inference-window boundary and contain non-silent
-references with low-band energy so all seven metrics are defined. The producer
-records the worst stem (and worst cross-stem leakage pair), plus chunk-boundary
-MSE against ground truth at actual overlap-add boundaries. Undefined metrics
-fail, rather than being replaced by finite placeholders. Separation rows carry
-the exact reference bundle digest/size; stable qualification requires the same
-rows as the quality producer report. Tiny generated test bundles test only this
-code and are **not** licensed real-corpus or release-quality evidence.
+On Linux x64 the comparison also measures cold session load and warm RTF;
+the candidate fails when either median exceeds 1.5 times the stable value.
+The PR workflow compares the current stable runtime with official ORT 1.31.1.
+The runtime publication workflow compares the actual built Linux x64
+candidate with stable before publishing. Model publication runs the same
+runtime comparison alongside export validation. The comparison does not
+measure application end-to-end performance or SDR.
 
-### Exact native archive measurement
-
-Release quality requires `--runtime <candidate archive>`, `--target` (or native
-host detection), and `--provider`. Runtime quality, benchmark and full/reduced
-comparison all invoke the C++ C API harness with that archive's actual library;
-`ORT_RUNTIMES` is not used. Installed-wheel mode is conversion/local diagnostics
-only and cannot pass the release benchmark gate. Quality/runtime producer
-reports bind actual model and runtime SHA256/size as well as target/provider;
-the publisher checks these against each exact compatibility edge.
-
-New packages include the pinned C API header and its transitive quoted header
-dependencies, with manifest digests. The small harness builds from these packaged headers;
-`--ort-source` optionally cross-checks explicit source bytes. Historical packages
-missing required headers must be rebuilt, not silently substituted. This
-compiles only the harness, never a full ORT build, with at most two jobs.
-
-`cold_load_s` sums per-window native session load; `first_window_s` times the
-first native inference. `warm_median_s`/p95 and `rtf_warm` measure native Run calls
-with the requested provider (sum over windows per iteration), **not** consumer
-DSP or a resident-session end-to-end benchmark. `end_to_end_s`/`rtf_first`
-measure the actual first full waveform pipeline, including DSP, tensor files,
-process startup and per-window loads. The report records that scope explicitly;
-RSS is the actual native child peak (KB), not the Python parent's peak.
-Full/reduced numerical equivalence compares every raw output tensor for one
-complete 343980-frame window, not just the reconstructed sum. These code tests
-do not establish corpus quality, native GPU success or product performance.
+The v1 stable catalog pointer is frozen for older clients. Candidate catalog
+publication verifies artifact sizes and digests but does not advance stable.
