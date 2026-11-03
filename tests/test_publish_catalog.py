@@ -436,6 +436,8 @@ class ExecutePathTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertFalse(gh.commands("release", "delete"),
                          "a pre-existing release must never be deleted")
+        self.assertFalse((pub.CHANNELS_DIR / "candidate.json").exists(),
+                         "candidate pointer must not advance on verification failure")
         self.assertFalse((pub.CHANNELS_DIR / "stable.json").exists(),
                          "pointer must not advance on verification failure")
 

@@ -137,7 +137,7 @@ A weekly check (every Monday) monitors **ONNX Runtime releases** (via `scripts/d
 1. Compares the latest stable upstream tag + commit SHA against `ort/source-lock.json`
 2. Opens a tracking issue for review
 3. A maintainer triggers the candidate orchestration workflow (`dep-candidate.yml`) to prepare a candidate PR; runtime builds and checks can be requested explicitly
-4. A candidate PR never changes the stable pointer — stable publication remains a separate reviewed action (tag push only)
+4. A candidate PR never changes the frozen v1 stable pointer; candidate publication uses its own channel
 
 See `.github/workflows/dep-detection.yml` for detection, `.github/workflows/dep-candidate.yml` for candidate orchestration, and `.github/workflows/dep-health-monitor.yml` for automation health monitoring. Dependency update ownership is documented in `docs/dependency-update-authorities.md`.
 

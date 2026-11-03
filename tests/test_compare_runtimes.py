@@ -1,12 +1,14 @@
 import hashlib
+import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from compare_runtimes import FRAMES, fixture_audio, max_error, qualifies, verify_archive, windows
+from compare_runtimes import FRAMES, Runner, fixture_audio, max_error, qualifies, verify_archive, windows
 
 
 def test_real_fixture_crosses_boundary_and_windows_keep_samples():
@@ -62,3 +64,15 @@ def test_archive_requires_both_size_and_digest(tmp_path):
         verify_archive(archive, 8, digest)
     with pytest.raises(ValueError, match="SHA-256"):
         verify_archive(archive, 7, "0" * 64)
+
+
+def test_harness_crash_reports_exit_and_stderr(tmp_path):
+    runner = object.__new__(Runner)
+    runner.harness = Path("/harness")
+    runner.library = Path("/runtime")
+    runner.target = "x86_64-unknown-linux-gnu"
+    result = subprocess.CompletedProcess([], 42, "", "runtime crashed")
+    with mock.patch("compare_runtimes.spectral_reference.spec", return_value=np.zeros(1)), \
+            mock.patch("compare_runtimes.subprocess.run", return_value=result):
+        with pytest.raises(ValueError, match="exit=42.*runtime crashed"):
+            runner.run(tmp_path / "model.onnx", np.zeros((1, 2, FRAMES)), tmp_path / "work")

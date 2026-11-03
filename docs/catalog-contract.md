@@ -182,7 +182,7 @@ manifest; channel pointers and release manifests are the only contract surfaces.
 
 ## Atomic publication
 
-`scripts/publish_catalog_release.py --release <release-id> [--execute]`
+`scripts/publish_catalog_release.py --release <release-id> --channel candidate [--execute]`
 publishes a catalog release as an immutable GitHub release and advances the
 candidate pointer atomically:
 

@@ -111,7 +111,13 @@ class Runner:
             "--input-dir", str(work), "--output-dir", str(work),
             "--warmup", "1", "--iters", "3",
         ], capture_output=True, text=True, timeout=600, cwd=work)
-        report = json.loads(result.stdout)
+        try:
+            report = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"native harness produced invalid JSON (exit={result.returncode}); "
+                f"{result.stderr[-500:]}"
+            ) from exc
         report["harness_exit_code"] = result.returncode
         failures = validation_failures(report, "cpu")
         if failures:
