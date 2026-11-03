@@ -280,14 +280,14 @@
         "-Donnxruntime_USE_CPU=ON",
         "-Donnxruntime_USE_COREML=ON",
         "-DCMAKE_BUILD_TYPE=Release",
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.13",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15",
         "-DCMAKE_OSX_ARCHITECTURES=x86_64",
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DCMAKE_SKIP_INSTALL_RULES=ON"
       ],
       "cmake_toolchain": "",
       "companion_libraries": [],
-      "deployment_target": "10.13",
+      "deployment_target": "10.15",
       "execution_providers": [
         "cpu",
         "coreml"

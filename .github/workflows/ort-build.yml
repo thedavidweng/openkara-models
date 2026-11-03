@@ -59,7 +59,7 @@ jobs:
         run: python scripts/download_stable_model.py --catalog catalog/releases/2026-07-25-005.json --artifact htdemucs.spectral.fp32.onnx --dest models/htdemucs.spectral.onnx
       - name: Build x86_64 smoke harness
         run: |
-          cmake -S ort/smoke -B ort/smoke/build -DORT_SOURCE_DIR="$PWD/ort/source" -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13 -DCMAKE_BUILD_TYPE=Release
+          cmake -S ort/smoke -B ort/smoke/build -DORT_SOURCE_DIR="$PWD/ort/source" -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release
           cmake --build ort/smoke/build --parallel 2
           file ort/smoke/build/ort_smoke
       - name: Run full-window smoke under Rosetta
