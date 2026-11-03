@@ -103,7 +103,7 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
         runtime.pop("supply_chain", None)
         runtime["runtime"].update({"version": f"v{VERSION}", "ort_c_api_level": "31", "execution_providers": ["cpu", "coreml"] if "apple" in target else ["cpu"], "companion_files": [], "supported_model_artifact_ids": model_ids})
         if target == "x86_64-apple-darwin":
-            runtime["runtime"]["deployment_target"] = "10.15"
+            runtime["runtime"]["deployment_target"] = "14.0"
         elif target == "aarch64-apple-darwin":
             runtime["runtime"]["deployment_target"] = "14.0"
         runtime["toolchain"] = {"image": "macos-latest" if path == intel else "Microsoft official release", "compiler": "Apple clang" if path == intel else "Microsoft official build", "cmake_flags": []}

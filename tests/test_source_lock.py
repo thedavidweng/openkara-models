@@ -156,7 +156,7 @@ class TargetConfigTests(unittest.TestCase):
         self.assertEqual(target["execution_providers"], ["cpu", "coreml"])
         self.assertIn("-DCMAKE_OSX_ARCHITECTURES=x86_64", target["cmake_args"])
         self.assertIn("-Donnxruntime_USE_COREML=ON", target["cmake_args"])
-        self.assertEqual(target["deployment_target"], "10.15")
+        self.assertEqual(target["deployment_target"], "14.0")
 
     def test_training_disabled_for_all_targets(self):
         lock = _load_lock()
