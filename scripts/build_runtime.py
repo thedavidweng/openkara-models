@@ -411,8 +411,17 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     for name in ort_api_version.required_headers(header.read_bytes(), lambda name: header.with_name(name).read_bytes()):
         shutil.copy2(header.with_name(name), staging / name)
 
-    # Copy runtime library.
-    shutil.copy2(lib_path, staging / lib_path.name)
+    # Match the official macOS archive layout for the Intel build.
+    if target == "x86_64-apple-darwin":
+        lib_dir = staging / "lib"
+        lib_dir.mkdir()
+        version = lock["upstream"]["tag"].lstrip("v")
+        versioned = f"libonnxruntime.{version}.dylib"
+        shutil.copy2(lib_path, lib_dir / versioned)
+        (lib_dir / "libonnxruntime.1.dylib").symlink_to(versioned)
+        (lib_dir / "libonnxruntime.dylib").symlink_to("libonnxruntime.1.dylib")
+    else:
+        shutil.copy2(lib_path, staging / lib_path.name)
 
     # Copy companion libraries.
     for comp in companion_libs:
@@ -515,7 +524,14 @@ def _make_tar(archive_path: Path, staging: Path, fixed_timestamp: int) -> None:
     with gzip.GzipFile(fileobj=buf, mode="wb", mtime=fixed_timestamp, filename="") as gz:
         with tarfile.open(fileobj=gz, mode="w") as tar:
             for f in sorted(staging.rglob("*")):
-                if f.is_file():
+                if f.is_symlink():
+                    info = tarfile.TarInfo(name=f.relative_to(staging).as_posix())
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = os.readlink(f)
+                    info.mtime = fixed_timestamp
+                    info.mode = 0o755
+                    tar.addfile(info)
+                elif f.is_file():
                     rel = f.relative_to(staging).as_posix()
                     info = tarfile.TarInfo(name=rel)
                     info.size = f.stat().st_size

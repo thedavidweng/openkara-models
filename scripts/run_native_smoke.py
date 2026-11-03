@@ -72,6 +72,8 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 def _find_lib(dest: Path) -> Path:
     libraries = [p for p in dest.rglob("*") if p.is_file() and p.name.lower() in
                  {"libonnxruntime.so", "libonnxruntime.dylib", "onnxruntime.dll"}]
+    if not libraries:
+        libraries = list(dest.rglob("libonnxruntime.*.*.*.dylib"))
     if len(libraries) != 1:
         raise ValueError("runtime archive must contain exactly one ORT runtime library")
     return libraries[0]
