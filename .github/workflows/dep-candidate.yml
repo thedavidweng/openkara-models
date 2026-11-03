@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_native:
-        description: "Explicitly opt into six native builds; default is lightweight preparation only. Does not qualify a release."
+        description: "Opt into the Intel cross-build; default is lightweight preparation only. Does not qualify a release."
         required: false
         type: boolean
         default: false

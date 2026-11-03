@@ -197,7 +197,7 @@ def validate_release_invariants(manifest: dict[str, Any]) -> list[ValidationErro
 
     # 1. Artifact ID uniqueness across all kinds.
     seen: dict[str, str] = {}  # id -> kind where first seen
-    for kind_list in ("models", "runtimes", "bundles"):
+    for kind_list in ("models", "runtimes", "bundles", "plugins"):
         for art in manifest.get("artifacts", {}).get(kind_list, []):
             aid = art.get("artifact_id")
             if aid is None:
@@ -212,6 +212,13 @@ def validate_release_invariants(manifest: dict[str, Any]) -> list[ValidationErro
                 )
             else:
                 seen[aid] = kind_list
+
+    for plugin in manifest.get("artifacts", {}).get("plugins", []):
+        aid = plugin["artifact_id"]
+        if plugin["filename"] != plugin["download_url"].rsplit("/", 1)[-1]:
+            errors.append(ValidationError("plugin_filename_mismatch", f"plugin {aid!r} filename does not match its URL"))
+        if not any(runtime.get("target_triple") == plugin["target_triple"] for runtime in ref.runtimes.values()):
+            errors.append(ValidationError("plugin_target_mismatch", f"plugin {aid!r} has no runtime for its target"))
 
     # 2. Immutable download URLs and per-file digests for every artifact.
     for kind_list in ("models", "runtimes", "bundles"):

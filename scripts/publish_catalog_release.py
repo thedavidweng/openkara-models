@@ -42,6 +42,8 @@ import hashlib
 import json
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +133,28 @@ def _download_asset_sha256(repo: str, tag: str, asset_name: str) -> str | None:
         return _sha256_file(dest)
 
 
+def _verify_plugin_asset(art: dict[str, Any]) -> list[str]:
+    """Verify the bytes served by the content-addressed official wheel URL."""
+    url = art["download_url"]
+    if not url.startswith("https://files.pythonhosted.org/packages/"):
+        return [f"{art['artifact_id']}: unsupported plugin URL"]
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            for chunk in iter(lambda: response.read(1 << 20), b""):
+                size += len(chunk)
+                digest.update(chunk)
+    except (OSError, urllib.error.URLError) as e:
+        return [f"{art['artifact_id']}: download failed: {e}"]
+    errors = []
+    if size != art["byte_size"]:
+        errors.append(f"{art['artifact_id']}: size mismatch: {size}")
+    if digest.hexdigest() != art["archive_digest"]:
+        errors.append(f"{art['artifact_id']}: SHA-256 mismatch")
+    return errors
+
+
 def _verify_manifest(manifest: dict[str, Any]) -> list[str]:
     """Pre-publication verification: manifest validates, supply-chain records
     match local files, every referenced asset URL resolves to an existing
@@ -214,6 +238,9 @@ def _verify_manifest(manifest: dict[str, Any]) -> list[str]:
                     f"manifest={art.get('archive_digest', '')[:12]}...)"
                 )
 
+    for plugin in manifest.get("artifacts", {}).get("plugins", []):
+        errors.extend(_verify_plugin_asset(plugin))
+
     return errors
 
 
@@ -252,8 +279,8 @@ def _advance_channel_pointer(
         f"infra-{release_id}/release-manifest.json"
     )
     pointer = {
-        "schema_version": "openkara.catalog/channel-v1",
-        "channel": channel,
+        "schema_version": f"openkara.catalog/channel-{'v2' if channel == 'stable-v2' else 'v1'}",
+        "channel": "stable" if channel == "stable-v2" else channel,
         "generation": manifest["generation"],
         "release_id": release_id,
         "release_manifest_url": publish_url,
@@ -266,7 +293,7 @@ def _advance_channel_pointer(
     # channel if present (a first-ever candidate pointer starts from the
     # stable pointer's release so the lineage stays connected).
     existing_pointer = CHANNELS_DIR / f"{channel}.json"
-    if not existing_pointer.is_file() and channel == "candidate":
+    if not existing_pointer.is_file() and channel in ("candidate", "stable-v2"):
         existing_pointer = CHANNELS_DIR / "stable.json"
     if existing_pointer.is_file():
         try:
@@ -298,7 +325,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Publish a catalog release atomically.")
     parser.add_argument("--release", required=True, help="release_id to publish.")
     parser.add_argument(
-        "--channel", choices=("stable", "candidate"), default="stable",
+        "--channel", choices=("stable", "stable-v2", "candidate"), default="stable",
         help="Channel pointer to advance (default: stable). Candidate "
              "publication never touches the stable pointer.",
     )
@@ -317,6 +344,10 @@ def main() -> int:
 
     if args.execute and args.channel == "stable":
         print("ERROR: the v1 stable pointer is frozen for older clients", file=sys.stderr)
+        return 1
+
+    if args.channel == "stable-v2" and manifest.get("schema_version") != "openkara.catalog/release-v2":
+        print("ERROR: stable-v2 requires a v2 release manifest", file=sys.stderr)
         return 1
 
     # Step 1: pre-publication verification (manifest, supply-chain, assets, monotonicity).

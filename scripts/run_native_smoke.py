@@ -73,7 +73,8 @@ def _find_lib(dest: Path) -> Path:
     libraries = [p for p in dest.rglob("*") if p.is_file() and p.name.lower() in
                  {"libonnxruntime.so", "libonnxruntime.dylib", "onnxruntime.dll"}]
     if not libraries:
-        libraries = list(dest.rglob("libonnxruntime.*.*.*.dylib"))
+        libraries = [*dest.rglob("libonnxruntime.*.*.*.dylib"),
+                     *dest.rglob("libonnxruntime.so.*.*.*")]
     if len(libraries) != 1:
         raise ValueError("runtime archive must contain exactly one ORT runtime library")
     return libraries[0]

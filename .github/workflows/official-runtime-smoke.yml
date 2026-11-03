@@ -1,0 +1,65 @@
+name: Official runtime smoke
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: onnxruntime-linux-x64-1.31.1.tgz
+            sha256: c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: onnxruntime-linux-aarch64-1.31.1.tgz
+            sha256: 5317505e2da99be65f8e2775ba3c2afd6d2961fd78aba1bd8f56159f48820c78
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            archive: onnxruntime-osx-arm64-1.31.1.tgz
+            sha256: 2e1344a1926ee50eb25b38153cb6992c3567515aef0e677a1a520a1798896d6f
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            archive: onnxruntime-win-x64-1.31.1.zip
+            sha256: 5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: microsoft/onnxruntime
+          ref: 6af1a932e2286d5c58166085d24c68783033edee
+          path: ort/source
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Download and verify official archive
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          SHA256: ${{ matrix.sha256 }}
+        shell: bash
+        run: |
+          curl -fsSL -o "$ARCHIVE" "https://github.com/microsoft/onnxruntime/releases/download/v1.31.1/$ARCHIVE"
+          python -c 'import hashlib,os; p=os.environ["ARCHIVE"]; assert hashlib.file_digest(open(p,"rb"),"sha256").hexdigest() == os.environ["SHA256"]'
+      - name: Download stable model
+        run: python scripts/download_stable_model.py --catalog catalog/releases/2026-07-25-005.json --artifact htdemucs.spectral.fp32.onnx --dest models/htdemucs.spectral.onnx
+      - name: Run full-window CPU smoke
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: python scripts/run_native_smoke.py --runtime "$ARCHIVE" --model models/htdemucs.spectral.onnx --target "$TARGET" --provider cpu --ort-source ort/source --report smoke.json
