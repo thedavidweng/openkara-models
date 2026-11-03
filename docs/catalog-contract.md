@@ -19,6 +19,8 @@ strings.
 | ---------------------- | ------------------------------------ | --------------------------------- |
 | Release manifest       | `catalog/schema-release-v1.json`     | `openkara.catalog/release-v1`     |
 | Stable-channel pointer | `catalog/schema-channel-v1.json`     | `openkara.catalog/channel-v1`     |
+| Release manifest       | `catalog/schema-release-v2.json`     | `openkara.catalog/release-v2`     |
+| Stable-channel pointer | `catalog/schema-channel-v2.json`     | `openkara.catalog/channel-v2`     |
 
 Both are JSON Schema (draft 2020-12). Field-level structure is enforced by the
 schema; cross-field invariants (referential integrity, immutable URLs,
@@ -97,7 +99,17 @@ providers. Only Pareto-optimal bundles are published (issue #22).
 
 `catalog/channels/stable.json` references one immutable release manifest by
 URL, SHA-256, and size. It is frozen at `2026-08-12-001` for existing clients.
-It will not advance; a separate pointer will serve the new format.
+It will not advance. `catalog/channels/stable-v2.json` serves the v2 format.
+The v2 release lists Microsoft runtime archives at their original release
+URLs and WebGPU plugins at their content-addressed PyPI wheel URLs. Intel macOS
+uses the full-operator CPU and CoreML runtime built by this repository; it has
+no WebGPU plugin. Each archive and extracted regular file has a size and
+SHA-256. Archive links must be relative and remain inside the extraction
+directory. Consumers verify the manifest and installed files before use.
+
+Consumers must declare which channel and release schema versions they support.
+When a newer schema is encountered, they must offer the existing application
+update flow rather than treating it as an ordinary download failure.
 
 `catalog/channels/candidate.json` (same schema, `channel: "candidate"`) is the
 pre-promotion channel introduced with the spectral-core generation (issue #23
@@ -121,7 +133,7 @@ filename, or URL to infer a version (invariant above).
 
 **Update check algorithm:**
 
-1. Fetch `catalog/channels/stable.json` from the repository's default branch
+1. Fetch the supported stable pointer from the repository's default branch
    (raw URL). It is a few hundred bytes.
 2. If `generation` is not greater than the stored generation, there is no
    update. Stop.
@@ -186,7 +198,15 @@ manifest; channel pointers and release manifests are the only contract surfaces.
 publishes a catalog release as an immutable GitHub release and advances the
 candidate pointer atomically:
 
-The v1 `catalog/channels/stable.json` pointer is frozen at `2026-08-12-001` for old clients. The publisher refuses to advance it. A new client channel will be introduced separately.
+The v1 `catalog/channels/stable.json` pointer is frozen at `2026-08-12-001` for old clients. The publisher refuses to advance it.
+
+For v2, the `Publish v2 catalog` workflow runs the native runtime smoke tests
+and the Linux differential and performance checks before publishing. It
+verifies the official package bytes, uploads the Intel runtime and manifest to
+the `infra-<release-id>` release, and emits the verified manifest and
+`stable-v2.json` as a workflow artifact. Commit those generated files to the
+default branch only after the release is public. Publication does not edit the
+frozen v1 pointer.
 
 1. **Dry-run (default):** verifies the manifest validates, supply-chain records
    match local files, every referenced artifact asset URL resolves to an

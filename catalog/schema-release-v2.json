@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/catalog/schema-release-v2.json",
+  "title": "OpenKara catalog release (v2)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release_id", "generation", "created_at", "producer", "artifacts", "compatibility"],
+  "properties": {
+    "schema_version": {"const": "openkara.catalog/release-v2"},
+    "release_id": {"$ref": "schema-release-v1.json#/properties/release_id"},
+    "generation": {"$ref": "schema-release-v1.json#/properties/generation"},
+    "created_at": {"$ref": "schema-release-v1.json#/properties/created_at"},
+    "producer": {"$ref": "schema-release-v1.json#/properties/producer"},
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["models", "runtimes", "bundles", "plugins"],
+      "properties": {
+        "models": {"type": "array", "items": {"$ref": "schema-release-v1.json#/$defs/model_artifact"}},
+        "runtimes": {"type": "array", "items": {"$ref": "schema-release-v1.json#/$defs/runtime_artifact"}},
+        "bundles": {"type": "array", "items": {"$ref": "schema-release-v1.json#/$defs/bundle_artifact"}},
+        "plugins": {"type": "array", "items": {"$ref": "#/$defs/plugin"}}
+      }
+    },
+    "compatibility": {"$ref": "schema-release-v1.json#/properties/compatibility"},
+    "supply_chain": {"$ref": "schema-release-v1.json#/properties/supply_chain"},
+    "minimum_consumer_schema": {"$ref": "schema-release-v1.json#/properties/minimum_consumer_schema"},
+    "maximum_consumer_schema": {"$ref": "schema-release-v1.json#/properties/maximum_consumer_schema"},
+    "notes": {"$ref": "schema-release-v1.json#/properties/notes"}
+  },
+  "$defs": {
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "target_triple", "provider", "version", "filename", "download_url", "byte_size", "archive_digest", "extracted_file_digests"],
+      "properties": {
+        "artifact_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+        "target_triple": {"$ref": "schema-release-v1.json#/$defs/target_triple"},
+        "provider": {"const": "webgpu"},
+        "version": {"type": "string", "minLength": 1},
+        "filename": {"type": "string", "minLength": 1},
+        "download_url": {"type": "string", "pattern": "^https://files\\.pythonhosted\\.org/packages/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{60}/[^/?#]+\\.whl$"},
+        "byte_size": {"type": "integer", "minimum": 1},
+        "archive_digest": {"$ref": "schema-release-v1.json#/$defs/sha256"},
+        "extracted_file_digests": {"$ref": "schema-release-v1.json#/$defs/extracted_file_digests"}
+      }
+    }
+  }
+}

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+from referencing import Registry, Resource
 
 # Make ``scripts/`` importable when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -72,9 +73,9 @@ def _load_schema(path: Path) -> dict[str, Any]:
 
 def _detect_schema_version(doc: dict[str, Any]) -> str | None:
     sv = doc.get("schema_version")
-    if sv == SCHEMA_VERSION_RELEASE:
+    if sv in (SCHEMA_VERSION_RELEASE, "openkara.catalog/release-v2"):
         return "release"
-    if sv == SCHEMA_VERSION_CHANNEL:
+    if sv in (SCHEMA_VERSION_CHANNEL, "openkara.catalog/channel-v2"):
         return "channel"
     return None
 
@@ -95,10 +96,15 @@ def validate_document(
             schema_errors=[f"unknown schema_version: {doc.get('schema_version')!r}"]
         )
 
-    schema_doc = _load_schema(
+    is_v2 = doc.get("schema_version") == f"openkara.catalog/{schema}-v2"
+    schema_path = (
+        CATALOG_DIR / f"schema-{schema}-v2.json" if is_v2 else
         RELEASE_SCHEMA_PATH if schema == "release" else CHANNEL_SCHEMA_PATH
     )
-    validator = jsonschema.Draft202012Validator(schema_doc)
+    schema_doc = _load_schema(schema_path)
+    v1_schema = _load_schema(RELEASE_SCHEMA_PATH)
+    registry = Registry().with_resource(v1_schema["$id"], Resource.from_contents(v1_schema))
+    validator = jsonschema.Draft202012Validator(schema_doc, registry=registry)
     schema_errors = sorted(
         # Render each jsonschema error as a compact "path: message" string.
         f"{'/'.join(str(p) for p in err.absolute_path) or '<root>'}: {err.message}"

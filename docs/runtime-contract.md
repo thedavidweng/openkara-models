@@ -98,40 +98,18 @@ Optional: pass `providers=['CoreMLExecutionProvider', 'CPUExecutionProvider']` i
 
 ## Source-built runtime distribution (issue #19)
 
-As of issue #19, OpenKara no longer ships official pre-built ORT packages.
-Instead, `openkara-models` builds reproducible, target-specific ORT archives
-from a pinned source lock (`ort/source-lock.json`) and publishes them as
-catalog runtime artifacts. The catalog's `compatibility` matrix declares
-which runtime artifact can load which model artifact, per target.
+The v2 catalog references Microsoft's official ORT 1.31.1 packages for Linux,
+Apple Silicon and Windows. Intel macOS uses a full-operator CPU and CoreML
+build cross-compiled from the pinned source on Apple Silicon and tested under
+Rosetta. DirectML is built only by the manual comparison workflow. Windows and
+Apple Silicon can also use the official WebGPU 0.5.0 plugin wheel; Intel macOS
+does not provide this plugin.
 
-The model-side contract above (forbidden operator domains, ORT_ENABLE_EXTENDED
-optimization) is unchanged and remains the portability guarantee: a model
-that passes the domain gate can be loaded by any runtime whose
-`supported_model_artifact_ids` includes it — whether that runtime is the
-full build or a reduced-operator build. The domain gate ensures the model
-does not use operators that the source-built runtime's kernel set does not
-include.
-
-The runtime-side contract is now:
-  - The runtime archive is built from `ort/source-lock.json` by
-    `scripts/build_runtime.py`.
-  - The archive contains a build manifest with per-file SHA-256 digests,
-    CMake args, submodule SHAs, and (for reduced builds) the ops config SHA.
-  - The archive contains an SPDX-2.3 SBOM + provenance record (PR 3).
-  - The catalog runtime entry records the target triple, execution providers,
-    C API level, toolchain, and supported model artifact IDs.
-  - The native benchmark matrix (PR 4) verifies the runtime can load every
-    supported model at 343980 frames with finite output and correct shape.
-
-OpenKara consumes the runtime via the catalog entry's `download_url` +
-`archive_digest`, loading the shared library dynamically. The Rust `ort`
-crate's C API level must be compatible with the runtime's
-`ort_c_api_level` (27, for ORT v1.27.1). The API version is no longer
-manually maintained in `ort/source-lock.json`; it is parsed at build time
-from `ORT_API_VERSION` in the pinned ORT header
-(`include/onnxruntime/core/session/onnxruntime_c_api.h`) and recorded in
-`build-manifest.json` and `provenance.json`. The app owns its own Rust
-`ort` crate version (the infrastructure source lock no longer pins it).
+The catalog identifies each package by URL, size and SHA-256 and declares its
+model compatibility. The native smoke gate loads the model and runs a complete
+343980-frame window. The application verifies archive and installed-file
+digests before loading the library. Its ORT C API level must be compatible with
+the catalog runtime's API level (31 for ORT 1.31.1).
 
 ## Related files
 
@@ -141,8 +119,9 @@ from `ORT_API_VERSION` in the pinned ORT header
 - `.github/workflows/runtime-contract.yml` — CI gate on pull requests and `main`
 - `ort/source-lock.json` — pinned ORT source + toolchain + build config (issue #19)
 - `scripts/build_runtime.py` — reproducible source build (issue #19 PR 1)
-- `scripts/generate_required_operators.py` — reduced-operator config (issue #19 PR 2)
 - `scripts/generate_runtime_supply_chain.py` — SBOM + provenance (issue #19 PR 3)
 - `scripts/run_runtime_benchmarks.py` — native compat+perf matrix (issue #19 PR 4)
 - `scripts/generate_runtime_catalog_entries.py` — catalog spec fragment (issue #19 PR 5)
-- `.github/workflows/ort-publish.yml` — build + publish workflow (issue #19 PR 5)
+- `.github/workflows/ort-build.yml` — cached Intel macOS build and Rosetta smoke
+- `.github/workflows/ort-directml.yml` — manual DirectML comparison build
+- `.github/workflows/official-runtime-smoke.yml` — official package smoke tests

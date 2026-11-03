@@ -150,10 +150,13 @@ class TargetConfigTests(unittest.TestCase):
             eps = lock["targets"][target]["execution_providers"]
             self.assertIn("xnnpack", eps)
 
-    def test_intel_macos_has_xnnpack(self):
+    def test_intel_macos_cross_compile_and_providers(self):
         lock = _load_lock()
-        eps = lock["targets"]["x86_64-apple-darwin"]["execution_providers"]
-        self.assertIn("xnnpack", eps)
+        target = lock["targets"]["x86_64-apple-darwin"]
+        self.assertEqual(target["execution_providers"], ["cpu", "coreml"])
+        self.assertIn("-DCMAKE_OSX_ARCHITECTURES=x86_64", target["cmake_args"])
+        self.assertIn("-Donnxruntime_USE_COREML=ON", target["cmake_args"])
+        self.assertEqual(target["deployment_target"], "14.0")
 
     def test_training_disabled_for_all_targets(self):
         lock = _load_lock()

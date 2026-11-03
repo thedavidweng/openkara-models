@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkara.dev/catalog/schema-channel-v2.json",
+  "title": "OpenKara catalog stable-channel pointer (v2)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "channel", "generation", "release_id", "release_manifest_url", "release_manifest_sha256", "release_manifest_size", "updated_at"],
+  "properties": {
+    "schema_version": {"const": "openkara.catalog/channel-v2"},
+    "channel": {"const": "stable"},
+    "generation": {"type": "integer", "minimum": 1},
+    "release_id": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}$"},
+    "release_manifest_url": {"type": "string", "pattern": "^https://"},
+    "release_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "release_manifest_size": {"type": "integer", "minimum": 1},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "previous_release_id": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}$"}
+  }
+}

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tarfile
 import tempfile
@@ -23,6 +24,21 @@ SCRIPTS_DIR = ROOT_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import build_runtime as br  # noqa: E402
+
+
+class IntelAvailabilityTests(unittest.TestCase):
+    def test_only_verified_coreml_lines_are_allowed(self):
+        def command(line):
+            warning = (
+                f"/src/core/providers/coreml/model/model.mm:{line}:3: warning: "
+                "new API [-Wunguarded-availability-new]"
+            )
+            return [sys.executable, "-c", f"print({warning!r})"]
+
+        with redirect_stdout(io.StringIO()):
+            br._run_intel_build(command(411), os.environ.copy())
+            with self.assertRaisesRegex(RuntimeError, "unexpected CoreML"):
+                br._run_intel_build(command(500), os.environ.copy())
 
 
 class LockedFlagTests(unittest.TestCase):
@@ -92,42 +108,30 @@ class LockedFlagTests(unittest.TestCase):
         mock_verify.assert_not_called()
 
 
-class ReducedBuildArgTests(unittest.TestCase):
-    """The reduced-operator publish pipeline (ort-publish.yml) builds every
-    target with --reduced, so the argument assembly for that flag must select
-    a dedicated <target>-reduced build dir and propagate reduced=True into
-    _build_target (which records ops_config_sha256 + names the -reduced
-    archive)."""
-
-    def test_reduced_flag_uses_reduced_build_dir_and_propagates(self):
-        captured: dict[str, object] = {}
-
-        def fake_build_target(lock, target, source_dir, build_dir, *, reduced=False):
-            captured["build_dir"] = str(build_dir)
-            captured["reduced"] = reduced
-            return {"reduced_build": reduced}
-
-        with mock.patch.object(sys, "argv", [
-            "build_runtime.py", "--target", "x86_64-unknown-linux-gnu",
-            "--reduced", "--skip-clone",
-        ]):
-            with mock.patch.object(br, "_load_lock", return_value={
-                "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
-                "submodules": {}, "targets": {"x86_64-unknown-linux-gnu": {}},
-                "reduced_build": {"config_path": "ort/required-operators.config"},
-            }):
-                with mock.patch.object(Path, "exists", return_value=True):
-                    with mock.patch.object(br, "_build_target", side_effect=fake_build_target):
-                        with mock.patch.object(br, "_package_target", return_value=Path("/tmp/x-reduced.tar.gz")):
-                            with mock.patch.object(br, "_sha256_file", return_value=(0, "0" * 64)):
-                                with redirect_stdout(io.StringIO()):
-                                    code = br.main()
-        self.assertEqual(code, 0)
-        self.assertIs(captured["reduced"], True)
-        self.assertTrue(
-            str(captured["build_dir"]).endswith("x86_64-unknown-linux-gnu-reduced"),
-            captured["build_dir"],
-        )
+class IntelPackageTests(unittest.TestCase):
+    def test_official_layout_and_relative_links(self):
+        target = "x86_64-apple-darwin"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            header = source / br.ort_api_version.HEADER_REL
+            header.parent.mkdir(parents=True)
+            header.write_text("header")
+            build = root / "build"
+            build.mkdir()
+            (build / "libonnxruntime.dylib").write_bytes(b"library")
+            lock = {"upstream": {"tag": "v1.31.1"}, "toolchain": {}, "targets": {target: {"artifact_name": "libonnxruntime.dylib", "archive_format": "tar.gz"}}}
+            with mock.patch.object(br, "BUILD_DIR", root / "work"), \
+                 mock.patch.object(br, "PACKAGES_DIR", root / "packages"), \
+                 mock.patch.object(br.ort_api_version, "required_headers", return_value=[header.name]):
+                output = br._package_target(lock, target, source, build, {})
+            with tarfile.open(output) as archive:
+                prefix = "onnxruntime-osx-x64-1.31.1/"
+                assert archive.getmember(prefix + "include/onnxruntime_c_api.h").isfile()
+                assert archive.getmember(prefix + "lib/libonnxruntime.1.31.1.dylib").isfile()
+                assert archive.getmember(prefix + "lib/libonnxruntime.dylib").linkname == "libonnxruntime.1.dylib"
+                manifest = json.load(archive.extractfile(prefix + "build-manifest.json"))
+                assert "lib/libonnxruntime.dylib" not in manifest["files"]
 
 
 class ReproducibilityTests(unittest.TestCase):

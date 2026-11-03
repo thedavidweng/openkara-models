@@ -306,19 +306,35 @@ def _version_ge(actual: str, required: str) -> bool:
     return _key(actual) >= _key(required)
 
 
+def _run_intel_build(cmd: list[str], env: dict[str, str]) -> None:
+    # The only caller of ConfigureOptimizationHints is guarded by macOS 15.
+    # Keep the compiler warnings visible and reject any other affected lines.
+    allowed_lines = {411, 413, 414, 416, 417}
+    diagnostic = re.compile(
+        r"core/providers/coreml/model/model\.mm:(\d+):\d+: warning: .*"
+        r"\[-Wunguarded-availability-new\]"
+    )
+    unexpected = []
+    print(f"  $ {' '.join(cmd)}", flush=True)
+    with subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, bufsize=1) as process:
+        assert process.stdout is not None
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            match = diagnostic.search(line)
+            if match and int(match.group(1)) not in allowed_lines:
+                unexpected.append(line.strip())
+        returncode = process.wait()
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, cmd)
+    if unexpected:
+        raise RuntimeError(f"unexpected CoreML availability warnings: {unexpected}")
+
+
 def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
-                  build_dir: Path, *, reduced: bool = False) -> dict[str, Any]:
+                  build_dir: Path) -> dict[str, Any]:
     target_config = lock["targets"][target]
     cmake_args = list(target_config["cmake_args"])
-    reduced_cfg = None
-    if reduced:
-        reduced_cfg = lock.get("reduced_build")
-        if not reduced_cfg:
-            raise RuntimeError(
-                "source lock has no reduced_build section; cannot build reduced runtime"
-            )
-        cmake_args.extend(reduced_cfg.get("extra_cmake_args", []))
-
     # Assert the toolchain matches the source lock before building.
     _assert_toolchain(lock, target)
 
@@ -337,36 +353,27 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
 
     # Configure.
     build_dir.mkdir(parents=True, exist_ok=True)
+    if target == "x86_64-apple-darwin":
+        coreml_source = source_dir / "onnxruntime/core/providers/coreml/model/model.mm"
+        cmake_include = build_dir / "coreml-availability.cmake"
+        cmake_include.write_text(
+            f'set_source_files_properties("{coreml_source}" PROPERTIES '
+            'COMPILE_OPTIONS "-Wno-error=unguarded-availability-new")\n',
+            encoding="utf-8",
+        )
+        cmake_args.append(f"-DCMAKE_PROJECT_onnxruntime_INCLUDE={cmake_include}")
     configure_cmd = ["cmake", "-S", str(source_dir / "cmake"), "-B", str(build_dir),
                      *cmake_args]
     _run(configure_cmd, env=env)
-
-    # Reduced-operator build: run ORT's reduce_op_kernels.py after configure
-    # to prune unused operator kernels from the generated source. This keeps
-    # ONNX-format model support, runtime optimization, and EP partitioning;
-    # it only removes kernels for operators not in the required-operators config.
-    if reduced:
-        config_path = ROOT / reduced_cfg["config_path"]
-        if not config_path.is_file():
-            raise FileNotFoundError(
-                f"required-operators config not found: {config_path}. "
-                "Run scripts/generate_required_operators.py first."
-            )
-        script = source_dir / reduced_cfg["reduce_op_kernels_script"]
-        if not script.is_file():
-            raise FileNotFoundError(
-                f"reduce_op_kernels.py not found at {script}; "
-                "source checkout may be incomplete"
-            )
-        _run([sys.executable, str(script),
-              "--cmake_build_dir", str(build_dir),
-              str(config_path)], env=env)
 
     # Build.
     nproc = min(os.cpu_count() or 1, 2)
     build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release",
                  "--parallel", str(nproc)]
-    _run(build_cmd, env=env)
+    if target == "x86_64-apple-darwin":
+        _run_intel_build(build_cmd, env)
+    else:
+        _run(build_cmd, env=env)
 
     # Collect build metadata. NOTE: build_host (hostname) is intentionally
     # omitted from the manifest — it varies per build host and breaks
@@ -383,9 +390,6 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
         "build_arch": platform.machine(),
         "ort_api_version": ort_api_version_value,
     }
-    if reduced:
-        meta["reduced_build"] = True
-        meta["ops_config_sha256"] = _sha256_file(ROOT / reduced_cfg["config_path"])[1]
     return meta
 
 
@@ -406,34 +410,48 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
+    intel_macos = target == "x86_64-apple-darwin"
+    version = lock["upstream"]["tag"].lstrip("v")
+    payload = staging / f"onnxruntime-osx-x64-{version}" if intel_macos else staging
+    payload.mkdir(exist_ok=True)
+    header_dir = payload / "include" if intel_macos else payload
+    header_dir.mkdir(exist_ok=True)
 
     header = source_dir / ort_api_version.HEADER_REL
     for name in ort_api_version.required_headers(header.read_bytes(), lambda name: header.with_name(name).read_bytes()):
-        shutil.copy2(header.with_name(name), staging / name)
+        shutil.copy2(header.with_name(name), header_dir / name)
 
-    # Copy runtime library.
-    shutil.copy2(lib_path, staging / lib_path.name)
+    # Match the official macOS archive layout for the Intel build.
+    if intel_macos:
+        lib_dir = payload / "lib"
+        lib_dir.mkdir()
+        versioned = f"libonnxruntime.{version}.dylib"
+        shutil.copy2(lib_path, lib_dir / versioned)
+        (lib_dir / "libonnxruntime.1.dylib").symlink_to(versioned)
+        (lib_dir / "libonnxruntime.dylib").symlink_to("libonnxruntime.1.dylib")
+    else:
+        shutil.copy2(lib_path, payload / lib_path.name)
 
     # Copy companion libraries.
     for comp in companion_libs:
         comp_path = _find_library(build_dir, comp)
         if comp_path:
-            shutil.copy2(comp_path, staging / comp_path.name)
+            shutil.copy2(comp_path, payload / comp_path.name)
 
     # Copy licenses and notices from source.
     license_file = source_dir / "LICENSE"
     if license_file.is_file():
-        shutil.copy2(license_file, staging / "LICENSE.onnxruntime")
+        shutil.copy2(license_file, payload / ("LICENSE" if intel_macos else "LICENSE.onnxruntime"))
     # ORT uses ThirdPartyNotices.txt, not NOTICE
     notice_file = source_dir / "NOTICE"
     if not notice_file.is_file():
         notice_file = source_dir / "ThirdPartyNotices.txt"
     if notice_file.is_file():
-        shutil.copy2(notice_file, staging / "NOTICE.onnxruntime")
+        shutil.copy2(notice_file, payload / ("ThirdPartyNotices.txt" if intel_macos else "NOTICE.onnxruntime"))
     # Third-party licenses
     tp_licenses = source_dir / "cmake" / "external" / "LICENSES"
     if tp_licenses.is_dir():
-        shutil.copytree(tp_licenses, staging / "third-party-licenses", dirs_exist_ok=True)
+        shutil.copytree(tp_licenses, payload / "third-party-licenses", dirs_exist_ok=True)
 
     # Write build manifest.
     manifest = {
@@ -454,13 +472,13 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     }
 
     # Compute digests for all staged files.
-    for f in sorted(staging.rglob("*")):
-        if f.is_file():
-            rel = f.relative_to(staging).as_posix()
+    for f in sorted(payload.rglob("*")):
+        if f.is_file() and not f.is_symlink():
+            rel = f.relative_to(payload).as_posix()
             size, sha = _sha256_file(f)
             manifest["files"][rel] = {"size": size, "sha256": sha}
 
-    with (staging / "build-manifest.json").open("w", encoding="utf-8") as fh:
+    with (payload / "build-manifest.json").open("w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True, ensure_ascii=False)
         fh.write("\n")
 
@@ -468,10 +486,7 @@ def _package_target(lock: dict[str, Any], target: str, source_dir: Path,
     # commit date as their mtime so the same source lock + toolchain produces
     # byte-identical archives across different build hosts and times.
     PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
-    version = lock["upstream"]["tag"].lstrip("v")
     archive_base = f"onnxruntime-{version}-openkara-{target}"
-    if build_meta.get("reduced_build"):
-        archive_base += "-reduced"
     fixed_timestamp = _ort_commit_timestamp(lock)
 
     if archive_format == "tar.gz":
@@ -515,7 +530,14 @@ def _make_tar(archive_path: Path, staging: Path, fixed_timestamp: int) -> None:
     with gzip.GzipFile(fileobj=buf, mode="wb", mtime=fixed_timestamp, filename="") as gz:
         with tarfile.open(fileobj=gz, mode="w") as tar:
             for f in sorted(staging.rglob("*")):
-                if f.is_file():
+                if f.is_symlink():
+                    info = tarfile.TarInfo(name=f.relative_to(staging).as_posix())
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = os.readlink(f)
+                    info.mtime = fixed_timestamp
+                    info.mode = 0o755
+                    tar.addfile(info)
+                elif f.is_file():
                     rel = f.relative_to(staging).as_posix()
                     info = tarfile.TarInfo(name=rel)
                     info.size = f.stat().st_size
@@ -574,21 +596,11 @@ def main() -> int:
                              "submodules exactly match the source lock before "
                              "building. Required by the verification commands "
                              "(verify_runtime_package.py, CI).")
-    parser.add_argument("--reduced", action="store_true",
-                        help="Build a reduced-operator runtime. Requires "
-                             "ort/required-operators.config (generate with "
-                             "scripts/generate_required_operators.py). Prunes "
-                             "unused operator kernels via reduce_op_kernels.py "
-                             "while retaining ONNX-format, runtime optimization, "
-                             "and EP partitioning support.")
     args = parser.parse_args()
 
     lock = _load_lock()
     source_dir = args.source_dir
     build_dir = args.build_dir or (BUILD_DIR / args.target)
-    if args.reduced:
-        build_dir = build_dir.parent / f"{args.target}-reduced" if build_dir.name == args.target else build_dir
-
     if not args.skip_clone:
         print(f"Cloning ORT {lock['upstream']['tag']} ({lock['upstream']['commit_sha'][:12]})...")
         _clone_source(lock, source_dir)
@@ -606,8 +618,8 @@ def main() -> int:
         _verify_submodules(lock, source_dir)
         print("  source lock verified.")
 
-    print(f"Building for {args.target}{' (reduced)' if args.reduced else ''}...")
-    build_meta = _build_target(lock, args.target, source_dir, build_dir, reduced=args.reduced)
+    print(f"Building for {args.target}...")
+    build_meta = _build_target(lock, args.target, source_dir, build_dir)
 
     print(f"Packaging {args.target}...")
     archive_path = _package_target(lock, args.target, source_dir, build_dir, build_meta)
