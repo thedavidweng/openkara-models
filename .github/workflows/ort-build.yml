@@ -22,6 +22,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-intel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   intel:
     runs-on: macos-latest
