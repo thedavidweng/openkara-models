@@ -306,6 +306,31 @@ def _version_ge(actual: str, required: str) -> bool:
     return _key(actual) >= _key(required)
 
 
+def _run_intel_build(cmd: list[str], env: dict[str, str]) -> None:
+    # The only caller of ConfigureOptimizationHints is guarded by macOS 15.
+    # Keep the compiler warnings visible and reject any other affected lines.
+    allowed_lines = {411, 413, 414, 416, 417}
+    diagnostic = re.compile(
+        r"core/providers/coreml/model/model\.mm:(\d+):\d+: warning: .*"
+        r"\[-Wunguarded-availability-new\]"
+    )
+    unexpected = []
+    print(f"  $ {' '.join(cmd)}", flush=True)
+    with subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, bufsize=1) as process:
+        assert process.stdout is not None
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            match = diagnostic.search(line)
+            if match and int(match.group(1)) not in allowed_lines:
+                unexpected.append(line.strip())
+        returncode = process.wait()
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, cmd)
+    if unexpected:
+        raise RuntimeError(f"unexpected CoreML availability warnings: {unexpected}")
+
+
 def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
                   build_dir: Path) -> dict[str, Any]:
     target_config = lock["targets"][target]
@@ -328,6 +353,15 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
 
     # Configure.
     build_dir.mkdir(parents=True, exist_ok=True)
+    if target == "x86_64-apple-darwin":
+        coreml_source = source_dir / "onnxruntime/core/providers/coreml/model/model.mm"
+        cmake_include = build_dir / "coreml-availability.cmake"
+        cmake_include.write_text(
+            f'set_source_files_properties("{coreml_source}" PROPERTIES '
+            'COMPILE_OPTIONS "-Wno-error=unguarded-availability-new")\n',
+            encoding="utf-8",
+        )
+        cmake_args.append(f"-DCMAKE_PROJECT_onnxruntime_INCLUDE={cmake_include}")
     configure_cmd = ["cmake", "-S", str(source_dir / "cmake"), "-B", str(build_dir),
                      *cmake_args]
     _run(configure_cmd, env=env)
@@ -336,7 +370,10 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
     nproc = min(os.cpu_count() or 1, 2)
     build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release",
                  "--parallel", str(nproc)]
-    _run(build_cmd, env=env)
+    if target == "x86_64-apple-darwin":
+        _run_intel_build(build_cmd, env)
+    else:
+        _run(build_cmd, env=env)
 
     # Collect build metadata. NOTE: build_host (hostname) is intentionally
     # omitted from the manifest — it varies per build host and breaks

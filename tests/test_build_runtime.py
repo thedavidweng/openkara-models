@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tarfile
 import tempfile
@@ -23,6 +24,21 @@ SCRIPTS_DIR = ROOT_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import build_runtime as br  # noqa: E402
+
+
+class IntelAvailabilityTests(unittest.TestCase):
+    def test_only_verified_coreml_lines_are_allowed(self):
+        def command(line):
+            warning = (
+                f"/src/core/providers/coreml/model/model.mm:{line}:3: warning: "
+                "new API [-Wunguarded-availability-new]"
+            )
+            return [sys.executable, "-c", f"print({warning!r})"]
+
+        with redirect_stdout(io.StringIO()):
+            br._run_intel_build(command(411), os.environ.copy())
+            with self.assertRaisesRegex(RuntimeError, "unexpected CoreML"):
+                br._run_intel_build(command(500), os.environ.copy())
 
 
 class LockedFlagTests(unittest.TestCase):
