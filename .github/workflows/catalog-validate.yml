@@ -28,11 +28,33 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  validate:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+  changes:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|catalog/|ort/source-lock\.json|scripts/(catalog_|validate_catalog|generate_catalog|generate_supply_chain|verify_supply_chain|publish_catalog)|tests/test_(catalog|supply_chain|publish_catalog))'; then
+              echo 'run=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+  catalog:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -99,3 +121,17 @@ jobs:
 
       - name: Syntax check catalog scripts
         run: python -m compileall -q scripts/catalog_model.py scripts/validate_catalog.py scripts/generate_catalog_fixtures.py scripts/generate_catalog_release.py scripts/generate_supply_chain.py scripts/verify_supply_chain.py scripts/publish_catalog_release.py
+
+  validate:
+    if: always()
+    needs: [changes, catalog]
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          CATALOG: ${{ needs.catalog.result }}
+          EXPECTED: ${{ needs.changes.outputs.run }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$EXPECTED" = true ]; then test "$CATALOG" = success; else test "$CATALOG" = skipped; fi
