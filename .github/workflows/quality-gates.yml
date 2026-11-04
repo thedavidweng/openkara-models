@@ -35,7 +35,7 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
             files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(compare_runtimes|run_linux_runtime_comparison|spectral_reference)\.py|tests/(fixtures/|test_(compare_runtimes|spectral_contract)\.py))'; then
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|compare_runtimes|generate_spectral_golden_vectors|run_linux_runtime_comparison|run_native_smoke|run_runtime_benchmarks|spectral_reference)\.py|tests/(fixtures/|test_(compare_runtimes|spectral_contract)\.py))'; then
               echo 'run=true' >> "$GITHUB_OUTPUT"
             else
               echo 'run=false' >> "$GITHUB_OUTPUT"
