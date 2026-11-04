@@ -309,6 +309,8 @@ def _build_target(lock: dict[str, Any], target: str, source_dir: Path,
                   build_dir: Path) -> dict[str, Any]:
     target_config = lock["targets"][target]
     cmake_args = list(target_config["cmake_args"])
+    if target_config.get("deployment_target") and "darwin" in target:
+        cmake_args.append(f'-DCMAKE_OSX_DEPLOYMENT_TARGET={target_config["deployment_target"]}')
     # Assert the toolchain matches the source lock before building.
     _assert_toolchain(lock, target)
 

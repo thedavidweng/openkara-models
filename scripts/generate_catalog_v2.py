@@ -81,6 +81,9 @@ def extracted_digests(path: Path) -> dict[str, dict]:
 
 def generate(packages: Path, intel: Path, release_id: str, created_at: str, producer_commit: str) -> dict:
     old = json.loads((ROOT / "catalog/releases/2026-08-12-001.json").read_text())
+    deployment_target = json.loads((ROOT / "ort/source-lock.json").read_text())["targets"]["x86_64-apple-darwin"]["deployment_target"]
+    pointer = json.loads((ROOT / "catalog/channels/stable-v2.json").read_text())
+    current = json.loads((ROOT / "catalog/releases" / f'{pointer["release_id"]}.json').read_text())
     models = [copy.deepcopy(m) for m in old["artifacts"]["models"] if not m["deprecation"]["deprecated"]]
     model_ids = [model["artifact_id"] for model in models]
     runtimes = []
@@ -92,7 +95,7 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
         template = next(r for r in old["artifacts"]["runtimes"] if r["target_triple"] == target and not r["deprecation"]["deprecated"] and "cpu" in r["runtime"]["execution_providers"])
         runtime = copy.deepcopy(template)
         runtime.update({
-            "artifact_id": f"onnxruntime-{VERSION}-{target}",
+            "artifact_id": f"onnxruntime-{VERSION}-{target}" + (f"-{sha256[:16]}" if path == intel else ""),
             "filename": filename,
             "download_url": (f"https://github.com/thedavidweng/openkara-models/releases/download/infra-{release_id}/{filename}" if path == intel else OFFICIAL + filename),
             "byte_size": size,
@@ -103,9 +106,9 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
         runtime.pop("supply_chain", None)
         runtime["runtime"].update({"version": f"v{VERSION}", "ort_c_api_level": "31", "execution_providers": ["cpu", "coreml"] if target == "aarch64-apple-darwin" else ["cpu"], "companion_files": [], "supported_model_artifact_ids": model_ids})
         if target == "x86_64-apple-darwin":
-            runtime["runtime"]["deployment_target"] = "10.15"
+            runtime["runtime"]["deployment_target"] = deployment_target
         elif target == "aarch64-apple-darwin":
-            runtime["runtime"]["deployment_target"] = "14.0"
+            runtime["runtime"]["deployment_target"] = next(r for r in current["artifacts"]["runtimes"] if r["target_triple"] == target)["runtime"]["deployment_target"]
         runtime["toolchain"] = {"image": "macos-latest" if path == intel else "Microsoft official release", "compiler": "Apple clang" if path == intel else "Microsoft official build", "cmake_flags": []}
         runtimes.append(runtime)
 
