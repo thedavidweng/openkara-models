@@ -22,26 +22,27 @@ jobs:
     timeout-minutes: 5
     permissions: {contents: read}
     outputs:
-      run: ${{ steps.paths.outputs.run }}
+      matrix: ${{ steps.paths.outputs.matrix }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 tests/test_classify_codeql.py
       - id: paths
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          EVENT: ${{ github.event_name }}
         run: |
-          if [ -z "$PR" ]; then
-            echo 'run=true' >> "$GITHUB_OUTPUT"
+          if [ -n "$PR" ]; then
+            gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files" > changed-files.txt
           else
-            files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Ev '(^docs/|\.md$)' | grep -q .; then
-              echo 'run=true' >> "$GITHUB_OUTPUT"
-            else
-              echo 'run=false' >> "$GITHUB_OUTPUT"
-            fi
+            : > changed-files.txt
           fi
+          echo "matrix=$(python3 scripts/classify_codeql.py changed-files.txt "$EVENT")" >> "$GITHUB_OUTPUT"
   analyze:
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    if: needs.changes.outputs.matrix != '{"include":[]}'
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -51,14 +52,7 @@ jobs:
       security-events: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - language: actions
-            queries: ''
-          - language: c-cpp
-            queries: ''
-          - language: python
-            queries: security-extended
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,7 +79,7 @@ jobs:
       - env:
           CHANGES: ${{ needs.changes.result }}
           RESULT: ${{ needs.analyze.result }}
-          EXPECTED: ${{ needs.changes.outputs.run }}
+          MATRIX: ${{ needs.changes.outputs.matrix }}
         run: |
           test "$CHANGES" = success
-          if [ "$EXPECTED" = true ]; then test "$RESULT" = success; else test "$RESULT" = skipped; fi
+          if [ "$MATRIX" = '{"include":[]}' ]; then test "$RESULT" = skipped; else test "$RESULT" = success; fi

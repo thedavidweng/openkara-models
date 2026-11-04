@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/workflows/**"
       - "scripts/compare_runtimes.py"
       - "scripts/run_linux_runtime_comparison.py"
       - "tests/fixtures/**"
