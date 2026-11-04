@@ -17,11 +17,33 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-differential-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|compare_runtimes|generate_spectral_golden_vectors|run_linux_runtime_comparison|run_native_smoke|run_runtime_benchmarks|spectral_reference)\.py|tests/(fixtures/|test_(compare_runtimes|spectral_contract)\.py))'; then
+              echo 'run=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
   compare:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -37,3 +59,17 @@ jobs:
         run: python -m pytest tests/test_compare_runtimes.py tests/test_spectral_contract.py -q
       - name: Compare official candidate with current stable runtime
         run: python scripts/run_linux_runtime_comparison.py --report runtime-comparison.json
+  gate:
+    name: Differential Gate
+    if: always()
+    needs: [changes, compare]
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          RESULT: ${{ needs.compare.result }}
+          EXPECTED: ${{ needs.changes.outputs.run }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$EXPECTED" = true ]; then test "$RESULT" = success; else test "$RESULT" = skipped; fi

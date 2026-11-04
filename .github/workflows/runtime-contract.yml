@@ -12,11 +12,33 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-runtime-contract-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  gate:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+  changes:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|scripts/(onnx_runtime_contract|spectral_core_graph|spectral_core_patch|export_spectral_core)\.py|tests/test_(runtime_contract_gate|spectral_core_graph|spectral_core_patch)\.py|requirements)'; then
+              echo 'run=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+  contract:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -51,3 +73,17 @@ jobs:
 
       - name: Syntax check scripts
         run: python -m compileall -q scripts
+
+  gate:
+    if: always()
+    needs: [changes, contract]
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          CONTRACT: ${{ needs.contract.result }}
+          EXPECTED: ${{ needs.changes.outputs.run }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$EXPECTED" = true ]; then test "$CONTRACT" = success; else test "$CONTRACT" = skipped; fi

@@ -125,7 +125,7 @@ class ReproducibilityTests(unittest.TestCase):
         lock = {
             "upstream": {"commit_sha": "a" * 40, "tag": "v1.27.1", "repo": "microsoft/onnxruntime"},
             "submodules": {},
-            "targets": {"x86_64-apple-darwin": {"cmake_args": []}},
+            "targets": {"x86_64-apple-darwin": {"cmake_args": [], "deployment_target": "14.2"}},
             "toolchain": {"python_version": "3.11", "cmake_minimum_version": "3.28",
                           "xcode_version": "16.0", "gcc_version": "13",
                           "visual_studio_version": "2022"},
@@ -148,6 +148,7 @@ class ReproducibilityTests(unittest.TestCase):
                                                             source_dir, build_dir)
         self.assertNotIn("build_host", meta,
                          "build_host must not be in build metadata (reproducibility)")
+        self.assertIn("-DCMAKE_OSX_DEPLOYMENT_TARGET=14.2", meta["cmake_args"])
         self.assertIn("build_os", meta)
         self.assertIn("build_arch", meta)
         self.assertEqual(meta["ort_api_version"], 27)

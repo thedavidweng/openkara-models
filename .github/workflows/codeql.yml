@@ -14,11 +14,34 @@ permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: {contents: read}
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
+            if printf '%s\n' "$files" | grep -Ev '(^docs/|\.md$)' | grep -q .; then
+              echo 'run=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
   analyze:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -52,3 +75,17 @@ jobs:
         with:
           category: /language:${{ matrix.language }}
           upload: always
+  gate:
+    name: CodeQL Gate
+    if: always()
+    needs: [changes, analyze]
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          RESULT: ${{ needs.analyze.result }}
+          EXPECTED: ${{ needs.changes.outputs.run }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$EXPECTED" = true ]; then test "$RESULT" = success; else test "$RESULT" = skipped; fi

@@ -107,4 +107,6 @@ def test_generated_catalog_advances_v2_and_marks_intel_cpu_only(tmp_path, monkey
     assert result["generation"] == pointer["generation"] + 1
     runtime = result["artifacts"]["runtimes"][0]
     assert runtime["runtime"]["execution_providers"] == ["cpu"]
-    assert runtime["runtime"]["deployment_target"] == "10.15"
+    assert runtime["artifact_id"].endswith(generator.digest_file(archive_path)[1][:16])
+    lock = json.loads((ROOT / "ort/source-lock.json").read_text())
+    assert runtime["runtime"]["deployment_target"] == lock["targets"]["x86_64-apple-darwin"]["deployment_target"]

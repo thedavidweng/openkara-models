@@ -6,30 +6,42 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    paths:
-      - "models/source-lock.json"
-      - "scripts/detect_model_weight_revision.py"
-      - "scripts/detect_ort_release.py"
-      - "scripts/validate_model_source_lock.py"
-      - "scripts/generate_dep_candidate.py"
-      - "scripts/dispatch_dep_candidate.py"
-      - "tests/test_dep_detection.py"
-      - "tests/test_dep_candidate.py"
-      - ".github/workflows/dep-detection.yml"
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+    steps:
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
+            if printf '%s\n' "$files" | grep -Eq '^(\.github/workflows/|models/source-lock\.json|scripts/(detect_model_weight_revision|detect_ort_release|validate_model_source_lock|generate_dep_candidate|dispatch_dep_candidate)\.py|tests/test_dep_(detection|candidate)\.py)'; then
+              echo 'run=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
   # PR-time validation of the model source lock and detection/candidate
   # scripts. Detection jobs poll upstream APIs and only run on schedule
   # or manual dispatch.
   validate-locks:
-    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event_name == 'pull_request') }}
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -51,6 +63,7 @@ jobs:
         run: python -m compileall -q scripts/detect_model_weight_revision.py scripts/detect_ort_release.py scripts/validate_model_source_lock.py scripts/generate_dep_candidate.py
 
   detect-ort:
+    needs: changes
     permissions:
       contents: read
       pull-requests: read
@@ -100,6 +113,7 @@ jobs:
           python -m pytest tests/test_dep_detection.py -q
 
   detect-model-weights:
+    needs: changes
     permissions:
       contents: read
       pull-requests: read
@@ -146,3 +160,29 @@ jobs:
           MODEL_COMMIT: ${{ steps.detect.outputs.latest_commit }}
         run: |
           python scripts/dispatch_dep_candidate.py --model "$MODEL" --model-commit "$MODEL_COMMIT"
+
+  gate:
+    name: Dependency Detection Gate
+    if: always()
+    needs: [changes, validate-locks, detect-ort, detect-model-weights]
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - env:
+          EVENT: ${{ github.event_name }}
+          CHANGES: ${{ needs.changes.result }}
+          EXPECTED: ${{ needs.changes.outputs.run }}
+          VALIDATE: ${{ needs.validate-locks.result }}
+          ORT: ${{ needs.detect-ort.result }}
+          MODELS: ${{ needs.detect-model-weights.result }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$EVENT" = pull_request ]; then
+            if [ "$EXPECTED" = true ]; then test "$VALIDATE" = success; else test "$VALIDATE" = skipped; fi
+            test "$ORT" = skipped
+            test "$MODELS" = skipped
+          else
+            test "$VALIDATE" = skipped
+            test "$ORT" = success
+            test "$MODELS" = success
+          fi
