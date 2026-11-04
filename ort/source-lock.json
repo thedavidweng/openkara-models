@@ -261,7 +261,7 @@
         "cpu"
       ],
       "runner": "macos-latest",
-      "runner_note": "Cross-compile on Apple Silicon and validate under Rosetta."
+      "runner_note": "Cross-compile on Apple Silicon and validate under Rosetta. CI routing verification."
     },
     "x86_64-pc-windows-msvc-cpu": {
       "archive_format": "zip",
