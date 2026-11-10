@@ -65,6 +65,94 @@ def test_compare_with_lock_commit_update() -> None:
     assert c["update_available"] is True
 
 
+def test_compare_with_lock_older_latest_is_not_update() -> None:
+    """Issue #151: a later-published older tag must not flag the lock stale."""
+    import detect_ort_release as d
+    latest = {"tag": "v1.30.1", "commit_sha": "older1"}
+    lock = {"upstream": {"tag": "v1.31.1", "commit_sha": "abc123"}}
+    c = d.compare_with_lock(latest, lock)
+    assert c["update_available"] is False
+
+
+def test_compare_with_lock_semver_not_lexicographic() -> None:
+    import detect_ort_release as d
+    latest = {"tag": "v1.100.0", "commit_sha": "def456"}
+    lock = {"upstream": {"tag": "v1.31.1", "commit_sha": "abc123"}}
+    assert d.compare_with_lock(latest, lock)["update_available"] is True
+
+
+def _rel(tag: str, published_at: str, prerelease: bool = False) -> dict:
+    return {"tag_name": tag, "prerelease": prerelease, "published_at": published_at}
+
+
+# Real publish order from microsoft/onnxruntime on 2026-11-09: v1.30.1 was
+# published after v1.31.1, and plugin tags are interleaved.
+_RELEASES_151 = [
+    _rel("v1.30.1", "2026-10-29T22:01:54Z"),
+    _rel("plugin-ep-webgpu/v0.5.0", "2026-10-29T21:30:05Z"),
+    _rel("v1.31.1", "2026-10-26T19:29:51Z"),
+    _rel("v1.31.0", "2026-10-09T04:51:32Z"),
+    _rel("plugin-ep-cuda/v0.3.0", "2026-10-09T00:49:01Z"),
+    _rel("v1.28.3", "2026-10-02T20:48:43Z"),
+    _rel("v1.30.0", "2026-09-10T16:55:55Z"),
+]
+
+
+def test_select_latest_stable_uses_semver_not_publish_order() -> None:
+    import detect_ort_release as d
+    assert d.select_latest_stable(_RELEASES_151)["tag_name"] == "v1.31.1"
+
+
+def test_select_latest_stable_ignores_prereleases() -> None:
+    import detect_ort_release as d
+    releases = [
+        _rel("v1.32.0-rc1", "2026-11-05T00:00:00Z"),
+        _rel("v1.32.0", "2026-11-04T00:00:00Z", prerelease=True),
+        *_RELEASES_151,
+    ]
+    assert d.select_latest_stable(releases)["tag_name"] == "v1.31.1"
+
+
+def test_select_latest_stable_no_stable_raises() -> None:
+    import pytest
+    import detect_ort_release as d
+    with pytest.raises(RuntimeError):
+        d.select_latest_stable([_rel("v1.32.0-rc1", "x"), _rel("plugin-ep-cuda/v0.3.0", "x")])
+
+
+def _detect_with(monkeypatch, releases: list) -> dict:
+    import detect_ort_release as d
+    monkeypatch.setattr(d, "_github_get", lambda url, token=None: releases)
+    monkeypatch.setattr(d, "_tag_commit_sha", lambda repo, tag, token=None: f"sha-{tag}")
+    return d.detect_latest_stable()
+
+
+def test_issue_151_lock_v1_31_1_is_up_to_date(monkeypatch) -> None:
+    import detect_ort_release as d
+    latest = _detect_with(monkeypatch, _RELEASES_151)
+    assert latest["tag"] == "v1.31.1"
+    lock = {"upstream": {"tag": "v1.31.1", "commit_sha": "sha-v1.31.1"}}
+    c = d.compare_with_lock(latest, lock)
+    assert c["update_available"] is False
+    assert c["latest_tag"] == "v1.31.1"
+
+
+def test_newer_stable_still_reports_update(monkeypatch) -> None:
+    import detect_ort_release as d
+    releases = [
+        _rel("v1.30.2", "2026-11-08T00:00:00Z"),
+        _rel("v1.33.0-rc1", "2026-11-07T00:00:00Z"),
+        _rel("v1.32.0", "2026-11-06T00:00:00Z"),
+        *_RELEASES_151,
+    ]
+    latest = _detect_with(monkeypatch, releases)
+    assert latest["tag"] == "v1.32.0"
+    lock = {"upstream": {"tag": "v1.31.1", "commit_sha": "sha-v1.31.1"}}
+    c = d.compare_with_lock(latest, lock)
+    assert c["update_available"] is True
+    assert c["latest_tag"] == "v1.32.0"
+
+
 def test_detect_ort_release_help() -> None:
     r = subprocess.run(
         [sys.executable, str(SCRIPTS / "detect_ort_release.py"), "--help"],
