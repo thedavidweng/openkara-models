@@ -47,7 +47,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir packages
-          gh release download v1.31.1 --repo microsoft/onnxruntime --dir packages --pattern 'onnxruntime-linux-x64-1.31.1.tgz' --pattern 'onnxruntime-linux-aarch64-1.31.1.tgz' --pattern 'onnxruntime-osx-arm64-1.31.1.tgz' --pattern 'onnxruntime-win-x64-1.31.1.zip'
+          gh release download v1.32.0 --repo microsoft/onnxruntime --dir packages --pattern 'onnxruntime-linux-x64-1.32.0.tgz' --pattern 'onnxruntime-linux-aarch64-1.32.0.tgz' --pattern 'onnxruntime-osx-arm64-1.32.0.tgz' --pattern 'onnxruntime-win-x64-1.32.0.zip'
           python -c 'import sys,urllib.request; from pathlib import Path; sys.path.insert(0,"scripts"); from generate_catalog_v2 import PLUGINS; [(urllib.request.urlretrieve(u, Path("packages") / u.rsplit("/",1)[-1])) for u,_,_ in PLUGINS.values()]'
       - name: Generate manifest
         env:

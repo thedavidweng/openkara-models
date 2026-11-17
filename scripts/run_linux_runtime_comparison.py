@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OFFICIAL = "https://github.com/microsoft/onnxruntime/releases/download"
 HEADERS = {
     "1.27.1": (8828892, "25b1ef1fea1acd210d63f8f24dc870ad6e077795ce1f54876252c6d3803c15af"),
-    "1.31.1": (11413655, "c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9"),
+    "1.32.0": (13425244, "bb169b7e374731730d2ae406fb39de7be4b315f413a9132efe896261c31bb503"),
 }
 
 
@@ -81,7 +81,7 @@ def main() -> int:
             download(f"{OFFICIAL}/v{version}/{name}", archive, size, digest)
             unpack_headers(archive, tmp / f"source-{version}")
             archives[version] = archive
-        candidate = args.candidate.resolve() if args.candidate else archives["1.31.1"]
+        candidate = args.candidate.resolve() if args.candidate else archives["1.32.0"]
         with candidate.open("rb") as file:
             candidate_sha256 = hashlib.file_digest(file, "sha256").hexdigest()
         return subprocess.run([
@@ -92,7 +92,7 @@ def main() -> int:
             "--candidate", str(candidate),
             "--candidate-size", str(candidate.stat().st_size),
             "--candidate-sha256", candidate_sha256,
-            "--candidate-source", str(tmp / ("source-1.27.1" if args.candidate else "source-1.31.1")),
+            "--candidate-source", str(tmp / ("source-1.27.1" if args.candidate else "source-1.32.0")),
             "--model", str(model_path), "--report", str(args.report.resolve()),
         ], check=False).returncode
 

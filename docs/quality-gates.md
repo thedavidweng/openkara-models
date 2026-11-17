@@ -16,7 +16,7 @@ providers require their own measurements.
 
 On Linux x64 the comparison also measures cold session load and warm RTF;
 the candidate fails when either median exceeds 1.5 times the stable value.
-The PR workflow compares the current stable runtime with official ORT 1.31.1.
+The PR workflow compares the current stable runtime with official ORT 1.32.0.
 The runtime publication workflow compares the actual built Linux x64
 candidate with stable before publishing. Model publication runs the same
 runtime comparison alongside export validation. The comparison does not

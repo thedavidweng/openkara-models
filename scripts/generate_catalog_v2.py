@@ -15,14 +15,14 @@ import archive_utils
 from validate_catalog import validate_document
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "1.31.1"
-COMMIT = "6af1a932e2286d5c58166085d24c68783033edee"
-OFFICIAL = "https://github.com/microsoft/onnxruntime/releases/download/v1.31.1/"
+VERSION = "1.32.0"
+COMMIT = "fab30a46491a40f5e4c968b80e8a59acbbb91b53"
+OFFICIAL = "https://github.com/microsoft/onnxruntime/releases/download/v1.32.0/"
 PACKAGES = {
-    "aarch64-apple-darwin": ("onnxruntime-osx-arm64-1.31.1.tgz", 36936435, "2e1344a1926ee50eb25b38153cb6992c3567515aef0e677a1a520a1798896d6f"),
-    "aarch64-unknown-linux-gnu": ("onnxruntime-linux-aarch64-1.31.1.tgz", 10332381, "5317505e2da99be65f8e2775ba3c2afd6d2961fd78aba1bd8f56159f48820c78"),
-    "x86_64-unknown-linux-gnu": ("onnxruntime-linux-x64-1.31.1.tgz", 11413655, "c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9"),
-    "x86_64-pc-windows-msvc": ("onnxruntime-win-x64-1.31.1.zip", 82929944, "5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c"),
+    "aarch64-apple-darwin": ("onnxruntime-osx-arm64-1.32.0.tgz", 38721388, "8ddca23f532b9d4fbb279ba9b08dab6c0ac94fdc9aec2eb44a1db7049216c043"),
+    "aarch64-unknown-linux-gnu": ("onnxruntime-linux-aarch64-1.32.0.tgz", 11167120, "81a46251dd90da4122f4b9ceb4433f836fbc79ee1eddffca7c09033af81a1939"),
+    "x86_64-unknown-linux-gnu": ("onnxruntime-linux-x64-1.32.0.tgz", 13425244, "bb169b7e374731730d2ae406fb39de7be4b315f413a9132efe896261c31bb503"),
+    "x86_64-pc-windows-msvc": ("onnxruntime-win-x64-1.32.0.zip", 96945131, "aaa1d04fcf86bd31e84b90bc0cbde80e632bd0720dcc5d8ba05c4fe45c09d127"),
 }
 PLUGINS = {
     "aarch64-apple-darwin": ("https://files.pythonhosted.org/packages/2c/c3/e047d38981e7d6f198f92b488e2c9cd12e45c73017ec851996ea69778922/onnxruntime_ep_webgpu-0.5.0-py3-none-macosx_14_0_universal2.whl", 4864395, "c9a757c7afaf114fde86993420810ff616e2d3046d42ae419bb0c8b9ebcf57fb"),
@@ -104,7 +104,7 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
             "upstream": {"project": "microsoft/onnxruntime", "tag": f"v{VERSION}", "commit_sha": COMMIT},
         })
         runtime.pop("supply_chain", None)
-        runtime["runtime"].update({"version": f"v{VERSION}", "ort_c_api_level": "31", "execution_providers": ["cpu", "coreml"] if target == "aarch64-apple-darwin" else ["cpu"], "companion_files": [], "supported_model_artifact_ids": model_ids})
+        runtime["runtime"].update({"version": f"v{VERSION}", "ort_c_api_level": "32", "execution_providers": ["cpu", "coreml"] if target == "aarch64-apple-darwin" else ["cpu"], "companion_files": [], "supported_model_artifact_ids": model_ids})
         if target == "x86_64-apple-darwin":
             runtime["runtime"]["deployment_target"] = deployment_target
         elif target == "aarch64-apple-darwin":
