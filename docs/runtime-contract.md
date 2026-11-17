@@ -98,7 +98,7 @@ Optional: pass `providers=['CoreMLExecutionProvider', 'CPUExecutionProvider']` i
 
 ## Source-built runtime distribution (issue #19)
 
-The v2 catalog references Microsoft's official ORT 1.31.1 packages for Linux,
+The v2 catalog references Microsoft's official ORT 1.32.0 packages for Linux,
 Apple Silicon and Windows. Intel macOS uses a full-operator CPU-only
 build cross-compiled from the pinned source on Apple Silicon and tested under
 Rosetta. Windows and
@@ -109,7 +109,7 @@ The catalog identifies each package by URL, size and SHA-256 and declares its
 model compatibility. The native smoke gate loads the model and runs a complete
 343980-frame window. The application verifies archive and installed-file
 digests before loading the library. Its ORT C API level must be compatible with
-the catalog runtime's API level (31 for ORT 1.31.1).
+the catalog runtime's API level (32 for ORT 1.32.0).
 
 ## Related files
 
