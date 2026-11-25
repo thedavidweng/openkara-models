@@ -14,6 +14,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import archive_utils
 import nuget_package
 import ort_api_version
 import repackage_nuget_runtime
@@ -90,7 +91,7 @@ def main() -> int:
             nupkg = repackage_nuget_runtime.fetch_verified_package(lock, args.cache)
             target = "x86_64-unknown-linux-gnu"
             candidate = repackage_nuget_runtime.repackage(nupkg, lock, [target], tmp / "candidate")[target]
-        ort_api_version.unpack_archive_headers(candidate, tmp / "source-candidate")
+        archive_utils.unpack_runtime_headers(candidate, tmp / "source-candidate")
         with candidate.open("rb") as file:
             candidate_sha256 = hashlib.file_digest(file, "sha256").hexdigest()
         return subprocess.run([

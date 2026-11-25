@@ -81,7 +81,7 @@ jobs:
         run: |
           archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)
           test -n "$archive"
-          python -c 'import sys; from pathlib import Path; sys.path.insert(0, "scripts"); import ort_api_version as o; o.unpack_archive_headers(Path(sys.argv[1]), Path("ort/source"))' "$archive"
+          python -c 'import sys; from pathlib import Path; sys.path.insert(0, "scripts"); import archive_utils as o; o.unpack_runtime_headers(Path(sys.argv[1]), Path("ort/source"))' "$archive"
       - name: Check Intel runtime deployment target
         run: |
           archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)

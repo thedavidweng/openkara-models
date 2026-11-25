@@ -30,6 +30,7 @@ Two entry points are provided:
 from __future__ import annotations
 
 import os
+import re
 import tarfile
 import zipfile
 from pathlib import Path
@@ -295,3 +296,28 @@ if __name__ == "__main__":
         raise SystemExit(2)
     files = safe_read_archive(Path(sys.argv[1]))
     print(f"OK: {len(files)} file(s)")
+
+
+def unpack_runtime_headers(archive: Path, source_dir: Path) -> None:
+    """Copy a canonical runtime archive's ``<root>/include/*.h`` into a source-shaped tree.
+
+    The smoke and comparison harnesses include the C API header as
+    ``<onnxruntime/core/session/onnxruntime_c_api.h>`` under ``source_dir``.
+    """
+    import shutil
+    import tarfile
+
+    from ort_api_version import HEADER_REL
+
+    target = source_dir / Path(HEADER_REL).parent
+    target.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            parts = Path(member.name).parts
+            if len(parts) == 3 and parts[1] == "include" and member.isfile():
+                if not re.fullmatch(r"[A-Za-z0-9_]+\.(h|inc)", parts[2]):
+                    raise ValueError(f"unexpected header name: {member.name}")
+                with tar.extractfile(member) as inp, (target / parts[2]).open("wb") as out:
+                    shutil.copyfileobj(inp, out)
+    if not (target / "onnxruntime_c_api.h").is_file():
+        raise ValueError(f"{archive} does not include the C API header")
