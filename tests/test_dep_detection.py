@@ -335,3 +335,41 @@ def test_detector_resolves_per_model_lock_entry() -> None:
     for name in ("htdemucs", "htdemucs_ft"):
         entry = lock["models"][name]
         assert entry["weights"]["commit_sha"], name
+
+
+def test_detect_plugin_release_ignores_prereleases_and_yanked() -> None:
+    from unittest.mock import patch
+    import detect_plugin_release as dp
+
+    lock = {
+        "package": {"name": "onnxruntime-ep-webgpu", "version": "0.5.0"},
+        "targets": {
+            "aarch64-apple-darwin": {"wheel_tag": "py3-none-macosx_14_0_universal2"},
+            "x86_64-pc-windows-msvc": {"wheel_tag": "py3-none-win_amd64"},
+        },
+    }
+    def _f(ver: str, tag: str, yanked: bool = False) -> dict:
+        fn = f"onnxruntime_ep_webgpu-{ver}-{tag}.whl"
+        return {
+            "filename": fn,
+            "packagetype": "bdist_wheel",
+            "url": f"https://files.pythonhosted.org/packages/ab/cd/{'0' * 60}/{fn}",
+            "size": 123,
+            "digests": {"sha256": "a" * 64},
+            "yanked": yanked,
+        }
+
+    pypi = {
+        "releases": {
+            "0.5.0": [_f("0.5.0", "py3-none-macosx_14_0_universal2"), _f("0.5.0", "py3-none-win_amd64")],
+            "0.6.0": [_f("0.6.0", "py3-none-macosx_14_0_universal2"), _f("0.6.0", "py3-none-win_amd64")],
+            "0.7.0a1": [_f("0.7.0a1", "py3-none-macosx_14_0_universal2"), _f("0.7.0a1", "py3-none-win_amd64")],
+            "0.8.0": [_f("0.8.0", "py3-none-macosx_14_0_universal2", yanked=True), _f("0.8.0", "py3-none-win_amd64")],
+            "0.9.0": [_f("0.9.0", "py3-none-macosx_14_0_universal2")],
+        }
+    }
+    with patch.object(dp.plugin_package, "fetch_pypi_json", return_value=pypi):
+        latest = dp.detect_latest_stable(lock)
+    assert latest["version"] == "0.6.0"
+    cmp = dp.compare_with_lock(latest, lock)
+    assert cmp["update_available"] is True

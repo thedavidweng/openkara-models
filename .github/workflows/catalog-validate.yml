@@ -12,6 +12,9 @@ on:
     paths:
       - ".github/workflows/**"
       - "catalog/**"
+      - "ort/plugin-lock.json"
+      - "scripts/generate_catalog_v2.py"
+      - "scripts/plugin_package.py"
       - "scripts/catalog_model.py"
       - "scripts/validate_catalog.py"
       - "scripts/generate_catalog_fixtures.py"
@@ -23,6 +26,8 @@ on:
       - "tests/test_catalog_generator.py"
       - "tests/test_supply_chain.py"
       - "tests/test_publish_catalog.py"
+      - "tests/test_catalog_v2.py"
+      - "tests/test_plugin_package.py"
 
 permissions:
   contents: read
@@ -47,7 +52,7 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
             files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|catalog/|ort/(source|nuget)-lock\.json|scripts/(catalog_|validate_catalog|generate_catalog|generate_supply_chain|verify_supply_chain|publish_catalog)|tests/test_(catalog|supply_chain|publish_catalog))'; then
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|catalog/|ort/(source|nuget|plugin)-lock\.json|scripts/(catalog_|validate_catalog|generate_catalog|generate_supply_chain|verify_supply_chain|publish_catalog|plugin_package)|tests/test_(catalog|supply_chain|publish_catalog|plugin_package))'; then
               echo 'run=true' >> "$GITHUB_OUTPUT"
             else
               echo 'run=false' >> "$GITHUB_OUTPUT"
@@ -91,7 +96,7 @@ jobs:
         run: python scripts/verify_supply_chain.py --all
 
       - name: Catalog unit + generator + supply-chain + publish tests
-        run: python -m pytest tests/test_catalog_validation.py tests/test_catalog_v2.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py -q
+        run: python scripts/plugin_package.py --validate-lock && python -m pytest tests/test_catalog_validation.py tests/test_catalog_v2.py tests/test_catalog_generator.py tests/test_supply_chain.py tests/test_publish_catalog.py tests/test_plugin_package.py -q
 
       - name: Fixtures are fresh (regenerate + git diff)
         run: |

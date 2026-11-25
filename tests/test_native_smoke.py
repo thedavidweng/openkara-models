@@ -259,3 +259,46 @@ def test_benchmark_catalog_resolves_model_artifact_id(tmp_path: Path) -> None:
     # Should fail at download (fake URL), not at model resolution.
     assert r.returncode != 0
     assert "not found in catalog" not in r.stderr
+
+
+def test_webgpu_smoke_requires_plugin_and_accepts_valid_report(tmp_path: Path) -> None:
+    import run_native_smoke as rns
+
+    report = {
+        "requested_provider": "webgpu",
+        "harness_exit_code": 0,
+        "session_creation": "ok",
+        "inference": "ok",
+        "finite_output": True,
+        "output_shape": rns.SPECTRAL_OUTPUT_SHAPE,
+        "used_fallback": False,
+        "provider_assignment": "webgpu",
+        "provider_node_count": 42,
+        "total_node_count": 50,
+    }
+    assert rns.validation_failures(report, "webgpu") == []
+
+    bad = dict(report, provider_node_count=0)
+    assert any("provider_node_count" in f for f in rns.validation_failures(bad, "webgpu"))
+
+    runtime = tmp_path / "rt.tar.gz"
+    model = tmp_path / "m.onnx"
+    runtime.write_bytes(b"rt")
+    model.write_bytes(b"m")
+    r = subprocess.run(
+        [sys.executable, str(SCRIPTS / "run_native_smoke.py"),
+         "--runtime", str(runtime), "--model", str(model),
+         "--target", "aarch64-apple-darwin", "--provider", "webgpu",
+         "--report", str(tmp_path / "smoke.json")],
+        capture_output=True, text=True,
+    )
+    assert r.returncode != 0
+    assert "--plugin is required" in r.stderr
+
+
+def test_smoke_cpp_compiles_for_webgpu_ep_and_pre23_ort(tmp_path: Path) -> None:
+    """Verify ort_smoke.cpp handles both WebGpuExecutionProvider and older headers cleanly."""
+    src = (ROOT / "ort" / "smoke" / "ort_smoke.cpp").read_text(encoding="utf-8")
+    assert "RegisterExecutionProviderLibrary" in src
+    assert "WebGpuExecutionProvider" in src
+    assert "#if ORT_API_VERSION >= 23" in src

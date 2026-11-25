@@ -11,6 +11,7 @@ authority**. No dependency is updated by two competing bots.
 | Python packages (`requirements.txt`) | Dependabot | `.github/dependabot.yml` | `pip` ecosystem, weekly. |
 | GitHub Actions (`.github/workflows/*.yml`) | Dependabot | `.github/dependabot.yml` | `github-actions` ecosystem, weekly. SHA-pinned actions get SHA bumps. |
 | ONNX Runtime source tag + commit | Repository-owned script | `scripts/detect_ort_release.py` | Detects new stable ORT tags (ignores prereleases), updates `ort/source-lock.json`, opens a candidate PR. Not a package-manager field — Renovate/Dependabot cannot handle source-lock JSON. |
+| ONNX Runtime WebGPU plugin (`onnxruntime-ep-webgpu`) | Repository-owned script | `scripts/detect_plugin_release.py` | Polls PyPI JSON weekly, verifies wheel SHA-256 values and ORT C API/plugin compatibility against `ort/nuget-lock.json`, refreshes `ort/plugin-lock.json`, and opens a candidate PR. |
 | Demucs model-weight revisions | Repository-owned script | `scripts/detect_model_weight_revision.py` | Detects HuggingFace model-weight revision changes using immutable commit SHAs (not `lastModified` timestamps), updates the model source lock, opens a candidate PR. |
 | Container/toolchain images | Renovate custom manager | `renovate.json` | Custom regex managers for `ort/source-lock.json` toolchain image fields. |
 | Catalog schema version | Manual | — | Schema changes require a manual PR with migration. Not automated. |
@@ -23,6 +24,7 @@ Dependabot handles standard package-manager ecosystems:
 
 Dependabot does NOT touch:
 - `ort/source-lock.json` (ORT source tag, commit SHA, toolchain config)
+- `ort/plugin-lock.json` (`onnxruntime-ep-webgpu` wheel URLs, sizes, SHA-256s, and ORT compatibility)
 - Model-weight revision tracking (HuggingFace)
 - Container image digests in source-lock JSON
 - Catalog schema versions
@@ -38,6 +40,7 @@ managers:
 
 Renovate does NOT touch:
 - ORT source tag + commit SHA (handled by `scripts/detect_ort_release.py`)
+- `onnxruntime-ep-webgpu` plugin wheel versions (handled by `scripts/detect_plugin_release.py`)
 - Model-weight revisions (handled by `scripts/detect_model_weight_revision.py`)
 - Python packages (owned by Dependabot)
 - GitHub Actions (owned by Dependabot)
@@ -82,6 +85,7 @@ Dependabot and Renovate are configured to own disjoint file sets:
 
 The repository-owned scripts own:
 - `ort/source-lock.json` (ORT source tag + commit SHA fields only)
+- `ort/plugin-lock.json` (`onnxruntime-ep-webgpu` wheel lock)
 - Model-weight revision tracking
 
 No file is owned by two authorities. If a future dependency falls into a

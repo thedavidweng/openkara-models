@@ -101,6 +101,53 @@ def check_ort_lock_stale(token: str | None = None) -> dict[str, Any]:
     return result
 
 
+
+def _open_plugin_candidate_pr(latest_version: str, token: str | None) -> dict[str, Any] | None:
+    """Return the open candidate PR for this plugin version, if one exists."""
+    if not token:
+        return None
+    try:
+        pulls = _github_get(
+            "https://api.github.com/repos/thedavidweng/openkara-models/pulls?state=open&per_page=100",
+            token,
+        )
+    except RuntimeError:
+        return None
+    branch = f"deps/candidate-plugin-webgpu-v{latest_version}"
+    for pr in pulls if isinstance(pulls, list) else []:
+        ref = (pr.get("head") or {}).get("ref", "")
+        if ref == branch:
+            return {"number": pr.get("number"), "branch": ref}
+    return None
+
+
+def check_plugin_lock_stale(token: str | None = None) -> dict[str, Any]:
+    """Check if ort/plugin-lock.json is behind the latest stable PyPI release."""
+    import detect_plugin_release
+    import plugin_package
+
+    lock_path = ROOT / "ort" / "plugin-lock.json"
+    if not lock_path.is_file():
+        return {"status": "api_error", "error": f"plugin lock missing: {lock_path}"}
+    lock = plugin_package.load_lock(lock_path)
+    try:
+        latest = detect_plugin_release.detect_latest_stable(lock)
+    except (RuntimeError, ValueError) as e:
+        return {"status": "api_error", "error": str(e)}
+    comparison = detect_plugin_release.compare_with_lock(latest, lock)
+    result: dict[str, Any] = {
+        "status": "stale" if comparison["update_available"] else "current",
+        "lock_version": comparison["lock_version"],
+        "latest_version": comparison["latest_version"],
+        "update_available": comparison["update_available"],
+    }
+    if comparison["update_available"]:
+        candidate = _open_plugin_candidate_pr(latest["version"], token)
+        if candidate:
+            result["status"] = "in_progress"
+            result["candidate_pr"] = candidate
+    return result
+
 def check_model_lock_stale(token: str | None = None) -> dict[str, Any]:
     """Check if any model weights lock entry is stale (behind the latest
     HuggingFace revision)."""
@@ -172,7 +219,10 @@ def check_duplicate_candidates(token: str | None = None) -> dict[str, Any]:
         for b in candidates:
             # Extract the version part (e.g. "ort-v1.28.0" from "deps/candidate-ort-v1.28.0").
             parts = b.replace("deps/candidate-", "").split("-")
-            prefix = "-".join(parts[:2]) if len(parts) >= 2 else parts[0]
+            if parts[0] == "plugin" and len(parts) >= 3:
+                prefix = "-".join(parts[:3])
+            else:
+                prefix = "-".join(parts[:2]) if len(parts) >= 2 else parts[0]
             prefixes.setdefault(prefix, []).append(b)
         duplicates = {k: v for k, v in prefixes.items() if len(v) > 1}
         return {
@@ -194,12 +244,14 @@ def main() -> int:
     token = os.environ.get("GITHUB_TOKEN")
 
     ort_check = check_ort_lock_stale(token)
+    plugin_check = check_plugin_lock_stale(token)
     model_check = check_model_lock_stale(token)
     workflow_check = check_workflow_recency(token, args.max_stale_days)
     duplicate_check = check_duplicate_candidates(token)
 
     results = {
         "ort_lock": ort_check,
+        "plugin_lock": plugin_check,
         "model_lock": model_check,
         "workflow_recency": workflow_check,
         "duplicate_candidates": duplicate_check,
@@ -209,6 +261,7 @@ def main() -> int:
         print(json.dumps(results, indent=2))
     else:
         print(f"ORT lock: {ort_check['status']} (lock={ort_check.get('lock_tag')}, latest={ort_check.get('latest_tag')})")
+        print(f"Plugin lock: {plugin_check['status']} (lock={plugin_check.get('lock_version')}, latest={plugin_check.get('latest_version')})")
         print(f"Model lock: {model_check['status']}")
         print(f"Workflow recency: {workflow_check['status']} (age={workflow_check.get('age_days')}d)")
         print(f"Duplicate candidates: {duplicate_check['status']}")
@@ -225,6 +278,14 @@ def main() -> int:
     if ort_check["status"] == "in_progress" and not args.json:
         candidate = ort_check.get("candidate_pr") or {}
         print(f"IN_PROGRESS: automatic update already tracked by PR #{candidate.get('number')} "
+              f"({candidate.get('branch')})")
+    if plugin_check["status"] == "stale":
+        if not args.json:
+            print("STALE: plugin lock is behind latest stable PyPI release", file=sys.stderr)
+        return 1
+    if plugin_check["status"] == "in_progress" and not args.json:
+        candidate = plugin_check.get("candidate_pr") or {}
+        print(f"IN_PROGRESS: plugin update already tracked by PR #{candidate.get('number')} "
               f"({candidate.get('branch')})")
     if model_check["status"] == "stale":
         if not args.json:

@@ -257,6 +257,7 @@ void print_json_trailer(int cpu_node_count, bool used_fallback,
 
 int main(int argc, char** argv) {
     std::string lib_path;
+    std::string plugin_path;
     std::string model_path;
     std::string provider = "cpu";
     std::string target = "unknown";
@@ -278,6 +279,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--lib" && i + 1 < argc) lib_path = argv[++i];
+        else if (a == "--plugin" && i + 1 < argc) plugin_path = argv[++i];
         else if (a == "--model" && i + 1 < argc) model_path = argv[++i];
         else if (a == "--provider" && i + 1 < argc) provider = argv[++i];
         else if (a == "--target" && i + 1 < argc) target = argv[++i];
@@ -293,12 +295,12 @@ int main(int argc, char** argv) {
         else if (a == "--help") {
             fprintf(stderr, "usage: ort_smoke --lib <lib> --model <onnx> "
                             "--expect-output-shape <str> "
-                            "--provider <name> [--target <triple>]\n");
+                            "--provider <name> [--plugin <path>] [--target <triple>]\n");
             return 0;
         }
     }
 
-    if (lib_path.empty() || model_path.empty() || expect_output_shape.empty() || (iters == 0 && warmup != 0) || input_dir.empty() != output_dir.empty()) {
+    if (lib_path.empty() || model_path.empty() || expect_output_shape.empty() || ((provider == "webgpu" || provider == "WebGpuExecutionProvider") && plugin_path.empty()) || (iters == 0 && warmup != 0) || input_dir.empty() != output_dir.empty()) {
         fprintf(stderr, "ERROR: --lib, --model, and --expect-output-shape are required\n");
         return 2;
     }
@@ -399,6 +401,36 @@ int main(int argc, char** argv) {
         }
     }
 
+
+#if ORT_API_VERSION >= 23
+    if (!plugin_path.empty()) {
+#if defined(_WIN32)
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, plugin_path.c_str(), -1, nullptr, 0);
+        std::wstring wplugin(wlen > 0 ? static_cast<size_t>(wlen - 1) : 0, L'\0');
+        if (wlen > 1) {
+            MultiByteToWideChar(CP_UTF8, 0, plugin_path.c_str(), -1, &wplugin[0], wlen);
+        }
+        OrtStatus* reg_st = api->RegisterExecutionProviderLibrary(env, "webgpu", wplugin.c_str());
+#else
+        OrtStatus* reg_st = api->RegisterExecutionProviderLibrary(env, "webgpu", plugin_path.c_str());
+#endif
+        if (reg_st) {
+            print_json_field("session_creation", "failed", false);
+            print_json_field("session_creation_error",
+                             std::string("RegisterExecutionProviderLibrary: ") + api->GetErrorMessage(reg_st),
+                             false);
+            api->ReleaseStatus(reg_st);
+            print_json_field("inference", "not_attempted", false);
+            print_json_field("output_shape", "", false);
+            print_json_field_bool("finite_output", false, false);
+            print_json_field("provider_assignment", "", false);
+            print_json_trailer(-1, false);
+            api->ReleaseEnv(env);
+            return 1;
+        }
+    }
+#endif
+
     // Read model bytes.
     std::string model_err;
     std::vector<uint8_t> model_bytes = read_file(model_path, model_err);
@@ -432,24 +464,80 @@ int main(int argc, char** argv) {
         }
         // CPU EP is the default and does not need to be appended explicitly.
         if (prov != "cpu" && prov != "CPUExecutionProvider") {
-            std::string ep_name;
-            if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
-                ep_name = "CoreMLExecutionProvider";
-            } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
-                ep_name = "XnnpackExecutionProvider";
+            if (prov == "webgpu" || prov == "WebGpuExecutionProvider") {
+#if ORT_API_VERSION >= 23
+                const OrtEpDevice* const* ep_devices = nullptr;
+                size_t num_ep_devices = 0;
+                st = api->GetEpDevices(env, &ep_devices, &num_ep_devices);
+                if (st) {
+                    last_session_error = std::string("GetEpDevices: ") + api->GetErrorMessage(st);
+                    api->ReleaseStatus(st);
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
+                const OrtEpDevice* webgpu_device = nullptr;
+                for (size_t idx = 0; idx < num_ep_devices; ++idx) {
+                    const char* name = api->EpDevice_EpName(ep_devices[idx]);
+                    if (name && std::string(name) == "WebGpuExecutionProvider") {
+                        webgpu_device = ep_devices[idx];
+                        break;
+                    }
+                }
+                if (!webgpu_device) {
+                    std::string dev_names;
+                    for (size_t idx = 0; idx < num_ep_devices; ++idx) {
+                        const char* name = api->EpDevice_EpName(ep_devices[idx]);
+                        if (idx) dev_names += ",";
+                        dev_names += (name ? name : "<null>");
+                    }
+                    last_session_error = "WebGpuExecutionProvider device unavailable after RegisterExecutionProviderLibrary (ep_devices=[" + dev_names + "])";
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
+                const char* keys[2] = {
+                    "WebGpuExecutionProvider.powerPreference",
+                    "WebGpuExecutionProvider.dawnBackendType",
+                };
+                const char* vals[2] = {"high-performance", "D3D12"};
+#if defined(_WIN32)
+                size_t num_opts = 2;
+#else
+                size_t num_opts = 1;
+#endif
+                st = api->SessionOptionsAppendExecutionProvider_V2(
+                    o, env, &webgpu_device, 1, keys, vals, num_opts);
+                if (st) {
+                    last_session_error = std::string("SessionOptionsAppendExecutionProvider_V2(WebGpuExecutionProvider): ") +
+                                         api->GetErrorMessage(st);
+                    api->ReleaseStatus(st);
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
+#else
+                last_session_error = "WebGpuExecutionProvider requires ORT_API_VERSION >= 23";
+                api->ReleaseSessionOptions(o);
+                return nullptr;
+#endif
             } else {
-                last_session_error = "unknown provider: " + prov;
-                api->ReleaseSessionOptions(o);
-                return nullptr;
-            }
-            st = api->SessionOptionsAppendExecutionProvider(
-                o, ep_name.c_str(), nullptr, nullptr, 0);
-            if (st) {
-                last_session_error = std::string("AppendExecutionProvider(") +
-                                     ep_name + "): " + api->GetErrorMessage(st);
-                api->ReleaseStatus(st);
-                api->ReleaseSessionOptions(o);
-                return nullptr;
+                std::string ep_name;
+                if (prov == "coreml" || prov == "CoreMLExecutionProvider") {
+                    ep_name = "CoreMLExecutionProvider";
+                } else if (prov == "xnnpack" || prov == "XnnpackExecutionProvider") {
+                    ep_name = "XnnpackExecutionProvider";
+                } else {
+                    last_session_error = "unknown provider: " + prov;
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
+                st = api->SessionOptionsAppendExecutionProvider(
+                    o, ep_name.c_str(), nullptr, nullptr, 0);
+                if (st) {
+                    last_session_error = std::string("AppendExecutionProvider(") +
+                                         ep_name + "): " + api->GetErrorMessage(st);
+                    api->ReleaseStatus(st);
+                    api->ReleaseSessionOptions(o);
+                    return nullptr;
+                }
             }
         }
         // Enable profiling so we can measure the fallback node count after
@@ -799,6 +887,8 @@ int main(int argc, char** argv) {
         requested_profile_provider = "CoreMLExecutionProvider";
     } else if (provider == "xnnpack") {
         requested_profile_provider = "XnnpackExecutionProvider";
+    } else if (provider == "webgpu") {
+        requested_profile_provider = "WebGpuExecutionProvider";
     }
 
     int provider_node_count = -1;

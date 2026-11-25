@@ -534,3 +534,71 @@ def test_candidate_and_smoke_workflows_support_nuget_version_updates():
     smoke = (ROOT / ".github/workflows/official-runtime-smoke.yml").read_text()
     assert "archive: onnxruntime-1.32.0-" not in smoke
     assert "repackage_nuget_runtime" in smoke
+
+
+def test_candidate_and_detection_workflows_support_webgpu_plugin():
+    candidate = (ROOT / ".github/workflows/dep-candidate.yml").read_text()
+    assert "plugin_version" in candidate
+    assert "git add ort/plugin-lock.json" in candidate
+    assert "plugin_package.py --validate-lock" in candidate
+
+    detection = (ROOT / ".github/workflows/dep-detection.yml").read_text()
+    assert "detect-plugin:" in detection
+    assert "detect_plugin_release.py" in detection
+    assert "--plugin webgpu" in detection
+
+    smoke = (ROOT / ".github/workflows/official-runtime-smoke.yml").read_text()
+    assert "provider: webgpu" in smoke
+    assert "plugin_package.py --download plugins" in smoke
+
+
+def test_update_plugin_lock_verifies_sha_and_ort_compatibility(tmp_path, monkeypatch):
+    import generate_dep_candidate as gdc
+    import plugin_package
+    from test_plugin_package import _build_wheel
+
+    nuget_lock = json.loads((ROOT / "ort/nuget-lock.json").read_text())
+    plugin_lock_path = tmp_path / "plugin-lock.json"
+    plugin_lock_path.write_text((ROOT / "ort/plugin-lock.json").read_text())
+    nuget_lock_path = tmp_path / "nuget-lock.json"
+    nuget_lock_path.write_text(json.dumps(nuget_lock))
+
+    monkeypatch.setattr(gdc, "PLUGIN_LOCK_PATH", plugin_lock_path)
+    monkeypatch.setattr(gdc, "NUGET_LOCK_PATH", nuget_lock_path)
+
+    win_whl = _build_wheel(
+        tmp_path / "onnxruntime_ep_webgpu-0.6.0-py3-none-win_amd64.whl",
+        version="0.6.0",
+        target="x86_64-pc-windows-msvc",
+    )
+    mac_whl = _build_wheel(
+        tmp_path / "onnxruntime_ep_webgpu-0.6.0-py3-none-macosx_14_0_universal2.whl",
+        version="0.6.0",
+        target="aarch64-apple-darwin",
+    )
+    pypi_payload = {
+        "urls": [
+            {
+                "filename": win_whl.name,
+                "url": f"https://files.pythonhosted.org/packages/ab/cd/{'0' * 60}/{win_whl.name}",
+                "size": win_whl.stat().st_size,
+                "digests": {"sha256": plugin_package.sha256_file(win_whl)[1]},
+                "yanked": False,
+            },
+            {
+                "filename": mac_whl.name,
+                "url": f"https://files.pythonhosted.org/packages/ab/cd/{'0' * 60}/{mac_whl.name}",
+                "size": mac_whl.stat().st_size,
+                "digests": {"sha256": plugin_package.sha256_file(mac_whl)[1]},
+                "yanked": False,
+            },
+        ]
+    }
+    monkeypatch.setattr(plugin_package, "fetch_pypi_json", lambda version=None: pypi_payload)
+    summary = gdc.update_plugin_lock(
+        "webgpu", "0.6.0", cache_dir=tmp_path, reuse_cache=True, ort_c_api_level=32
+    )
+    assert summary["new_version"] == "0.6.0"
+    updated = json.loads(plugin_lock_path.read_text())
+    assert updated["package"]["version"] == "0.6.0"
+    assert plugin_package.validate_lock(updated, nuget_lock) == []

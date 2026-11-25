@@ -39,6 +39,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
 NUGET_LOCK_PATH = ROOT / "ort" / "nuget-lock.json"
+PLUGIN_LOCK_PATH = ROOT / "ort" / "plugin-lock.json"
 MODEL_LOCK_PATH = ROOT / "models" / "source-lock.json"
 PACKAGE_ID = "Microsoft.ML.OnnxRuntime"
 APPLE_TEAM_ID = "UBF8T346G9"
@@ -251,6 +252,147 @@ def update_ort_lock(
     }
 
 
+
+def _locked_ort_c_api_level(nuget_lock: dict[str, Any], cache_dir: Path | None) -> int:
+    import ort_api_version
+    import repackage_nuget_runtime
+
+    nupkg = repackage_nuget_runtime.fetch_verified_package(
+        nuget_lock, cache_dir or (ROOT / "ort" / "nuget-cache")
+    )
+    include_prefix = nuget_lock["common"]["include"].rstrip("/") + "/"
+    with zipfile.ZipFile(nupkg) as package:
+        header = package.read(f"{include_prefix}onnxruntime_c_api.h").decode("utf-8")
+    return ort_api_version.parse_header(header)
+
+
+def update_plugin_lock(
+    plugin: str,
+    version: str,
+    cache_dir: Path | None = None,
+    reuse_cache: bool = False,
+    ort_c_api_level: int | None = None,
+) -> dict[str, Any]:
+    """Verify a PyPI plugin release against locked ORT and refresh ort/plugin-lock.json."""
+    import plugin_package
+
+    if plugin != plugin_package.PROVIDER:
+        raise ValueError(f"unsupported plugin: {plugin!r}")
+    plugin_package.parse_semver(version)
+
+    plugin_lock = json.loads(PLUGIN_LOCK_PATH.read_text(encoding="utf-8"))
+    nuget_lock = json.loads(NUGET_LOCK_PATH.read_text(encoding="utf-8"))
+    old_version = plugin_lock["package"]["version"]
+    locked_ort_version = nuget_lock["package"]["version"]
+    resolved_api_level = (
+        ort_c_api_level
+        if ort_c_api_level is not None
+        else _locked_ort_c_api_level(nuget_lock, cache_dir)
+    )
+
+    pypi_data = plugin_package.fetch_pypi_json(version)
+    release_files = pypi_data.get("urls") or pypi_data.get("releases", {}).get(version, [])
+    if not isinstance(release_files, list) or not release_files:
+        raise ValueError(f"PyPI release {plugin_package.PACKAGE_NAME} {version} has no files")
+
+    by_name = {
+        f.get("filename"): f
+        for f in release_files
+        if isinstance(f, dict)
+        and not f.get("yanked", False)
+        and f.get("packagetype") in (None, "bdist_wheel")
+    }
+
+    wheel_cache = cache_dir or (ROOT / "ort" / "plugin-cache")
+    updated_targets: dict[str, Any] = {}
+    requires_python = ""
+    min_ort_version = ""
+
+    for target, cfg in sorted(plugin_lock["targets"].items()):
+        wheel_tag = cfg["wheel_tag"]
+        expected_filename = f"{plugin_package.DIST_PREFIX}-{version}-{wheel_tag}.whl"
+        file_info = by_name.get(expected_filename)
+        if file_info is None:
+            raise ValueError(
+                f"PyPI release {plugin_package.PACKAGE_NAME} {version} missing non-yanked wheel {expected_filename}"
+            )
+        url = file_info.get("url", "")
+        expected_size = file_info.get("size")
+        expected_sha256 = (file_info.get("digests") or {}).get("sha256", "")
+        if not url or type(expected_size) is not int or not expected_sha256:
+            raise ValueError(f"PyPI metadata incomplete for {expected_filename}")
+
+        dest = wheel_cache / expected_filename
+        if reuse_cache and dest.is_file() and plugin_package.sha256_file(dest) == (expected_size, expected_sha256):
+            wheel_path = dest
+        else:
+            wheel_path = plugin_package.download_verified_bytes(url, dest, expected_size, expected_sha256)
+
+        compat = plugin_package.check_wheel_compatibility(
+            wheel_path,
+            target,
+            version,
+            locked_ort_version,
+            resolved_api_level,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+        requires_python = compat["requires_python"] or requires_python
+        min_ort_version = compat["min_ort_version"]
+        updated_targets[target] = {
+            "wheel_tag": wheel_tag,
+            "filename": expected_filename,
+            "url": url,
+            "size": compat["size"],
+            "sha256": compat["sha256"],
+            "library_member": compat["library_member"],
+            "members": compat["members"],
+        }
+
+    updated_lock = {
+        "schema_version": plugin_lock["schema_version"],
+        "package": {
+            "name": plugin_package.PACKAGE_NAME,
+            "provider": plugin_package.PROVIDER,
+            "version": version,
+            "pypi_url": plugin_package.pypi_version_url(version),
+            "requires_python": requires_python,
+            "min_ort_version": min_ort_version,
+        },
+        "compatibility": {
+            "ort_version": locked_ort_version,
+            "ort_c_api_level": resolved_api_level,
+            "ep_name": plugin_package.EP_NAME,
+            "registration_name": plugin_package.REGISTRATION_NAME,
+        },
+        "targets": updated_targets,
+    }
+    errors = plugin_package.validate_lock(updated_lock, nuget_lock)
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    PLUGIN_LOCK_PATH.write_text(json.dumps(updated_lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "type": "plugin",
+        "plugin": plugin,
+        "package_name": plugin_package.PACKAGE_NAME,
+        "old_version": old_version,
+        "new_version": version,
+        "lock_path": str(PLUGIN_LOCK_PATH),
+        "ort_version": locked_ort_version,
+        "ort_c_api_level": resolved_api_level,
+        "min_ort_version": min_ort_version,
+        "targets": {
+            t: {
+                "filename": v["filename"],
+                "size": v["size"],
+                "sha256": v["sha256"],
+                "url": v["url"],
+            }
+            for t, v in updated_targets.items()
+        },
+    }
+
 def generate_candidate_summary(changes: dict[str, Any]) -> str:
     """Generate a Markdown summary for the candidate PR body."""
     lines = ["## Dependency update candidate", ""]
@@ -312,6 +454,29 @@ def generate_candidate_summary(changes: dict[str, Any]) -> str:
             "- [ ] Intel macOS status (rebuilt or carried forward) is acceptable for this release",
             "- [ ] No stable pointer changed",
         ])
+    elif changes["type"] == "plugin":
+        lines.extend([
+            "**Type:** ONNX Runtime WebGPU plugin update (PyPI)",
+            f"**Package:** `{changes['package_name']}`",
+            f"**Old:** `{changes['old_version']}`",
+            f"**New:** `{changes['new_version']}`",
+            f"**Locked ORT compatibility:** `v{changes['ort_version']}` (C API `{changes['ort_c_api_level']}`, plugin requires `>= {changes['min_ort_version']}`)",
+            "",
+            "### Verified wheels",
+            "",
+        ])
+        for target, info in sorted(changes.get("targets", {}).items()):
+            lines.append(
+                f"- `{target}`: `{info['filename']}` (`{info['size']}` bytes, sha256 `{info['sha256']}`)"
+            )
+        lines.extend([
+            "",
+            "### Required coupled changes",
+            "",
+            "- [ ] Run WebGPU plugin smoke and quality gates (`official-runtime-smoke.yml`, `quality-gates.yml`)",
+            "- [ ] Validate updated `ort/plugin-lock.json` (`catalog-validate.yml`)",
+            "- [ ] Publish and promote the v2 catalog (`catalog-release-v2.yml`) only after smoke passes",
+        ])
     elif changes["type"] == "model":
         lines.extend([
             "**Type:** Model-weight revision update",
@@ -333,12 +498,14 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ort-tag", help="New ORT release tag.")
     group.add_argument("--model", help="Model name for weight revision update.")
+    group.add_argument("--plugin", help="Plugin name for PyPI update (e.g. webgpu).")
     parser.add_argument("--ort-commit", help="New ORT commit SHA (required with --ort-tag).")
     parser.add_argument("--model-commit", help="New model commit SHA (required with --model).")
-    parser.add_argument("--cache", type=Path, default=ROOT / "ort" / "nuget-cache",
-                        help="NuGet download cache directory.")
+    parser.add_argument("--plugin-version", help="New plugin version (required with --plugin).")
+    parser.add_argument("--cache", type=Path, default=None,
+                        help="Download cache directory (defaults to ort/nuget-cache or ort/plugin-cache).")
     parser.add_argument("--reuse-cache", action="store_true",
-                        help="Reuse an existing cached .nupkg instead of re-downloading (signatures are still verified).")
+                        help="Reuse an existing cached package instead of re-downloading (signatures/hashes are still verified).")
     parser.add_argument("--output", type=Path, default=Path("candidate-summary.json"),
                         help="Output JSON summary path.")
     parser.add_argument("--markdown", type=Path, default=None,
@@ -349,12 +516,16 @@ def main() -> int:
         if not args.ort_commit:
             parser.error("--ort-commit is required with --ort-tag")
         changes = update_ort_lock(args.ort_tag, args.ort_commit, cache_dir=args.cache, reuse_cache=args.reuse_cache)
+    elif args.plugin:
+        if not args.plugin_version:
+            parser.error("--plugin-version is required with --plugin")
+        changes = update_plugin_lock(args.plugin, args.plugin_version, cache_dir=args.cache, reuse_cache=args.reuse_cache)
     elif args.model:
         if not args.model_commit:
             parser.error("--model-commit is required with --model")
         changes = update_model_lock(args.model, args.model_commit)
     else:
-        parser.error("provide --ort-tag or --model")
+        parser.error("provide --ort-tag, --plugin, or --model")
 
     args.output.write_text(json.dumps(changes, indent=2, sort_keys=True) + "\n")
     print(f"summary: {args.output}")

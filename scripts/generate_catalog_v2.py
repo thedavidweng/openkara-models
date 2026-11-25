@@ -25,12 +25,9 @@ from validate_catalog import validate_document
 
 ROOT = Path(__file__).resolve().parents[1]
 NUGET_LOCK = ROOT / "ort/nuget-lock.json"
+PLUGIN_LOCK = ROOT / "ort/plugin-lock.json"
 RELEASE_BASE = "https://github.com/thedavidweng/openkara-models/releases/download"
 INTEL = "x86_64-apple-darwin"
-PLUGINS = {
-    "aarch64-apple-darwin": ("https://files.pythonhosted.org/packages/2c/c3/e047d38981e7d6f198f92b488e2c9cd12e45c73017ec851996ea69778922/onnxruntime_ep_webgpu-0.5.0-py3-none-macosx_14_0_universal2.whl", 4864395, "c9a757c7afaf114fde86993420810ff616e2d3046d42ae419bb0c8b9ebcf57fb"),
-    "x86_64-pc-windows-msvc": ("https://files.pythonhosted.org/packages/7e/36/9935a5b7851099da3da81d9e04f3021bcc61a5a1039e6c098cf08e5c6607/onnxruntime_ep_webgpu-0.5.0-py3-none-win_amd64.whl", 13608886, "713b94e7b4ce5979a356e19b926ecba2c0d4ba24f857ef4bbb11c75c37cc5b61"),
-}
 
 
 def digest_file(path: Path) -> tuple[int, str]:
@@ -153,13 +150,26 @@ def generate(packages: Path, intel: Path | None, release_id: str, created_at: st
     for runtime in runtimes:
         runtime["runtime"]["supported_model_artifact_ids"] = model_ids
 
+    plugin_lock = json.loads(PLUGIN_LOCK.read_text())
+    plugin_version = plugin_lock["package"]["version"]
+    plugin_provider = plugin_lock["package"]["provider"]
     plugins = []
-    for target, (url, size, sha256) in PLUGINS.items():
-        filename = url.rsplit("/", 1)[-1]
+    for target, entry in sorted(plugin_lock["targets"].items()):
+        filename = entry["filename"]
         path = packages / filename
-        if digest_file(path) != (size, sha256):
+        if digest_file(path) != (entry["size"], entry["sha256"]):
             raise ValueError(f"archive integrity mismatch: {path}")
-        plugins.append({"artifact_id": f"onnxruntime-webgpu-0.5.0-{target}", "target_triple": target, "provider": "webgpu", "version": "0.5.0", "filename": filename, "download_url": url, "byte_size": size, "archive_digest": sha256, "extracted_file_digests": extracted_digests(path)})
+        plugins.append({
+            "artifact_id": f"onnxruntime-{plugin_provider}-{plugin_version}-{target}",
+            "target_triple": target,
+            "provider": plugin_provider,
+            "version": plugin_version,
+            "filename": filename,
+            "download_url": entry["url"],
+            "byte_size": entry["size"],
+            "archive_digest": entry["sha256"],
+            "extracted_file_digests": extracted_digests(path),
+        })
 
     runtime_ids = [runtime["artifact_id"] for runtime in runtimes]
     for model in models:

@@ -1,0 +1,115 @@
+{
+  "compatibility": {
+    "ep_name": "WebGpuExecutionProvider",
+    "ort_c_api_level": 32,
+    "ort_version": "1.32.0",
+    "registration_name": "webgpu"
+  },
+  "package": {
+    "min_ort_version": "1.24.4",
+    "name": "onnxruntime-ep-webgpu",
+    "provider": "webgpu",
+    "pypi_url": "https://pypi.org/pypi/onnxruntime-ep-webgpu/0.5.0/json",
+    "requires_python": ">=3.11",
+    "version": "0.5.0"
+  },
+  "schema_version": "openkara.ort-plugin-lock/v1",
+  "targets": {
+    "aarch64-apple-darwin": {
+      "filename": "onnxruntime_ep_webgpu-0.5.0-py3-none-macosx_14_0_universal2.whl",
+      "library_member": "onnxruntime_ep_webgpu/libonnxruntime_providers_webgpu.dylib",
+      "members": {
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/METADATA": {
+          "sha256": "e94f7498204d482d2ae69fd569b19f6f73f28330480c150a4f78524c82b65ba6",
+          "size": 4165
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/RECORD": {
+          "sha256": "a639a1c356fe6c4b0044a3661d052d98f6f0bce33e64d9933c9926d22afa94cc",
+          "size": 891
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/WHEEL": {
+          "sha256": "0b8f9ce78a68ed6cde26c2fb18fdc1d1e2f70506dc29d9d62597702a438bbd1a",
+          "size": 111
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/licenses/LICENSE": {
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+          "size": 1073
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/licenses/ThirdPartyNotices.txt": {
+          "sha256": "143764b952fdb1a7c69ce653bfba74a7744d6a8a573bfb73e235fba356c83de3",
+          "size": 338088
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/top_level.txt": {
+          "sha256": "48bf8a29991b60c2b1c4bb494a0688acf68742afbd350542c56b9fc5166dbf3d",
+          "size": 22
+        },
+        "onnxruntime_ep_webgpu/README.md": {
+          "sha256": "945f35e5cace9e9c35d81d77edbdc133f7b78fc26475f3e33c57a23d7efa5f7b",
+          "size": 2792
+        },
+        "onnxruntime_ep_webgpu/__init__.py": {
+          "sha256": "f9b470319713f3b2db8315f023de9cc2a3325a3314e0c0ee5ac0269f20022462",
+          "size": 1301
+        },
+        "onnxruntime_ep_webgpu/libonnxruntime_providers_webgpu.dylib": {
+          "sha256": "796e02f9bc1d96c3a163f27a139b7a9358dd40ba850fd3788134960db28994ab",
+          "size": 14411424
+        }
+      },
+      "sha256": "c9a757c7afaf114fde86993420810ff616e2d3046d42ae419bb0c8b9ebcf57fb",
+      "size": 4864395,
+      "url": "https://files.pythonhosted.org/packages/2c/c3/e047d38981e7d6f198f92b488e2c9cd12e45c73017ec851996ea69778922/onnxruntime_ep_webgpu-0.5.0-py3-none-macosx_14_0_universal2.whl",
+      "wheel_tag": "py3-none-macosx_14_0_universal2"
+    },
+    "x86_64-pc-windows-msvc": {
+      "filename": "onnxruntime_ep_webgpu-0.5.0-py3-none-win_amd64.whl",
+      "library_member": "onnxruntime_ep_webgpu/onnxruntime_providers_webgpu.dll",
+      "members": {
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/METADATA": {
+          "sha256": "8aa3bc834d6abffc613c35b9ceea9c5b56340d76ed4d6d2dcf1eafb973c4423a",
+          "size": 4271
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/RECORD": {
+          "sha256": "5be48ea5d2355a3647f48213d58639265bba2aa5a422258cfe75b88ca3622523",
+          "size": 982
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/WHEEL": {
+          "sha256": "efd042ceb5c124e6b6615eae80aacae7d76a5a27cc1a302481577fe8042ba9b5",
+          "size": 98
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/licenses/LICENSE": {
+          "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+          "size": 1094
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/licenses/ThirdPartyNotices.txt": {
+          "sha256": "c53a76501ef60db6f865f20599f220761201ac4057683acefdab37d861b86622",
+          "size": 344457
+        },
+        "onnxruntime_ep_webgpu-0.5.0.dist-info/top_level.txt": {
+          "sha256": "48bf8a29991b60c2b1c4bb494a0688acf68742afbd350542c56b9fc5166dbf3d",
+          "size": 22
+        },
+        "onnxruntime_ep_webgpu/README.md": {
+          "sha256": "6c4256c939dc533663cb979d3d08d2d92549049b02983b88b0b28aec08a6d91c",
+          "size": 2867
+        },
+        "onnxruntime_ep_webgpu/__init__.py": {
+          "sha256": "83a1c43c4548e5f38151148b408477606014699e50bb95cbcb9568288cc1f1bf",
+          "size": 1347
+        },
+        "onnxruntime_ep_webgpu/dxcompiler.dll": {
+          "sha256": "40fff09e9f79f8b3c8f634b010ef1c22c79aef6bf0e02e702e7efba2532659b1",
+          "size": 17986400
+        },
+        "onnxruntime_ep_webgpu/onnxruntime_providers_webgpu.dll": {
+          "sha256": "dbbbbe7e22e8323167ca2f4c3f5bd7c72a2cc2ff66d00afe0c80251dadcf6ff0",
+          "size": 13426488
+        }
+      },
+      "sha256": "713b94e7b4ce5979a356e19b926ecba2c0d4ba24f857ef4bbb11c75c37cc5b61",
+      "size": 13608886,
+      "url": "https://files.pythonhosted.org/packages/7e/36/9935a5b7851099da3da81d9e04f3021bcc61a5a1039e6c098cf08e5c6607/onnxruntime_ep_webgpu-0.5.0-py3-none-win_amd64.whl",
+      "wheel_tag": "py3-none-win_amd64"
+    }
+  }
+}

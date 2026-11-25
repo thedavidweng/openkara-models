@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir packages intel
           cp nuget/packages/onnxruntime-*-openkara-* packages/
-          python -c 'import sys,urllib.request; from pathlib import Path; sys.path.insert(0,"scripts"); from generate_catalog_v2 import PLUGINS; [(urllib.request.urlretrieve(u, Path("packages") / u.rsplit("/",1)[-1])) for u,_,_ in PLUGINS.values()]'
+          python scripts/plugin_package.py --download packages
           url=$(python -c 'import sys; sys.path.insert(0, "scripts"); import generate_catalog_v2 as g; print(g.intel_download_url())')
           case "$url" in https://github.com/thedavidweng/openkara-models/releases/download/*) ;; *) echo "unexpected Intel runtime URL: $url"; exit 1;; esac
           tag=$(printf '%s' "$url" | cut -d/ -f8)

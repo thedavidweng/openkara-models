@@ -24,6 +24,14 @@ on:
         description: "New model-weight commit SHA. Required if model is set."
         required: false
         type: string
+      plugin:
+        description: "Plugin EP name (webgpu). Leave empty for ORT or model-weight updates."
+        required: false
+        type: string
+      plugin_version:
+        description: "New plugin release version (e.g. 0.6.0). Required if plugin is set."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -40,7 +48,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       branch_name: ${{ steps.branch.outputs.branch_name }}
-      is_ort_update: ${{ steps.branch.outputs.is_ort_update }}
+      update_kind: ${{ steps.branch.outputs.update_kind }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,15 +61,20 @@ jobs:
         env:
           ORT_TAG: ${{ inputs.ort_tag }}
           ORT_COMMIT: ${{ inputs.ort_commit }}
+          PLUGIN: ${{ inputs.plugin }}
+          PLUGIN_VERSION: ${{ inputs.plugin_version }}
           MODEL: ${{ inputs.model }}
           MODEL_COMMIT: ${{ inputs.model_commit }}
         run: |
           if [ -n "$ORT_TAG" ]; then
             BRANCH="deps/candidate-ort-$ORT_TAG-$ORT_COMMIT"
-            echo "is_ort_update=true" >> "$GITHUB_OUTPUT"
+            echo "update_kind=ort" >> "$GITHUB_OUTPUT"
+          elif [ -n "$PLUGIN" ]; then
+            BRANCH="deps/candidate-plugin-$PLUGIN-v$PLUGIN_VERSION"
+            echo "update_kind=plugin" >> "$GITHUB_OUTPUT"
           elif [ -n "$MODEL" ]; then
             BRANCH="deps/candidate-$MODEL-$MODEL_COMMIT"
-            echo "is_ort_update=false" >> "$GITHUB_OUTPUT"
+            echo "update_kind=model" >> "$GITHUB_OUTPUT"
           else
             echo "ERROR: no update specified"
             exit 1
@@ -73,6 +86,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORT_TAG: ${{ inputs.ort_tag }}
           ORT_COMMIT: ${{ inputs.ort_commit }}
+          PLUGIN: ${{ inputs.plugin }}
+          PLUGIN_VERSION: ${{ inputs.plugin_version }}
           MODEL: ${{ inputs.model }}
           MODEL_COMMIT: ${{ inputs.model_commit }}
         run: |
@@ -80,6 +95,12 @@ jobs:
             python scripts/generate_dep_candidate.py \
               --ort-tag "$ORT_TAG" \
               --ort-commit "$ORT_COMMIT" \
+              --output candidate-summary.json \
+              --markdown candidate-summary.md
+          elif [ -n "$PLUGIN" ]; then
+            python scripts/generate_dep_candidate.py \
+              --plugin "$PLUGIN" \
+              --plugin-version "$PLUGIN_VERSION" \
               --output candidate-summary.json \
               --markdown candidate-summary.md
           else
@@ -94,6 +115,10 @@ jobs:
         run: |
           python scripts/validate_source_lock.py
           python scripts/repackage_nuget_runtime.py --validate-lock
+          python scripts/plugin_package.py --validate-lock
+      - name: Validate updated plugin lock
+        if: inputs.plugin != ''
+        run: python scripts/plugin_package.py --validate-lock
       - name: Validate updated model lock
         if: inputs.model != ''
         run: python scripts/validate_model_source_lock.py
@@ -105,6 +130,7 @@ jobs:
             candidate-summary.md
             ort/source-lock.json
             ort/nuget-lock.json
+            ort/plugin-lock.json
             models/source-lock.json
 
   build-runtimes:
@@ -166,7 +192,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH_NAME: ${{ needs.prepare.outputs.branch_name }}
-          IS_ORT_UPDATE: ${{ needs.prepare.outputs.is_ort_update }}
+          UPDATE_KIND: ${{ needs.prepare.outputs.update_kind }}
         run: |
           set -euo pipefail
           # Configure git identity (hosted runners have no default identity).
@@ -179,8 +205,10 @@ jobs:
           # model-weight updates.
           # NEVER stage catalog/channels/stable.json — the stable pointer is
           # not advanced by candidate workflows.
-          if [ "$IS_ORT_UPDATE" = "true" ]; then
+          if [ "$UPDATE_KIND" = "ort" ]; then
             git add ort/source-lock.json ort/nuget-lock.json
+          elif [ "$UPDATE_KIND" = "plugin" ]; then
+            git add ort/plugin-lock.json
           else
             git add models/source-lock.json
           fi
