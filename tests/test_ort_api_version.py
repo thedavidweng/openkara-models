@@ -104,3 +104,21 @@ def test_api_header_rejects_unsafe_include():
     import pytest
     with pytest.raises(ValueError, match="unsupported C API header include"):
         ort_api_version.required_headers(b'#include "../escape.h"\n', lambda name: b"")
+
+
+def test_unpack_archive_headers_builds_source_shaped_tree(tmp_path):
+    import io
+    import tarfile
+
+    archive = tmp_path / "runtime.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, data in {
+            "onnxruntime-linux-x64-1.32.0/include/onnxruntime_c_api.h": b"#define ORT_API_VERSION 32\n",
+            "onnxruntime-linux-x64-1.32.0/lib/libonnxruntime.so.1.32.0": b"elf",
+        }.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    ort_api_version.unpack_archive_headers(archive, tmp_path / "source")
+    assert ort_api_version.parse_ort_api_version(tmp_path / "source") == 32
+    assert not (tmp_path / "source" / "lib").exists()

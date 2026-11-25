@@ -9,7 +9,6 @@ import json
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import urllib.request
 import zipfile
@@ -49,20 +48,6 @@ def download_package(package_id: str, version: str, size: int, sha256: str, cach
     nupkg = nuget_package.download(nuget_package.package_url(package_id, version), cache / f"{package_id}.{version}.nupkg", size, sha256)
     nuget_package.verify_signatures(nupkg, package_id, version)
     return nupkg
-
-
-def unpack_headers(archive: Path, source: Path) -> None:
-    """Copy a canonical runtime archive's include/ headers into a source-shaped tree."""
-    target = source / Path(ort_api_version.HEADER_REL).parent
-    target.mkdir(parents=True)
-    with tarfile.open(archive, "r:gz") as tar:
-        for member in tar.getmembers():
-            parts = Path(member.name).parts
-            if len(parts) == 3 and parts[1] == "include" and member.isfile():
-                with tar.extractfile(member) as inp, (target / parts[2]).open("wb") as out:
-                    shutil.copyfileobj(inp, out)
-    if not (target / "onnxruntime_c_api.h").is_file():
-        raise ValueError("candidate archive does not include the C API header")
 
 
 def main() -> int:
@@ -105,7 +90,7 @@ def main() -> int:
             nupkg = repackage_nuget_runtime.fetch_verified_package(lock, args.cache)
             target = "x86_64-unknown-linux-gnu"
             candidate = repackage_nuget_runtime.repackage(nupkg, lock, [target], tmp / "candidate")[target]
-        unpack_headers(candidate, tmp / "source-candidate")
+        ort_api_version.unpack_archive_headers(candidate, tmp / "source-candidate")
         with candidate.open("rb") as file:
             candidate_sha256 = hashlib.file_digest(file, "sha256").hexdigest()
         return subprocess.run([

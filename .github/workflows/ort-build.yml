@@ -74,9 +74,14 @@ jobs:
       - name: Build full operator runtime
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         run: python scripts/build_runtime.py --locked --target x86_64-apple-darwin
-      - name: Obtain source headers on cache hit
+      # The cached archive was built from the locked commit and ships its C API
+      # headers, so a cache hit needs no upstream source checkout.
+      - name: Obtain C API headers from the cached runtime on cache hit
         if: steps.runtime-cache.outputs.cache-hit == 'true'
-        run: python -c 'import sys; sys.path.insert(0, "scripts"); import build_runtime as b; b._clone_source(b._load_lock(), b.SOURCE_DIR)'
+        run: |
+          archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)
+          test -n "$archive"
+          python -c 'import sys; from pathlib import Path; sys.path.insert(0, "scripts"); import ort_api_version as o; o.unpack_archive_headers(Path(sys.argv[1]), Path("ort/source"))' "$archive"
       - name: Check Intel runtime deployment target
         run: |
           archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)
