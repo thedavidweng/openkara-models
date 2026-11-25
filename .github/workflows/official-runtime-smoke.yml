@@ -29,14 +29,43 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
             files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|run_native_smoke|download_stable_model|generate_catalog_v2)\.py|catalog/)'; then
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|run_native_smoke|download_stable_model|generate_catalog_v2|repackage_nuget_runtime|nuget_package|build_runtime|ort_api_version)\.py|tests/test_nuget_repackage\.py|catalog/)'; then
               echo 'run=true' >> "$GITHUB_OUTPUT"
             else
               echo 'run=false' >> "$GITHUB_OUTPUT"
             fi
           fi
-  smoke:
+  repackage:
+    name: Repackage NuGet runtimes
     needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Repackager tests
+        run: |
+          python -m pip install 'pytest>=8.0'
+          python -m pytest tests/test_nuget_repackage.py -q
+      - name: Verify the signed NuGet package and repackage every target
+        run: |
+          dotnet --version
+          python scripts/repackage_nuget_runtime.py --output packages --headers headers
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ort-nuget-runtimes
+          path: |
+            packages
+            headers
+          if-no-files-found: error
+          retention-days: 30
+  smoke:
+    needs: [changes, repackage]
     if: needs.changes.outputs.run == 'true'
     strategy:
       fail-fast: false
@@ -44,62 +73,54 @@ jobs:
         include:
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            archive: onnxruntime-linux-x64-1.32.0.tgz
-            sha256: bb169b7e374731730d2ae406fb39de7be4b315f413a9132efe896261c31bb503
+            archive: onnxruntime-1.32.0-openkara-x86_64-unknown-linux-gnu.tar.gz
+            provider: cpu
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            archive: onnxruntime-linux-aarch64-1.32.0.tgz
-            sha256: 81a46251dd90da4122f4b9ceb4433f836fbc79ee1eddffca7c09033af81a1939
+            archive: onnxruntime-1.32.0-openkara-aarch64-unknown-linux-gnu.tar.gz
+            provider: cpu
           - runner: macos-latest
             target: aarch64-apple-darwin
-            archive: onnxruntime-osx-arm64-1.32.0.tgz
-            sha256: 8ddca23f532b9d4fbb279ba9b08dab6c0ac94fdc9aec2eb44a1db7049216c043
+            archive: onnxruntime-1.32.0-openkara-aarch64-apple-darwin.tar.gz
+            provider: cpu
           - runner: windows-2022
             target: x86_64-pc-windows-msvc
-            archive: onnxruntime-win-x64-1.32.0.zip
-            sha256: aaa1d04fcf86bd31e84b90bc0cbde80e632bd0720dcc5d8ba05c4fe45c09d127
+            archive: onnxruntime-1.32.0-openkara-x86_64-pc-windows-msvc.zip
+            provider: cpu
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: microsoft/onnxruntime
-          ref: fab30a46491a40f5e4c968b80e8a59acbbb91b53
-          path: ort/source
-          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
-      - name: Download and verify official archive
-        env:
-          ARCHIVE: ${{ matrix.archive }}
-          SHA256: ${{ matrix.sha256 }}
-        shell: bash
-        run: |
-          curl -fsSL -o "$ARCHIVE" "https://github.com/microsoft/onnxruntime/releases/download/v1.32.0/$ARCHIVE"
-          python -c 'import hashlib,os; p=os.environ["ARCHIVE"]; assert hashlib.file_digest(open(p,"rb"),"sha256").hexdigest() == os.environ["SHA256"]'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ort-nuget-runtimes
+          path: nuget
       - name: Download stable model
         run: python scripts/download_stable_model.py --catalog catalog/releases/2026-07-25-005.json --artifact htdemucs.spectral.fp32.onnx --dest models/htdemucs.spectral.onnx
-      - name: Run full-window CPU smoke
+      - name: Run full-window smoke
         env:
           ARCHIVE: ${{ matrix.archive }}
           TARGET: ${{ matrix.target }}
+          PROVIDER: ${{ matrix.provider }}
         shell: bash
-        run: python scripts/run_native_smoke.py --runtime "$ARCHIVE" --model models/htdemucs.spectral.onnx --target "$TARGET" --provider cpu --ort-source ort/source --report smoke.json
+        run: python scripts/run_native_smoke.py --runtime "nuget/packages/$ARCHIVE" --model models/htdemucs.spectral.onnx --target "$TARGET" --provider "$PROVIDER" --ort-source nuget/headers --report smoke.json
   gate:
     name: Official Runtime Gate
     if: always()
-    needs: [changes, smoke]
+    needs: [changes, repackage, smoke]
     runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
+          REPACKAGE: ${{ needs.repackage.result }}
           RESULT: ${{ needs.smoke.result }}
           EXPECTED: ${{ needs.changes.outputs.run }}
         run: |
           test "$CHANGES" = success
-          if [ "$EXPECTED" = true ]; then test "$RESULT" = success; else test "$RESULT" = skipped; fi
+          if [ "$EXPECTED" = true ]; then test "$REPACKAGE" = success && test "$RESULT" = success; else test "$RESULT" = skipped; fi

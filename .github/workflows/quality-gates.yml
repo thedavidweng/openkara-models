@@ -9,6 +9,8 @@ on:
       - ".github/workflows/**"
       - "scripts/compare_runtimes.py"
       - "scripts/run_linux_runtime_comparison.py"
+      - "scripts/repackage_nuget_runtime.py"
+      - "scripts/nuget_package.py"
       - "tests/fixtures/**"
       - "ort/source-lock.json"
   workflow_call:
@@ -36,7 +38,7 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
             files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|compare_runtimes|generate_spectral_golden_vectors|run_linux_runtime_comparison|run_native_smoke|run_runtime_benchmarks|spectral_reference)\.py|tests/(fixtures/|test_(compare_runtimes|spectral_contract)\.py))'; then
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|compare_runtimes|repackage_nuget_runtime|nuget_package|generate_spectral_golden_vectors|run_linux_runtime_comparison|run_native_smoke|run_runtime_benchmarks|spectral_reference)\.py|tests/(fixtures/|test_(compare_runtimes|spectral_contract)\.py))'; then
               echo 'run=true' >> "$GITHUB_OUTPUT"
             else
               echo 'run=false' >> "$GITHUB_OUTPUT"
@@ -58,7 +60,7 @@ jobs:
         run: python -m pip install numpy pytest
       - name: Test comparison and spectral contract
         run: python -m pytest tests/test_compare_runtimes.py tests/test_spectral_contract.py -q
-      - name: Compare official candidate with current stable runtime
+      - name: Compare the repackaged NuGet runtime with the current stable runtime
         run: python scripts/run_linux_runtime_comparison.py --report runtime-comparison.json
   gate:
     name: Differential Gate

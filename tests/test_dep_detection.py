@@ -121,10 +121,41 @@ def test_select_latest_stable_no_stable_raises() -> None:
 
 
 def _detect_with(monkeypatch, releases: list) -> dict:
+    """Serve ``releases`` as the nuget.org version list (no plugin tags there)."""
     import detect_ort_release as d
-    monkeypatch.setattr(d, "_github_get", lambda url, token=None: releases)
-    monkeypatch.setattr(d, "_tag_commit_sha", lambda repo, tag, token=None: f"sha-{tag}")
+    versions = [
+        r["tag_name"].removeprefix("v") + ("-pre" if r["prerelease"] else "")
+        for r in releases if "/" not in r["tag_name"]
+    ]
+    monkeypatch.setattr(d, "_nuget_versions", lambda: versions)
+    monkeypatch.setattr(d, "_nuspec_commit", lambda version: f"sha-v{version}")
     return d.detect_latest_stable()
+
+
+def test_nuget_prerelease_versions_are_ignored(monkeypatch) -> None:
+    import detect_ort_release as d
+    monkeypatch.setattr(d, "_nuget_versions", lambda: ["1.31.1", "1.33.0-rc.1", "1.32.0", "1.28.0-dev-20260101"])
+    monkeypatch.setattr(d, "_nuspec_commit", lambda version: "a" * 40)
+    latest = d.detect_latest_stable()
+    assert latest["tag"] == "v1.32.0"
+    assert latest["release_url"] == "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/1.32.0"
+
+
+def test_nuspec_commit_reads_repository_element(monkeypatch) -> None:
+    import pytest
+    import detect_ort_release as d
+    commit = "fab30a46491a40f5e4c968b80e8a59acbbb91b53"
+    nuspec = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd"><metadata>'
+        f'<repository type="git" url="https://github.com/Microsoft/onnxruntime.git" commit="{commit}" />'
+        '</metadata></package>'
+    ).encode()
+    monkeypatch.setattr(d, "_http_get", lambda url: nuspec)
+    assert d._nuspec_commit("1.32.0") == commit
+    monkeypatch.setattr(d, "_http_get", lambda url: nuspec.replace(commit.encode(), b"main"))
+    with pytest.raises(RuntimeError):
+        d._nuspec_commit("1.32.0")
 
 
 def test_issue_151_lock_v1_31_1_is_up_to_date(monkeypatch) -> None:

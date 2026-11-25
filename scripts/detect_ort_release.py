@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Detect new stable ONNX Runtime releases and compare against the source lock.
 
-Polls the ONNX Runtime GitHub releases API, filters prereleases and non-core
-tags (e.g. ``plugin-ep-*``), picks the highest ``vX.Y.Z`` stable tag by
-semantic version (not by publish order, since patch releases of older minors
-are published after newer minors), and compares it against
-ort/source-lock.json. If a newer stable release is available, prints the
+Polls the version list of the Microsoft-signed ``Microsoft.ML.OnnxRuntime``
+package on nuget.org (the GitHub repository is not a dependency), filters
+prereleases, picks the highest ``X.Y.Z`` stable version by semantic version
+(not by publish order, since patch releases of older minors are published
+after newer minors), reads the source commit from the package's nuspec
+``<repository commit="...">``, and compares it against ort/source-lock.json. If a newer stable release is available, prints the
 release info and exits with code 0.
 If the lock is up-to-date, exits with code 1. On API failure, exits with
 code 2.
@@ -33,22 +34,44 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = ROOT / "ort" / "source-lock.json"
-GITHUB_API = "https://api.github.com/repos/microsoft/onnxruntime/releases?per_page=100"
+PACKAGE_ID = "microsoft.ml.onnxruntime"
+NUGET_FLAT = "https://api.nuget.org/v3-flatcontainer"
+GALLERY = "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime"
 _STABLE_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def _github_get(url: str, token: str | None = None) -> Any:
-    headers = {"Accept": "application/vnd.github+json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, headers=headers)
+def _http_get(url: str) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": "openkara-models-dep-detection"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            return resp.read()
     except urllib.error.HTTPError as e:
-        raise RuntimeError(f"GitHub API error {e.code}: {e.reason}") from e
+        raise RuntimeError(f"nuget.org error {e.code}: {e.reason}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"network error: {e.reason}") from e
+
+
+def _nuget_versions() -> list[str]:
+    data = json.loads(_http_get(f"{NUGET_FLAT}/{PACKAGE_ID}/index.json").decode("utf-8"))
+    versions = data.get("versions") if isinstance(data, dict) else None
+    if not isinstance(versions, list):
+        raise RuntimeError("unexpected nuget.org response: expected a version list")
+    return [str(v) for v in versions]
+
+
+def _nuspec_commit(version: str) -> str:
+    """Read the source commit Microsoft records in the package nuspec."""
+    import xml.etree.ElementTree as ET
+
+    raw = _http_get(f"{NUGET_FLAT}/{PACKAGE_ID}/{version}/{PACKAGE_ID}.nuspec")
+    root = ET.fromstring(raw)
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] == "repository":
+            commit = (element.get("commit") or "").lower()
+            if _COMMIT_RE.match(commit):
+                return commit
+    raise RuntimeError(f"nuspec for {version} has no repository commit")
 
 
 def _is_prerelease(tag: str) -> bool:
@@ -84,10 +107,9 @@ def _stable_version(tag: str | None) -> tuple[int, int, int] | None:
 def select_latest_stable(releases: list[dict[str, Any]]) -> dict[str, Any]:
     """Pick the release with the highest stable semver tag.
 
-    The GitHub releases list is ordered by creation/publish time, so a patch
-    for an older minor (e.g. ``v1.30.1``) can appear before a newer minor
-    (``v1.31.1``). Ordering by version avoids reporting the older tag as
-    "latest".
+    Release lists are not ordered by version: a patch for an older minor
+    (e.g. ``v1.30.1``) can be published after a newer minor (``v1.31.1``).
+    Ordering by version avoids reporting the older tag as "latest".
     """
     best: dict[str, Any] | None = None
     best_version: tuple[int, int, int] | None = None
@@ -105,35 +127,22 @@ def select_latest_stable(releases: list[dict[str, Any]]) -> dict[str, Any]:
     return best
 
 
-def _tag_commit_sha(repo: str, tag: str, token: str | None = None) -> str:
-    """Get the commit SHA for a tag via the GitHub API."""
-    url = f"https://api.github.com/repos/{repo}/git/ref/tags/{tag}"
-    data = _github_get(url, token)
-    ref_type = data.get("object", {}).get("type")
-    sha = data.get("object", {}).get("sha", "")
-    if ref_type == "tag":
-        # Dereference annotated tag to commit.
-        url2 = f"https://api.github.com/repos/{repo}/git/tags/{sha}"
-        data2 = _github_get(url2, token)
-        sha = data2.get("object", {}).get("sha", sha)
-    return sha
-
-
 def detect_latest_stable(token: str | None = None) -> dict[str, Any]:
-    """Return the latest (highest semver) stable ORT release info."""
-    releases = _github_get(GITHUB_API, token)
-    if not isinstance(releases, list):
-        raise RuntimeError("unexpected API response: expected list of releases")
+    """Return the latest (highest semver) stable ORT release on nuget.org.
+
+    ``token`` is accepted for interface compatibility and unused: nuget.org
+    needs no authentication.
+    """
+    releases = [{"tag_name": f"v{v}", "prerelease": "-" in v, "version": v} for v in _nuget_versions()]
     rel = select_latest_stable(releases)
-    tag = rel["tag_name"]
-    commit_sha = _tag_commit_sha("microsoft/onnxruntime", tag, token)
+    version = rel["version"]
     return {
-        "tag": tag,
-        "commit_sha": commit_sha,
-        "release_url": rel.get("html_url", ""),
-        "published_at": rel.get("published_at", ""),
-        "name": rel.get("name", ""),
-        "body": (rel.get("body") or "")[:500],
+        "tag": rel["tag_name"],
+        "commit_sha": _nuspec_commit(version),
+        "release_url": f"{GALLERY}/{version}",
+        "published_at": "",
+        "name": f"Microsoft.ML.OnnxRuntime {version}",
+        "body": "",
     }
 
 
@@ -169,13 +178,10 @@ def compare_with_lock(latest: dict[str, Any], lock: dict[str, Any]) -> dict[str,
 def main() -> int:
     parser = argparse.ArgumentParser(description="Detect new stable ORT releases.")
     parser.add_argument("--json", action="store_true", help="Output JSON.")
-    parser.add_argument("--token", default=None, help="GitHub API token (for rate limits).")
     args = parser.parse_args()
 
-    token = args.token or __import__("os").environ.get("GITHUB_TOKEN")
-
     try:
-        latest = detect_latest_stable(token)
+        latest = detect_latest_stable()
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2

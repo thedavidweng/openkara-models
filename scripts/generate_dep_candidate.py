@@ -58,9 +58,38 @@ def update_model_lock(model: str, commit_sha: str) -> dict[str, Any]:
     }
 
 
+def _github_get(url: str, token: str | None = None) -> Any:
+    """GET a GitHub API URL (the source lock still pins the upstream source tree)."""
+    import urllib.error
+    import urllib.request
+
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"GitHub API error {e.code}: {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"network error: {e.reason}") from e
+
+
+def _tag_commit_sha(repo: str, tag: str, token: str | None = None) -> str:
+    """Get the commit SHA for a tag via the GitHub API."""
+    data = _github_get(f"https://api.github.com/repos/{repo}/git/ref/tags/{tag}", token)
+    ref_type = data.get("object", {}).get("type")
+    sha = data.get("object", {}).get("sha", "")
+    if ref_type == "tag":
+        # Dereference annotated tag to commit.
+        data2 = _github_get(f"https://api.github.com/repos/{repo}/git/tags/{sha}", token)
+        sha = data2.get("object", {}).get("sha", sha)
+    return sha
+
+
 def update_ort_lock(tag: str, commit_sha: str) -> dict[str, Any]:
     """Refresh coupled source pins before writing a candidate lock."""
-    from detect_ort_release import _github_get, _tag_commit_sha
     from validate_source_lock import validate_lock
 
     lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
