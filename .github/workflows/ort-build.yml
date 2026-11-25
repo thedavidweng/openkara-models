@@ -87,7 +87,7 @@ jobs:
       - name: Flag carried-forward Intel runtime in workflow summary
         run: |
           if [ -f intel-status.json ]; then
-            python3 -c 'import json, os; s = json.load(open("intel-status.json")); tag = s.get("carried_tag"); fname = s.get("filename"); digest = s.get("archive_digest"); msg = f"Intel macOS runtime carried forward from {tag} ({fname}) because upstream ORT source is unavailable."; (print(f"::warning::{msg}"), (open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(f"### Intel macOS degraded (carried forward)\n\n- {msg}\n- SHA-256: `{digest}`\n") if os.environ.get("GITHUB_STEP_SUMMARY") else None)) if s.get("mode") == "carried-forward" else None'
+            python3 -c 'import json, os; s = json.load(open("intel-status.json")); tag = s.get("carried_tag"); fname = s.get("filename"); digest = s.get("archive_digest"); msg = f"Intel macOS runtime carried forward from {tag} ({fname}) because upstream ORT source is unavailable."; (print(f"::warning::{msg}"), (open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(f"### Intel macOS degraded (carried forward)\n\n- {msg}\n- SHA-256: {digest}\n") if os.environ.get("GITHUB_STEP_SUMMARY") else None)) if s.get("mode") == "carried-forward" else None'
           fi
       - name: Check Intel runtime deployment target
         run: |

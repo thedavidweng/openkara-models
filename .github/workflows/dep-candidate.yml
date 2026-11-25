@@ -159,7 +159,7 @@ jobs:
         run: |
           cp candidate-summary.md pr-body.md
           if [ -f artifacts/runtimes/intel-status.json ]; then
-            python3 -c 'import json; s = json.load(open("artifacts/runtimes/intel-status.json")); tag = s.get("carried_tag"); fname = s.get("filename"); print(f"\n> **Intel macOS degraded:** carried forward `{tag}` (`{fname}`) because upstream ORT source was unavailable.") if s.get("mode") == "carried-forward" else None' >> pr-body.md
+            python3 -c 'import json; s = json.load(open("artifacts/runtimes/intel-status.json")); tag = s.get("carried_tag"); fname = s.get("filename"); print(f"\n> **Intel macOS degraded:** carried forward {tag} ({fname}) because upstream ORT source was unavailable.") if s.get("mode") == "carried-forward" else None' >> pr-body.md
           fi
           printf '\nRuntime and model checks run in the corresponding workflows.\n' >> pr-body.md
       - name: Create or update candidate PR
