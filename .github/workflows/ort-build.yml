@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/**
       - ort/source-lock.json
+      - scripts/archive_utils.py
       - scripts/build_runtime.py
       - scripts/ort_api_version.py
   workflow_call:
@@ -39,7 +40,7 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
             files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(build_runtime|ort_api_version)\.py)'; then
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|build_runtime|ort_api_version)\.py)'; then
               echo 'run=true' >> "$GITHUB_OUTPUT"
             else
               echo 'run=false' >> "$GITHUB_OUTPUT"
@@ -74,9 +75,14 @@ jobs:
       - name: Build full operator runtime
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         run: python scripts/build_runtime.py --locked --target x86_64-apple-darwin
-      - name: Obtain source headers on cache hit
+      # The cached archive was built from the locked commit and ships its C API
+      # headers, so a cache hit needs no upstream source checkout.
+      - name: Obtain C API headers from the cached runtime on cache hit
         if: steps.runtime-cache.outputs.cache-hit == 'true'
-        run: python -c 'import sys; sys.path.insert(0, "scripts"); import build_runtime as b; b._clone_source(b._load_lock(), b.SOURCE_DIR)'
+        run: |
+          archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)
+          test -n "$archive"
+          python -c 'import sys; from pathlib import Path; sys.path.insert(0, "scripts"); import archive_utils as o; o.unpack_runtime_headers(Path(sys.argv[1]), Path("ort/source"))' "$archive"
       - name: Check Intel runtime deployment target
         run: |
           archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)

@@ -117,7 +117,6 @@ def test_update_model_lock_unknown_model(tmp_path) -> None:
 def test_update_ort_lock_refreshes_coupled_pins(tmp_path, monkeypatch) -> None:
     import base64
     import generate_dep_candidate as g
-    import detect_ort_release as d
 
     work = tmp_path / "source-lock.json"
     work.write_bytes(g.LOCK_PATH.read_bytes())
@@ -139,8 +138,8 @@ def test_update_ort_lock_refreshes_coupled_pins(tmp_path, monkeypatch) -> None:
         path = url.split("/contents/")[1].split("?")[0]
         return {"content": base64.b64encode(texts[path].encode()).decode()}
 
-    with mock.patch.object(d, "_tag_commit_sha", return_value=commit), \
-         mock.patch.object(d, "_github_get", side_effect=github_get):
+    with mock.patch.object(g, "_tag_commit_sha", return_value=commit), \
+         mock.patch.object(g, "_github_get", side_effect=github_get):
         changes = g.update_ort_lock("v1.31.0", commit)
     updated = json.loads(work.read_text())
     assert updated["submodules"] == {
@@ -156,18 +155,18 @@ def test_update_ort_lock_refreshes_coupled_pins(tmp_path, monkeypatch) -> None:
     saved = work.read_bytes()
     for malformed in ("new;url", "new;url;sha;extra", "new;url;bad", "", "new;url;" + "b" * 40 + "\nnew;url;" + "b" * 40):
         texts["cmake/deps.txt"] = malformed
-        with mock.patch.object(d, "_tag_commit_sha", return_value=commit), \
-             mock.patch.object(d, "_github_get", side_effect=github_get):
+        with mock.patch.object(g, "_tag_commit_sha", return_value=commit), \
+             mock.patch.object(g, "_github_get", side_effect=github_get):
             with pytest.raises(ValueError):
                 g.update_ort_lock("v1.31.0", commit)
         assert work.read_bytes() == saved
     texts[".gitmodules"] = texts[".gitmodules"].replace("cmake/external/new", "cmake/external/missing")
-    with mock.patch.object(d, "_tag_commit_sha", return_value=commit), \
-         mock.patch.object(d, "_github_get", side_effect=github_get):
+    with mock.patch.object(g, "_tag_commit_sha", return_value=commit), \
+         mock.patch.object(g, "_github_get", side_effect=github_get):
         with pytest.raises(ValueError, match="gitlinks disagree"):
             g.update_ort_lock("v1.31.0", commit)
     assert work.read_bytes() == saved
-    with mock.patch.object(d, "_tag_commit_sha", return_value="d" * 40):
+    with mock.patch.object(g, "_tag_commit_sha", return_value="d" * 40):
         with pytest.raises(ValueError, match="tag"):
             g.update_ort_lock("v1.31.0", commit)
     assert work.read_bytes() == saved

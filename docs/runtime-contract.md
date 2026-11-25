@@ -98,8 +98,19 @@ Optional: pass `providers=['CoreMLExecutionProvider', 'CPUExecutionProvider']` i
 
 ## Source-built runtime distribution (issue #19)
 
-The v2 catalog references Microsoft's official ORT 1.32.0 packages for Linux,
-Apple Silicon and Windows. Intel macOS uses a full-operator CPU-only
+The v2 catalog ships Microsoft's official ORT 1.32.0 binaries for Linux,
+Apple Silicon and Windows, taken from the signed `Microsoft.ML.OnnxRuntime`
+NuGet package and hosted on this repository's `infra-<release-id>` release.
+`scripts/repackage_nuget_runtime.py` downloads the package pinned in
+`ort/nuget-lock.json` from nuget.org, requires its size and SHA-256, runs
+`dotnet nuget verify --all` (Microsoft Corporation author signature plus the
+nuget.org repository countersignature), checks every used file against the
+lock, and writes deterministic archives in the canonical layout
+(`onnxruntime-<platform>-<version>/{LICENSE,ThirdPartyNotices.txt,build-manifest.json,include/,lib/}`).
+The Linux and Windows binaries are byte-identical to the GitHub release
+archives catalogued in generation 17. The Apple Silicon dylib on nuget.org
+carries Microsoft's Developer ID signature instead of the ad-hoc signature of
+the GitHub archive. Intel macOS uses a full-operator CPU-only
 build cross-compiled from the pinned source on Apple Silicon and tested under
 Rosetta. Windows and
 Apple Silicon can also use the official WebGPU 0.5.0 plugin wheel; Intel macOS
@@ -123,4 +134,6 @@ the catalog runtime's API level (32 for ORT 1.32.0).
 - `scripts/run_runtime_benchmarks.py` — native compat+perf matrix (issue #19 PR 4)
 - `scripts/generate_runtime_catalog_entries.py` — catalog spec fragment (issue #19 PR 5)
 - `.github/workflows/ort-build.yml` — cached Intel macOS build and Rosetta smoke
-- `.github/workflows/official-runtime-smoke.yml` — official package smoke tests
+- `ort/nuget-lock.json` — pinned NuGet package, signers, and per-file digests
+- `scripts/repackage_nuget_runtime.py` — signed NuGet package to catalog archives
+- `.github/workflows/official-runtime-smoke.yml` — repackages the NuGet runtimes and smoke-tests them

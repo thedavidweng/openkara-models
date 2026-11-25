@@ -47,8 +47,9 @@ Renovate does NOT touch:
 Two repository-owned scripts handle upstream sources that no bot can
 manage (source-lock JSON, HuggingFace model weights):
 
-- `scripts/detect_ort_release.py` — polls the ONNX Runtime GitHub
-  releases API, filters prereleases, compares the latest stable tag +
+- `scripts/detect_ort_release.py` — polls the `Microsoft.ML.OnnxRuntime`
+  version list on nuget.org (reading the source commit from the nuspec),
+  filters prereleases, compares the latest stable tag +
   commit SHA against `ort/source-lock.json`, and if different, updates the
   lock and opens a candidate PR (PR 2 of this issue).
 - `scripts/detect_model_weight_revision.py` — polls the HuggingFace API

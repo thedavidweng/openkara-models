@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Generate the v2 catalog from verified runtime and plugin archives."""
+"""Generate the v2 catalog from verified runtime and plugin archives.
+
+Runtimes for Linux, Windows, and Apple Silicon macOS are the Microsoft-signed
+binaries from the Microsoft.ML.OnnxRuntime NuGet package, repackaged by
+``scripts/repackage_nuget_runtime.py`` and hosted on this repository's
+``infra-<release-id>`` release. The Intel macOS runtime built from source by
+this repository is carried forward unchanged from the current stable-v2
+release.
+"""
 
 from __future__ import annotations
 
@@ -15,15 +23,9 @@ import archive_utils
 from validate_catalog import validate_document
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "1.32.0"
-COMMIT = "fab30a46491a40f5e4c968b80e8a59acbbb91b53"
-OFFICIAL = "https://github.com/microsoft/onnxruntime/releases/download/v1.32.0/"
-PACKAGES = {
-    "aarch64-apple-darwin": ("onnxruntime-osx-arm64-1.32.0.tgz", 38721388, "8ddca23f532b9d4fbb279ba9b08dab6c0ac94fdc9aec2eb44a1db7049216c043"),
-    "aarch64-unknown-linux-gnu": ("onnxruntime-linux-aarch64-1.32.0.tgz", 11167120, "81a46251dd90da4122f4b9ceb4433f836fbc79ee1eddffca7c09033af81a1939"),
-    "x86_64-unknown-linux-gnu": ("onnxruntime-linux-x64-1.32.0.tgz", 13425244, "bb169b7e374731730d2ae406fb39de7be4b315f413a9132efe896261c31bb503"),
-    "x86_64-pc-windows-msvc": ("onnxruntime-win-x64-1.32.0.zip", 96945131, "aaa1d04fcf86bd31e84b90bc0cbde80e632bd0720dcc5d8ba05c4fe45c09d127"),
-}
+NUGET_LOCK = ROOT / "ort/nuget-lock.json"
+RELEASE_BASE = "https://github.com/thedavidweng/openkara-models/releases/download"
+INTEL = "x86_64-apple-darwin"
 PLUGINS = {
     "aarch64-apple-darwin": ("https://files.pythonhosted.org/packages/2c/c3/e047d38981e7d6f198f92b488e2c9cd12e45c73017ec851996ea69778922/onnxruntime_ep_webgpu-0.5.0-py3-none-macosx_14_0_universal2.whl", 4864395, "c9a757c7afaf114fde86993420810ff616e2d3046d42ae419bb0c8b9ebcf57fb"),
     "x86_64-pc-windows-msvc": ("https://files.pythonhosted.org/packages/7e/36/9935a5b7851099da3da81d9e04f3021bcc61a5a1039e6c098cf08e5c6607/onnxruntime_ep_webgpu-0.5.0-py3-none-win_amd64.whl", 13608886, "713b94e7b4ce5979a356e19b926ecba2c0d4ba24f857ef4bbb11c75c37cc5b61"),
@@ -79,38 +81,57 @@ def extracted_digests(path: Path) -> dict[str, dict]:
     return result
 
 
-def generate(packages: Path, intel: Path, release_id: str, created_at: str, producer_commit: str) -> dict:
-    old = json.loads((ROOT / "catalog/releases/2026-08-12-001.json").read_text())
-    deployment_target = json.loads((ROOT / "ort/source-lock.json").read_text())["targets"]["x86_64-apple-darwin"]["deployment_target"]
+def _current_release() -> tuple[dict, dict]:
     pointer = json.loads((ROOT / "catalog/channels/stable-v2.json").read_text())
-    current = json.loads((ROOT / "catalog/releases" / f'{pointer["release_id"]}.json').read_text())
-    models = [copy.deepcopy(m) for m in old["artifacts"]["models"] if not m["deprecation"]["deprecated"]]
+    return pointer, json.loads((ROOT / "catalog/releases" / f'{pointer["release_id"]}.json').read_text())
+
+
+def intel_download_url() -> str:
+    """URL of the Intel macOS runtime the next release carries forward."""
+    return _intel_runtime(_current_release()[1], None)["download_url"]
+
+
+def _intel_runtime(current: dict, intel: Path | None) -> dict:
+    """Carry the current Intel macOS runtime forward, byte for byte."""
+    runtime = copy.deepcopy(next(r for r in current["artifacts"]["runtimes"] if r["target_triple"] == INTEL and not r["deprecation"]["deprecated"]))
+    if intel is not None and digest_file(intel) != (runtime["byte_size"], runtime["archive_digest"]):
+        raise ValueError(f"archive integrity mismatch: {intel}")
+    return runtime
+
+
+def _nuget_runtime(template: dict, lock: dict, target: str, path: Path, release_id: str) -> dict:
+    size, sha256 = digest_file(path)
+    version = lock["package"]["version"]
+    runtime = copy.deepcopy(template)
+    runtime.update({
+        "artifact_id": f"onnxruntime-{version}-{target}-{sha256[:16]}",
+        "filename": path.name,
+        "download_url": f"{RELEASE_BASE}/infra-{release_id}/{path.name}",
+        "byte_size": size,
+        "archive_digest": sha256,
+        "extracted_file_digests": extracted_digests(path),
+        "upstream": {"project": lock["upstream"]["project"], "tag": lock["upstream"]["tag"], "commit_sha": lock["upstream"]["commit_sha"]},
+    })
+    runtime.pop("supply_chain", None)
+    runtime["toolchain"] = {"image": f"nuget.org {lock['package']['id']} {version}", "compiler": "Microsoft official build", "cmake_flags": []}
+    return runtime
+
+
+def generate(packages: Path, intel: Path | None, release_id: str, created_at: str, producer_commit: str, run_id: str = "manual") -> dict:
+    import repackage_nuget_runtime
+
+    lock = json.loads(NUGET_LOCK.read_text())
+    pointer, current = _current_release()
+    models = [copy.deepcopy(m) for m in current["artifacts"]["models"] if not m["deprecation"]["deprecated"]]
     model_ids = [model["artifact_id"] for model in models]
+    templates = {r["target_triple"]: r for r in current["artifacts"]["runtimes"] if not r["deprecation"]["deprecated"]}
     runtimes = []
-    package_items = list(PACKAGES.items()) + [("x86_64-apple-darwin", (intel.name, *digest_file(intel)))]
-    for target, (filename, size, sha256) in package_items:
-        path = intel if target == "x86_64-apple-darwin" else packages / filename
-        if digest_file(path) != (size, sha256):
-            raise ValueError(f"archive integrity mismatch: {path}")
-        template = next(r for r in old["artifacts"]["runtimes"] if r["target_triple"] == target and not r["deprecation"]["deprecated"] and "cpu" in r["runtime"]["execution_providers"])
-        runtime = copy.deepcopy(template)
-        runtime.update({
-            "artifact_id": f"onnxruntime-{VERSION}-{target}" + (f"-{sha256[:16]}" if path == intel else ""),
-            "filename": filename,
-            "download_url": (f"https://github.com/thedavidweng/openkara-models/releases/download/infra-{release_id}/{filename}" if path == intel else OFFICIAL + filename),
-            "byte_size": size,
-            "archive_digest": sha256,
-            "extracted_file_digests": extracted_digests(path),
-            "upstream": {"project": "microsoft/onnxruntime", "tag": f"v{VERSION}", "commit_sha": COMMIT},
-        })
-        runtime.pop("supply_chain", None)
-        runtime["runtime"].update({"version": f"v{VERSION}", "ort_c_api_level": "32", "execution_providers": ["cpu", "coreml"] if target == "aarch64-apple-darwin" else ["cpu"], "companion_files": [], "supported_model_artifact_ids": model_ids})
-        if target == "x86_64-apple-darwin":
-            runtime["runtime"]["deployment_target"] = deployment_target
-        elif target == "aarch64-apple-darwin":
-            runtime["runtime"]["deployment_target"] = next(r for r in current["artifacts"]["runtimes"] if r["target_triple"] == target)["runtime"]["deployment_target"]
-        runtime["toolchain"] = {"image": "macos-latest" if path == intel else "Microsoft official release", "compiler": "Apple clang" if path == intel else "Microsoft official build", "cmake_flags": []}
-        runtimes.append(runtime)
+    for target in sorted(lock["targets"]):
+        path = packages / repackage_nuget_runtime.archive_name(lock, target)
+        runtimes.append(_nuget_runtime(templates[target], lock, target, path, release_id))
+    runtimes.append(_intel_runtime(current, intel))
+    for runtime in runtimes:
+        runtime["runtime"]["supported_model_artifact_ids"] = model_ids
 
     plugins = []
     for target, (url, size, sha256) in PLUGINS.items():
@@ -127,7 +148,7 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
         {"model_artifact_id": mid, "runtime_artifact_id": runtime["artifact_id"], "target_triple": runtime["target_triple"], "execution_provider": provider, "status": "supported"}
         for mid in model_ids for runtime in runtimes for provider in runtime["runtime"]["execution_providers"]
     ]
-    manifest = {"schema_version": "openkara.catalog/release-v2", "release_id": release_id, "generation": json.loads((ROOT / "catalog/channels/stable-v2.json").read_text())["generation"] + 1, "created_at": created_at, "producer": {"repo": "thedavidweng/openkara-models", "commit_sha": producer_commit, "workflow": "Intel macOS runtime", "run_id": "manual"}, "artifacts": {"models": models, "runtimes": runtimes, "bundles": [], "plugins": plugins}, "compatibility": compatibility}
+    manifest = {"schema_version": "openkara.catalog/release-v2", "release_id": release_id, "generation": pointer["generation"] + 1, "created_at": created_at, "producer": {"repo": "thedavidweng/openkara-models", "commit_sha": producer_commit, "workflow": "Publish v2 catalog", "run_id": run_id}, "artifacts": {"models": models, "runtimes": runtimes, "bundles": [], "plugins": plugins}, "compatibility": compatibility}
     validation = validate_document(manifest)
     if not validation.ok:
         raise ValueError(f"invalid catalog: {validation}")
@@ -137,13 +158,14 @@ def generate(packages: Path, intel: Path, release_id: str, created_at: str, prod
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packages", type=Path, required=True)
-    parser.add_argument("--intel", type=Path, required=True)
+    parser.add_argument("--intel", type=Path, help="Carried-forward Intel macOS archive to re-verify")
     parser.add_argument("--release-id", required=True)
     parser.add_argument("--created-at", required=True)
     parser.add_argument("--producer-commit", required=True)
+    parser.add_argument("--run-id", default="manual")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    manifest = generate(args.packages, args.intel, args.release_id, args.created_at, args.producer_commit)
+    manifest = generate(args.packages, args.intel, args.release_id, args.created_at, args.producer_commit, args.run_id)
     args.output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 

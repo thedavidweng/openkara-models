@@ -100,8 +100,9 @@ providers. Only Pareto-optimal bundles are published (issue #22).
 `catalog/channels/stable.json` references one immutable release manifest by
 URL, SHA-256, and size. It is frozen at `2026-08-12-001` for existing clients.
 It will not advance. `catalog/channels/stable-v2.json` serves the v2 format.
-The v2 release lists Microsoft runtime archives at their original release
-URLs and WebGPU plugins at their content-addressed PyPI wheel URLs. Intel macOS
+The v2 release lists Microsoft's official runtimes, repackaged from the signed
+NuGet package and hosted on this repository's `infra-<release-id>` release,
+and WebGPU plugins at their content-addressed PyPI wheel URLs. Intel macOS
 uses the full-operator CPU and CoreML runtime built by this repository; it has
 no WebGPU plugin. Each archive and extracted regular file has a size and
 SHA-256. Archive links must be relative and remain inside the extraction
@@ -202,8 +203,9 @@ The v1 `catalog/channels/stable.json` pointer is frozen at `2026-08-12-001` for 
 
 For v2, the `Publish v2 catalog` workflow runs the native runtime smoke tests
 and the Linux differential and performance checks before publishing. It
-verifies the official package bytes, uploads the Intel runtime and manifest to
-the `infra-<release-id>` release, and emits the verified manifest and
+publishes the smoke-tested NuGet repackaged runtimes and the manifest to the
+`infra-<release-id>` release, carries the current Intel runtime forward
+unchanged, and emits the verified manifest and
 `stable-v2.json` as a workflow artifact. Commit those generated files to the
 default branch only after the release is public. Publication does not edit the
 frozen v1 pointer.

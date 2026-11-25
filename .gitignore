@@ -36,3 +36,4 @@ Thumbs.db
 # Local quality-suite outputs (measurement matrices are archived in issues)
 *-suite.log
 *-quality-report.json
+ort/nuget-cache/

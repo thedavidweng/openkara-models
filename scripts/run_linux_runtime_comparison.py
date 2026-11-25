@@ -9,19 +9,21 @@ import json
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
+import archive_utils
+import nuget_package
+import ort_api_version
+import repackage_nuget_runtime
 from compare_runtimes import verify_archive
 
 ROOT = Path(__file__).resolve().parents[1]
-OFFICIAL = "https://github.com/microsoft/onnxruntime/releases/download"
-HEADERS = {
-    "1.27.1": (8828892, "25b1ef1fea1acd210d63f8f24dc870ad6e077795ce1f54876252c6d3803c15af"),
-    "1.32.0": (13425244, "bb169b7e374731730d2ae406fb39de7be4b315f413a9132efe896261c31bb503"),
-}
+# The stable runtime has no headers; its C API headers come from Microsoft's
+# signed NuGet package for the same release.
+STABLE_HEADERS = ("Microsoft.ML.OnnxRuntime", "1.27.1", 135152698, "9359e46eba4482ded00e678c98f22b68f51bb411d7934f5516d64050edfa3383")
 
 
 def download(url: str, dest: Path, size: int, sha256: str) -> None:
@@ -30,23 +32,30 @@ def download(url: str, dest: Path, size: int, sha256: str) -> None:
     verify_archive(dest, size, sha256)
 
 
-def unpack_headers(archive: Path, source: Path) -> None:
-    target = source / "include/onnxruntime/core/session"
+def stable_headers(cache: Path, source: Path) -> None:
+    package_id, version, size, sha256 = STABLE_HEADERS
+    nupkg = download_package(package_id, version, size, sha256, cache)
+    target = source / Path(ort_api_version.HEADER_REL).parent
     target.mkdir(parents=True)
-    with tarfile.open(archive, "r:gz") as tar:
-        for member in tar.getmembers():
-            parts = Path(member.name).parts
-            if len(parts) == 3 and parts[1] == "include" and member.isfile():
-                with tar.extractfile(member) as inp, (target / parts[2]).open("wb") as out:
-                    shutil.copyfileobj(inp, out)
-    if not (target / "onnxruntime_c_api.h").is_file():
-        raise ValueError("official archive does not include the C API header")
+    with zipfile.ZipFile(nupkg) as package:
+        def read(name: str) -> bytes:
+            return package.read(f"build/native/include/{name}")
+
+        for name in ort_api_version.required_headers(read("onnxruntime_c_api.h"), read):
+            (target / name).write_bytes(read(name))
+
+
+def download_package(package_id: str, version: str, size: int, sha256: str, cache: Path) -> Path:
+    nupkg = nuget_package.download(nuget_package.package_url(package_id, version), cache / f"{package_id}.{version}.nupkg", size, sha256)
+    nuget_package.verify_signatures(nupkg, package_id, version)
+    return nupkg
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path)
-    parser.add_argument("--candidate", type=Path, help="Native candidate archive from the build")
+    parser.add_argument("--candidate", type=Path, help="Candidate .tar.gz with C API headers under <root>/include/ or at the archive root (default: repackage the locked NuGet runtime)")
+    parser.add_argument("--cache", type=Path, default=ROOT / "ort" / "nuget-cache", help="NuGet download cache")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
 
@@ -74,25 +83,26 @@ def main() -> int:
             download(model["download_url"], model_path, model["byte_size"], model["archive_digest"])
         else:
             model_path = args.model.resolve()
-        archives = {}
-        for version, (size, digest) in HEADERS.items():
-            name = f"onnxruntime-linux-x64-{version}.tgz"
-            archive = tmp / name
-            download(f"{OFFICIAL}/v{version}/{name}", archive, size, digest)
-            unpack_headers(archive, tmp / f"source-{version}")
-            archives[version] = archive
-        candidate = args.candidate.resolve() if args.candidate else archives["1.32.0"]
+        stable_headers(args.cache, tmp / "source-stable")
+        if args.candidate:
+            candidate = args.candidate.resolve()
+        else:
+            lock = repackage_nuget_runtime.load_lock()
+            nupkg = repackage_nuget_runtime.fetch_verified_package(lock, args.cache)
+            target = "x86_64-unknown-linux-gnu"
+            candidate = repackage_nuget_runtime.repackage(nupkg, lock, [target], tmp / "candidate")[target]
+        archive_utils.unpack_runtime_headers(candidate, tmp / "source-candidate")
         with candidate.open("rb") as file:
             candidate_sha256 = hashlib.file_digest(file, "sha256").hexdigest()
         return subprocess.run([
             sys.executable, str(ROOT / "scripts/compare_runtimes.py"),
             "--stable", str(stable), "--stable-size", str(runtime["byte_size"]),
             "--stable-sha256", runtime["archive_digest"],
-            "--stable-source", str(tmp / "source-1.27.1"),
+            "--stable-source", str(tmp / "source-stable"),
             "--candidate", str(candidate),
             "--candidate-size", str(candidate.stat().st_size),
             "--candidate-sha256", candidate_sha256,
-            "--candidate-source", str(tmp / ("source-1.27.1" if args.candidate else "source-1.32.0")),
+            "--candidate-source", str(tmp / "source-candidate"),
             "--model", str(model_path), "--report", str(args.report.resolve()),
         ], check=False).returncode
 
