@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 
 import archive_utils
+import ort_api_version
 from validate_catalog import validate_document
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,6 +100,21 @@ def _intel_runtime(current: dict, intel: Path | None) -> dict:
     return runtime
 
 
+def _archive_ort_api_level(path: Path) -> int | None:
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                if name.endswith("/include/onnxruntime_c_api.h") or name == "include/onnxruntime_c_api.h":
+                    return ort_api_version.parse_header(archive.read(name).decode("utf-8"))
+    else:
+        with tarfile.open(path, "r:gz") as archive:
+            for member in archive.getmembers():
+                if member.isfile() and (member.name.endswith("/include/onnxruntime_c_api.h") or member.name == "include/onnxruntime_c_api.h"):
+                    with archive.extractfile(member) as stream:
+                        return ort_api_version.parse_header(stream.read().decode("utf-8"))
+    return None
+
+
 def _nuget_runtime(template: dict, lock: dict, target: str, path: Path, release_id: str) -> dict:
     size, sha256 = digest_file(path)
     version = lock["package"]["version"]
@@ -112,6 +128,10 @@ def _nuget_runtime(template: dict, lock: dict, target: str, path: Path, release_
         "extracted_file_digests": extracted_digests(path),
         "upstream": {"project": lock["upstream"]["project"], "tag": lock["upstream"]["tag"], "commit_sha": lock["upstream"]["commit_sha"]},
     })
+    runtime["runtime"]["version"] = lock["upstream"]["tag"]
+    api_level = _archive_ort_api_level(path)
+    if api_level is not None:
+        runtime["runtime"]["ort_c_api_level"] = str(api_level)
     runtime.pop("supply_chain", None)
     runtime["toolchain"] = {"image": f"nuget.org {lock['package']['id']} {version}", "compiler": "Microsoft official build", "cmake_flags": []}
     return runtime

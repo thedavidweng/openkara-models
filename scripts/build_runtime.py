@@ -39,7 +39,13 @@ SOURCE_DIR = ROOT / "ort" / "source"
 PACKAGES_DIR = ROOT / "ort" / "packages"
 
 sys.path.insert(0, str(ROOT / "scripts"))
+import archive_utils  # noqa: E402
+import nuget_package  # noqa: E402
 import ort_api_version  # noqa: E402
+
+
+class UpstreamUnavailableError(RuntimeError):
+    """Raised when the upstream ORT git remote cannot be cloned or fetched."""
 
 
 def _load_lock() -> dict[str, Any]:
@@ -79,13 +85,19 @@ def _clone_source(lock: dict[str, Any], target_dir: Path) -> None:
 
     if target_dir.exists() and (target_dir / ".git").is_dir():
         print(f"  source dir exists, fetching {commit}...")
-        _run(["git", *faithful, "fetch", "origin", commit], cwd=target_dir)
+        try:
+            _run(["git", *faithful, "fetch", "origin", commit], cwd=target_dir)
+        except subprocess.CalledProcessError as exc:
+            raise UpstreamUnavailableError(f"failed to fetch {repo}@{commit}: {exc}") from exc
         _run(["git", *faithful, "checkout", commit], cwd=target_dir)
     else:
         target_dir.parent.mkdir(parents=True, exist_ok=True)
-        _run(["git", "clone", "--config", "core.autocrlf=false",
-              "--config", "core.eol=lf",
-              f"https://github.com/{repo}.git", str(target_dir)])
+        try:
+            _run(["git", "clone", "--config", "core.autocrlf=false",
+                  "--config", "core.eol=lf",
+                  f"https://github.com/{repo}.git", str(target_dir)])
+        except subprocess.CalledProcessError as exc:
+            raise UpstreamUnavailableError(f"failed to clone https://github.com/{repo}.git: {exc}") from exc
         _run(["git", "checkout", commit], cwd=target_dir)
 
     # Initialize and update submodules.
@@ -542,6 +554,66 @@ def _find_library(build_dir: Path, name: str) -> Path | None:
     return None
 
 
+def _carried_forward_intel_entry(root: Path = ROOT) -> tuple[str, dict[str, Any]]:
+    pointer = json.loads((root / "catalog" / "channels" / "stable-v2.json").read_text(encoding="utf-8"))
+    release_id = pointer["release_id"]
+    manifest = json.loads((root / "catalog" / "releases" / f"{release_id}.json").read_text(encoding="utf-8"))
+    entry = next(
+        (
+            r for r in manifest.get("artifacts", {}).get("runtimes", [])
+            if r.get("target_triple") == "x86_64-apple-darwin"
+            and not r.get("deprecation", {}).get("deprecated")
+        ),
+        None,
+    )
+    if entry is None:
+        raise RuntimeError(f"no active x86_64-apple-darwin runtime found in stable-v2 release {release_id}")
+    url = entry.get("download_url", "")
+    if not url.startswith("https://github.com/thedavidweng/openkara-models/releases/download/"):
+        raise ValueError(f"unexpected Intel carry-forward download URL: {url!r}")
+    return release_id, entry
+
+
+def _carry_forward_intel_archive(
+    lock: dict[str, Any],
+    source_dir: Path,
+    root: Path = ROOT,
+    packages_dir: Path | None = None,
+) -> dict[str, Any]:
+    release_id, entry = _carried_forward_intel_entry(root)
+    dest = (packages_dir or PACKAGES_DIR) / entry["filename"]
+    archive_path = nuget_package.download(
+        entry["download_url"],
+        dest,
+        int(entry["byte_size"]),
+        entry["archive_digest"],
+    )
+    archive_utils.unpack_runtime_headers(archive_path, source_dir)
+    return {
+        "target": "x86_64-apple-darwin",
+        "mode": "carried-forward",
+        "reason": "upstream ORT git repository unavailable and Microsoft.ML.OnnxRuntime NuGet ships no osx-x64 binary",
+        "requested_tag": lock["upstream"]["tag"],
+        "requested_commit": lock["upstream"]["commit_sha"],
+        "carried_from_release": release_id,
+        "carried_tag": entry.get("upstream", {}).get("tag", ""),
+        "carried_commit": entry.get("upstream", {}).get("commit_sha", ""),
+        "artifact_id": entry["artifact_id"],
+        "archive": str(archive_path),
+        "filename": entry["filename"],
+        "download_url": entry["download_url"],
+        "byte_size": entry["byte_size"],
+        "archive_digest": entry["archive_digest"],
+    }
+
+
+def _write_status(path: Path | None, status: dict[str, Any]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build ORT from source lock.")
     parser.add_argument("--target", required=True,
@@ -560,14 +632,37 @@ def main() -> int:
                              "submodules exactly match the source lock before "
                              "building. Required by the verification commands "
                              "(verify_runtime_package.py, CI).")
+    parser.add_argument("--allow-carry-forward", action="store_true",
+                        help="For x86_64-apple-darwin only: if upstream git clone/fetch fails, "
+                             "keep and verify the previous stable-v2 Intel archive instead of failing.")
+    parser.add_argument("--status-json", type=Path, default=None,
+                        help="Optional path to write structured build/carry-forward status JSON.")
     args = parser.parse_args()
+
+    if args.allow_carry_forward and args.target != "x86_64-apple-darwin":
+        parser.error("--allow-carry-forward is only supported for x86_64-apple-darwin")
 
     lock = _load_lock()
     source_dir = args.source_dir
     build_dir = args.build_dir or (BUILD_DIR / args.target)
     if not args.skip_clone:
         print(f"Cloning ORT {lock['upstream']['tag']} ({lock['upstream']['commit_sha'][:12]})...")
-        _clone_source(lock, source_dir)
+        try:
+            _clone_source(lock, source_dir)
+        except UpstreamUnavailableError as exc:
+            if not args.allow_carry_forward:
+                raise
+            print(
+                f"WARNING: {exc}; carrying forward previous verified Intel macOS archive from stable-v2.",
+                file=sys.stderr,
+            )
+            status = _carry_forward_intel_archive(lock, source_dir)
+            _write_status(args.status_json, status)
+            print(f"CARRIED FORWARD: {args.target}")
+            print(f"  archive: {status['archive']}")
+            print(f"  tag:     {status['carried_tag']} (release {status['carried_from_release']})")
+            print(f"  sha256:  {status['archive_digest']}")
+            return 0
     elif not source_dir.exists():
         print(f"ERROR: source dir not found: {source_dir}", file=sys.stderr)
         return 1
@@ -589,6 +684,16 @@ def main() -> int:
     archive_path = _package_target(lock, args.target, source_dir, build_dir, build_meta)
 
     archive_size, archive_sha = _sha256_file(archive_path)
+    _write_status(args.status_json, {
+        "target": args.target,
+        "mode": "source-built",
+        "tag": lock["upstream"]["tag"],
+        "commit_sha": lock["upstream"]["commit_sha"],
+        "archive": str(archive_path),
+        "filename": archive_path.name,
+        "byte_size": archive_size,
+        "archive_digest": archive_sha,
+    })
     print(f"OK: {args.target}")
     print(f"  archive: {archive_path}")
     print(f"  size:    {archive_size} bytes")

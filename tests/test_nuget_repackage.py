@@ -47,6 +47,8 @@ def test_verify_output_requires_microsoft_author_and_nuget_repository():
 def test_lock_binaries_match_the_pre_outage_catalog():
     """Linux and Windows binaries are byte-identical to the GitHub release archives."""
     lock = repackage.load_lock()
+    if lock["package"]["version"] != "1.32.0":
+        pytest.skip("pre-outage catalog 2026-11-17-001 only covers ORT 1.32.0")
     current = json.loads((ROOT / "catalog/releases/2026-11-17-001.json").read_text())
     declared = {
         name: digest
@@ -129,3 +131,20 @@ def test_download_rejects_wrong_bytes(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="expected"):
         nuget_package.download("https://api.nuget.org/x.nupkg", tmp_path / "x.nupkg", 3, "0" * 64)
     assert not (tmp_path / "x.nupkg").exists()
+
+
+def test_parse_signers_and_validate_lock():
+    output = VERIFY_OK.replace(
+        "Timestamp: 11/13/2026 00:36:55",
+        "  SHA256 hash: " + ("A" * 64) + "\nTimestamp: 11/13/2026 00:36:55",
+    ).replace(
+        "Subject Name: CN=NuGet.org Repository by Microsoft, O=NuGet.org Repository by Microsoft, L=Redmond, S=Washington, C=US",
+        "Subject Name: CN=NuGet.org Repository by Microsoft, O=NuGet.org Repository by Microsoft, L=Redmond, S=Washington, C=US\n  SHA256 hash: " + ("B" * 64),
+    )
+    signers = nuget_package.parse_signers(output)
+    assert signers["author"]["sha256_fingerprint"] == "A" * 64
+    assert signers["repository"]["sha256_fingerprint"] == "B" * 64
+    lock = repackage.load_lock()
+    assert repackage.validate_lock(lock) == []
+    lock["package"]["signers"]["author"]["subject"] = "CN=Someone Else"
+    assert any("author" in err for err in repackage.validate_lock(lock))

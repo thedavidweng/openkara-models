@@ -37,7 +37,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       branch_name: ${{ steps.branch.outputs.branch_name }}
       is_ort_update: ${{ steps.branch.outputs.is_ort_update }}
@@ -89,9 +89,11 @@ jobs:
               --output candidate-summary.json \
               --markdown candidate-summary.md
           fi
-      - name: Validate updated lock
+      - name: Validate updated locks
         if: inputs.ort_tag != ''
-        run: python scripts/validate_source_lock.py
+        run: |
+          python scripts/validate_source_lock.py
+          python scripts/repackage_nuget_runtime.py --validate-lock
       - name: Validate updated model lock
         if: inputs.model != ''
         run: python scripts/validate_model_source_lock.py
@@ -102,6 +104,7 @@ jobs:
             candidate-summary.json
             candidate-summary.md
             ort/source-lock.json
+            ort/nuget-lock.json
             models/source-lock.json
 
   build-runtimes:
@@ -155,6 +158,9 @@ jobs:
       - name: Build PR body
         run: |
           cp candidate-summary.md pr-body.md
+          if [ -f artifacts/runtimes/intel-status.json ]; then
+            python3 -c 'import json; s = json.load(open("artifacts/runtimes/intel-status.json")); tag = s.get("carried_tag"); fname = s.get("filename"); print(f"\n> **Intel macOS degraded:** carried forward {tag} ({fname}) because upstream ORT source was unavailable.") if s.get("mode") == "carried-forward" else None' >> pr-body.md
+          fi
           printf '\nRuntime and model checks run in the corresponding workflows.\n' >> pr-body.md
       - name: Create or update candidate PR
         env:
@@ -168,12 +174,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Create or switch to the candidate branch.
           git checkout -b "$BRANCH_NAME"
-          # Stage only the relevant lock file: ort/source-lock.json for ORT
-          # updates, models/source-lock.json for model-weight updates.
+          # Stage only the relevant lock files: ort/source-lock.json and
+          # ort/nuget-lock.json for ORT updates, models/source-lock.json for
+          # model-weight updates.
           # NEVER stage catalog/channels/stable.json — the stable pointer is
           # not advanced by candidate workflows.
           if [ "$IS_ORT_UPDATE" = "true" ]; then
-            git add ort/source-lock.json
+            git add ort/source-lock.json ort/nuget-lock.json
           else
             git add models/source-lock.json
           fi

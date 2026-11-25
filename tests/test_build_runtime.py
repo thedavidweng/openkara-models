@@ -402,3 +402,51 @@ class WindowsPatchToolchainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IntelCarryForwardTests(unittest.TestCase):
+    def test_carry_forward_rejected_for_non_intel_target(self):
+        with mock.patch.object(sys, "argv", [
+            "build_runtime.py", "--target", "x86_64-unknown-linux-gnu", "--allow-carry-forward",
+        ]):
+            with redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    br.main()
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_carry_forward_used_when_upstream_clone_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            status_path = root / "intel-status.json"
+            fake_status = {
+                "target": "x86_64-apple-darwin",
+                "mode": "carried-forward",
+                "carried_tag": "v1.32.0",
+                "carried_from_release": "2026-11-25-001",
+                "archive": str(root / "intel.tar.gz"),
+                "archive_digest": "a" * 64,
+            }
+            with mock.patch.object(sys, "argv", [
+                "build_runtime.py", "--target", "x86_64-apple-darwin", "--locked",
+                "--allow-carry-forward", "--status-json", str(status_path),
+            ]), mock.patch.object(br, "_load_lock", return_value={
+                "upstream": {"commit_sha": "b" * 40, "tag": "v1.33.0", "repo": "microsoft/onnxruntime"},
+                "submodules": {},
+                "targets": {"x86_64-apple-darwin": {}},
+            }), mock.patch.object(br, "_clone_source", side_effect=br.UpstreamUnavailableError("404")),                 mock.patch.object(br, "_carry_forward_intel_archive", return_value=fake_status),                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = br.main()
+            self.assertEqual(code, 0)
+            written = json.loads(status_path.read_text())
+            self.assertEqual(written["mode"], "carried-forward")
+            self.assertEqual(written["carried_tag"], "v1.32.0")
+
+    def test_upstream_unavailable_fails_without_carry_forward_flag(self):
+        with mock.patch.object(sys, "argv", [
+            "build_runtime.py", "--target", "x86_64-apple-darwin", "--locked",
+        ]), mock.patch.object(br, "_load_lock", return_value={
+            "upstream": {"commit_sha": "b" * 40, "tag": "v1.33.0", "repo": "microsoft/onnxruntime"},
+            "submodules": {},
+            "targets": {"x86_64-apple-darwin": {}},
+        }), mock.patch.object(br, "_clone_source", side_effect=br.UpstreamUnavailableError("404")),             redirect_stdout(io.StringIO()):
+            with self.assertRaises(br.UpstreamUnavailableError):
+                br.main()

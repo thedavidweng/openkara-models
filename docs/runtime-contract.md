@@ -110,9 +110,13 @@ lock, and writes deterministic archives in the canonical layout
 The Linux and Windows binaries are byte-identical to the GitHub release
 archives catalogued in generation 17. The Apple Silicon dylib on nuget.org
 carries Microsoft's Developer ID signature instead of the ad-hoc signature of
-the GitHub archive. Intel macOS uses a full-operator CPU-only
-build cross-compiled from the pinned source on Apple Silicon and tested under
-Rosetta. Windows and
+the GitHub archive. Intel macOS (`x86_64-apple-darwin`) is not shipped in Microsoft's official
+`Microsoft.ML.OnnxRuntime` NuGet package (dropped after 1.23.2). When the
+upstream ORT git repository is available, Intel macOS uses a full-operator
+CPU-only build cross-compiled from pinned source and tested under Rosetta; when
+upstream source is unavailable, `ort-build.yml` degrades clearly by carrying
+forward and Rosetta-smoke-testing the previous verified `stable-v2` Intel
+macOS archive. Windows and
 Apple Silicon can also use the official WebGPU 0.5.0 plugin wheel; Intel macOS
 does not provide this plugin.
 

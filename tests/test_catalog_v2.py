@@ -144,3 +144,46 @@ def test_generated_catalog_rejects_a_different_intel_archive(tmp_path, monkeypat
     intel.write_bytes(b"not the published Intel runtime")
     with pytest.raises(ValueError, match="integrity mismatch"):
         generator.generate(tmp_path, intel, "2026-11-25-001", "2026-11-25T00:00:00Z", "a" * 40)
+
+
+def test_generated_catalog_updates_runtime_version_and_c_api_level_from_lock(tmp_path, monkeypatch):
+    import zipfile
+    import generate_catalog_v2 as generator
+    import repackage_nuget_runtime
+
+    lock = json.loads(generator.NUGET_LOCK.read_text())
+    lock["package"]["version"] = "1.33.0"
+    lock["upstream"]["tag"] = "v1.33.0"
+    lock["upstream"]["commit_sha"] = "b" * 40
+    for cfg in lock["targets"].values():
+        cfg["root"] = cfg["root"].replace("1.32.0", "1.33.0")
+        cfg["files"] = {k.replace("1.32.0", "1.33.0"): v for k, v in cfg["files"].items()}
+        cfg["symlinks"] = {k.replace("1.32.0", "1.33.0"): v.replace("1.32.0", "1.33.0") for k, v in cfg["symlinks"].items()}
+
+    lock_path = tmp_path / "nuget-lock.json"
+    lock_path.write_text(json.dumps(lock))
+    monkeypatch.setattr(generator, "NUGET_LOCK", lock_path)
+    monkeypatch.setattr(generator, "PLUGINS", {})
+
+    header = b"#define ORT_API_VERSION 33\n"
+    for target in lock["targets"]:
+        path = tmp_path / repackage_nuget_runtime.archive_name(lock, target)
+        root = lock["targets"][target]["root"]
+        if path.suffix == ".zip":
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr(f"{root}/include/onnxruntime_c_api.h", header)
+                archive.writestr(f"{root}/lib/onnxruntime.dll", b"dll")
+        else:
+            with tarfile.open(path, "w:gz") as archive:
+                for name, data in ((f"{root}/include/onnxruntime_c_api.h", header), (f"{root}/lib/libonnxruntime.bin", b"so")):
+                    entry = tarfile.TarInfo(name)
+                    entry.size = len(data)
+                    archive.addfile(entry, io.BytesIO(data))
+
+    result = generator.generate(tmp_path, None, "2026-12-01-001", "2026-12-01T00:00:00Z", "c" * 40, "456")
+    runtimes = {r["target_triple"]: r for r in result["artifacts"]["runtimes"]}
+    for target in lock["targets"]:
+        assert runtimes[target]["runtime"]["version"] == "v1.33.0"
+        assert runtimes[target]["runtime"]["ort_c_api_level"] == "33"
+    assert runtimes["x86_64-apple-darwin"]["runtime"]["version"] == "v1.32.0"
+    assert runtimes["x86_64-apple-darwin"]["runtime"]["ort_c_api_level"] == "32"

@@ -329,7 +329,7 @@
   "upstream": {
     "commit_sha": "fab30a46491a40f5e4c968b80e8a59acbbb91b53",
     "project": "onnxruntime",
-    "release_url": "https://github.com/microsoft/onnxruntime/releases/tag/v1.32.0",
+    "release_url": "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/1.32.0",
     "repo": "microsoft/onnxruntime",
     "tag": "v1.32.0"
   }
