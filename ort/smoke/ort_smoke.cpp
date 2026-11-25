@@ -55,6 +55,7 @@
 #include <climits>
 #if defined(_WIN32)
 #  include <windows.h>
+#  include <io.h>
 #  include <psapi.h>
 #else
 #  include <sys/resource.h>
@@ -63,6 +64,7 @@
 // Platform dynamic loading.
 #if !defined(_WIN32)
 #  include <dlfcn.h>
+#  include <unistd.h>
 #endif
 
 // ORT C API header (from the pinned source checkout, passed via -I).
@@ -219,12 +221,51 @@ long long native_peak_rss_kb() {
     return peak_rss_kb;
 }
 
+static FILE* g_json_out = nullptr;
+
+struct JsonOutGuard {
+    ~JsonOutGuard() {
+        if (g_json_out) {
+            fflush(g_json_out);
+            if (g_json_out != stdout) fclose(g_json_out);
+        }
+    }
+};
+
+void isolate_json_stdout() {
+    fflush(stdout);
+#if defined(_WIN32)
+    int saved_fd = _dup(_fileno(stdout));
+    if (saved_fd >= 0) {
+        _dup2(_fileno(stderr), _fileno(stdout));
+        FILE* f = _fdopen(saved_fd, "wb");
+        if (f) {
+            g_json_out = f;
+            return;
+        }
+        _close(saved_fd);
+    }
+#else
+    int saved_fd = dup(STDOUT_FILENO);
+    if (saved_fd >= 0) {
+        dup2(STDERR_FILENO, STDOUT_FILENO);
+        FILE* f = fdopen(saved_fd, "wb");
+        if (f) {
+            g_json_out = f;
+            return;
+        }
+        close(saved_fd);
+    }
+#endif
+    g_json_out = stdout;
+}
+
 void print_json_field(const char* key, const std::string& value, bool last) {
-    printf("  \"%s\": \"%s\"%s\n", key, json_escape(value).c_str(), last ? "" : ",");
+    fprintf(g_json_out, "  \"%s\": \"%s\"%s\n", key, json_escape(value).c_str(), last ? "" : ",");
 }
 
 void print_json_field_bool(const char* key, bool value, bool last) {
-    printf("  \"%s\": %s%s\n", key, value ? "true" : "false", last ? "" : ",");
+    fprintf(g_json_out, "  \"%s\": %s%s\n", key, value ? "true" : "false", last ? "" : ",");
 }
 
 // Print the trailing fields that every JSON output (success or failure)
@@ -233,24 +274,24 @@ void print_json_trailer(int cpu_node_count, bool used_fallback,
                         int total_node_count = -1,
                         int provider_node_count = -1) {
     if (total_node_count >= 0) {
-        printf("  \"total_node_count\": %d,\n", total_node_count);
+        fprintf(g_json_out, "  \"total_node_count\": %d,\n", total_node_count);
     } else {
-        printf("  \"total_node_count\": null,\n");
+        fprintf(g_json_out, "  \"total_node_count\": null,\n");
     }
     if (cpu_node_count >= 0) {
-        printf("  \"cpu_node_count\": %d,\n", cpu_node_count);
-        printf("  \"fallback_node_count\": %d,\n", cpu_node_count);
+        fprintf(g_json_out, "  \"cpu_node_count\": %d,\n", cpu_node_count);
+        fprintf(g_json_out, "  \"fallback_node_count\": %d,\n", cpu_node_count);
     } else {
-        printf("  \"cpu_node_count\": null,\n");
-        printf("  \"fallback_node_count\": null,\n");
+        fprintf(g_json_out, "  \"cpu_node_count\": null,\n");
+        fprintf(g_json_out, "  \"fallback_node_count\": null,\n");
     }
     if (provider_node_count >= 0) {
-        printf("  \"provider_node_count\": %d,\n", provider_node_count);
+        fprintf(g_json_out, "  \"provider_node_count\": %d,\n", provider_node_count);
     } else {
-        printf("  \"provider_node_count\": null,\n");
+        fprintf(g_json_out, "  \"provider_node_count\": null,\n");
     }
     print_json_field_bool("used_fallback", used_fallback, true);
-    printf("}\n");
+    fprintf(g_json_out, "}\n");
 }
 
 }  // namespace
@@ -305,8 +346,10 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    // Begin JSON output on stdout.
-    printf("{\n");
+    // Isolate the JSON report fd from third-party DLL stdout noise (e.g. Dawn/AgilitySDK).
+    isolate_json_stdout();
+    JsonOutGuard json_guard;
+    fprintf(g_json_out, "{\n");
     print_json_field("target", target, false);
     print_json_field("requested_provider", provider, false);
 
@@ -898,13 +941,13 @@ int main(int argc, char** argv) {
     }
     if (!input_dir.empty()) {
         long long peak_rss_kb = native_peak_rss_kb();
-        printf("  \"cold_load_s\": %.9f,\n", cold_load_s);
-        printf("  \"first_window_s\": %.9f,\n", first_window_s);
-        printf("  \"peak_rss_kb\": %lld,\n", peak_rss_kb);
-        printf("  \"rss_delta_kb\": %lld,\n", peak_rss_kb - rss_before);
-        printf("  \"warm_latencies_s\": [");
-        for (size_t i = 0; i < latencies.size(); ++i) printf("%s%.9f", i ? "," : "", latencies[i]);
-        printf("],\n");
+        fprintf(g_json_out, "  \"cold_load_s\": %.9f,\n", cold_load_s);
+        fprintf(g_json_out, "  \"first_window_s\": %.9f,\n", first_window_s);
+        fprintf(g_json_out, "  \"peak_rss_kb\": %lld,\n", peak_rss_kb);
+        fprintf(g_json_out, "  \"rss_delta_kb\": %lld,\n", peak_rss_kb - rss_before);
+        fprintf(g_json_out, "  \"warm_latencies_s\": [");
+        for (size_t i = 0; i < latencies.size(); ++i) fprintf(g_json_out, "%s%.9f", i ? "," : "", latencies[i]);
+        fprintf(g_json_out, "],\n");
     }
     print_json_trailer(
         cpu_node_count, used_fallback, total_node_count, provider_node_count);
