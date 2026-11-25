@@ -224,3 +224,23 @@ def test_unpack_runtime_headers_builds_source_shaped_tree(tmp_path):
     archive_utils.unpack_runtime_headers(archive, tmp_path / "source")
     assert ort_api_version.parse_ort_api_version(tmp_path / "source") == 32
     assert not (tmp_path / "source" / "lib").exists()
+
+
+def test_unpack_runtime_headers_accepts_flat_build_layout(tmp_path):
+    import io
+    import tarfile
+
+    import archive_utils
+    import ort_api_version
+
+    archive = tmp_path / "runtime.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, data in {
+            "onnxruntime-linux-x64/onnxruntime_c_api.h": b"#define ORT_API_VERSION 32\n",
+            "onnxruntime-linux-x64/libonnxruntime.so.1.32.0": b"elf",
+        }.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    archive_utils.unpack_runtime_headers(archive, tmp_path / "source")
+    assert ort_api_version.parse_ort_api_version(tmp_path / "source") == 32

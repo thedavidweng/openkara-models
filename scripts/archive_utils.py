@@ -299,7 +299,10 @@ if __name__ == "__main__":
 
 
 def unpack_runtime_headers(archive: Path, source_dir: Path) -> None:
-    """Copy a canonical runtime archive's ``<root>/include/*.h`` into a source-shaped tree.
+    """Copy a runtime archive's C API headers into a source-shaped tree.
+
+    Headers are read from ``<root>/include/*.h`` (the canonical layout) or,
+    for the flat Linux archives ``build_runtime.py`` writes, ``<root>/*.h``.
 
     The smoke and comparison harnesses include the C API header as
     ``<onnxruntime/core/session/onnxruntime_c_api.h>`` under ``source_dir``.
@@ -314,10 +317,13 @@ def unpack_runtime_headers(archive: Path, source_dir: Path) -> None:
     with tarfile.open(archive, "r:gz") as tar:
         for member in tar.getmembers():
             parts = Path(member.name).parts
-            if len(parts) == 3 and parts[1] == "include" and member.isfile():
-                if not re.fullmatch(r"[A-Za-z0-9_]+\.(h|inc)", parts[2]):
+            canonical = len(parts) == 3 and parts[1] == "include"
+            flat = len(parts) == 2 and parts[1].endswith(".h")
+            if (canonical or flat) and member.isfile():
+                name = parts[-1]
+                if not re.fullmatch(r"[A-Za-z0-9_]+\.(h|inc)", name):
                     raise ValueError(f"unexpected header name: {member.name}")
-                with tar.extractfile(member) as inp, (target / parts[2]).open("wb") as out:
+                with tar.extractfile(member) as inp, (target / name).open("wb") as out:
                     shutil.copyfileobj(inp, out)
     if not (target / "onnxruntime_c_api.h").is_file():
         raise ValueError(f"{archive} does not include the C API header")
