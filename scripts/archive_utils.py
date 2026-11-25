@@ -302,7 +302,7 @@ def unpack_runtime_headers(archive: Path, source_dir: Path) -> None:
     """Copy a runtime archive's C API headers into a source-shaped tree.
 
     Headers are read from ``<root>/include/*.h`` (the canonical layout) or,
-    for the flat Linux archives ``build_runtime.py`` writes, ``<root>/*.h``.
+    for the flat Linux archives ``build_runtime.py`` writes, the archive root.
 
     The smoke and comparison harnesses include the C API header as
     ``<onnxruntime/core/session/onnxruntime_c_api.h>`` under ``source_dir``.
@@ -318,7 +318,7 @@ def unpack_runtime_headers(archive: Path, source_dir: Path) -> None:
         for member in tar.getmembers():
             parts = Path(member.name).parts
             canonical = len(parts) == 3 and parts[1] == "include"
-            flat = len(parts) == 2 and parts[1].endswith(".h")
+            flat = len(parts) == 1 and parts[0].endswith(".h")
             if (canonical or flat) and member.isfile():
                 name = parts[-1]
                 if not re.fullmatch(r"[A-Za-z0-9_]+\.(h|inc)", name):

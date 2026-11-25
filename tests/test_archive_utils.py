@@ -236,8 +236,8 @@ def test_unpack_runtime_headers_accepts_flat_build_layout(tmp_path):
     archive = tmp_path / "runtime.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         for name, data in {
-            "onnxruntime-linux-x64/onnxruntime_c_api.h": b"#define ORT_API_VERSION 32\n",
-            "onnxruntime-linux-x64/libonnxruntime.so.1.32.0": b"elf",
+            "onnxruntime_c_api.h": b"#define ORT_API_VERSION 32\n",
+            "libonnxruntime.so.1.32.0": b"elf",
         }.items():
             info = tarfile.TarInfo(name)
             info.size = len(data)

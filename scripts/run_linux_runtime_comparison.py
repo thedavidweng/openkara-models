@@ -54,7 +54,7 @@ def download_package(package_id: str, version: str, size: int, sha256: str, cach
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path)
-    parser.add_argument("--candidate", type=Path, help="Candidate .tar.gz with C API headers under <root>/include/ or <root>/ (default: repackage the locked NuGet runtime)")
+    parser.add_argument("--candidate", type=Path, help="Candidate .tar.gz with C API headers under <root>/include/ or at the archive root (default: repackage the locked NuGet runtime)")
     parser.add_argument("--cache", type=Path, default=ROOT / "ort" / "nuget-cache", help="NuGet download cache")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
