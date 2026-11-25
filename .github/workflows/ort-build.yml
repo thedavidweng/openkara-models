@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/**
       - ort/source-lock.json
+      - scripts/archive_utils.py
       - scripts/build_runtime.py
       - scripts/ort_api_version.py
   workflow_call:
@@ -39,7 +40,7 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
             files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(build_runtime|ort_api_version)\.py)'; then
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|ort/|scripts/(archive_utils|build_runtime|ort_api_version)\.py)'; then
               echo 'run=true' >> "$GITHUB_OUTPUT"
             else
               echo 'run=false' >> "$GITHUB_OUTPUT"
