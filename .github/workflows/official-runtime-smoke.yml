@@ -115,6 +115,7 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           PROVIDER: ${{ matrix.provider }}
+          ORT_WEBGPU_EP_ALLOW_SOFTWARE_ADAPTER: ${{ matrix.provider == 'webgpu' && runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
           ARCHIVE=$(python -c 'import sys; sys.path.insert(0, "scripts"); import repackage_nuget_runtime as r; print(r.archive_name(r.load_lock(), sys.argv[1]))' "$TARGET")

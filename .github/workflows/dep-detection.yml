@@ -57,14 +57,14 @@ jobs:
         run: |
           python scripts/validate_model_source_lock.py
           python scripts/validate_source_lock.py
-          python scripts/repackage_nuget_runtime.py scripts/detect_plugin_release.py scripts/plugin_package.py --validate-lock
+          python scripts/repackage_nuget_runtime.py --validate-lock
           python scripts/plugin_package.py --validate-lock
       - name: Detection + candidate + NuGet repackage tests
         run: |
           pip install "pytest>=8.0"
           python -m pytest tests/test_dep_detection.py tests/test_dep_candidate.py tests/test_nuget_repackage.py tests/test_plugin_package.py -q
       - name: Syntax check detection scripts
-        run: python -m compileall -q scripts/detect_model_weight_revision.py scripts/detect_ort_release.py scripts/validate_model_source_lock.py scripts/validate_source_lock.py scripts/generate_dep_candidate.py scripts/nuget_package.py scripts/repackage_nuget_runtime.py
+        run: python -m compileall -q scripts/detect_model_weight_revision.py scripts/detect_ort_release.py scripts/validate_model_source_lock.py scripts/validate_source_lock.py scripts/generate_dep_candidate.py scripts/nuget_package.py scripts/repackage_nuget_runtime.py scripts/detect_plugin_release.py scripts/plugin_package.py
 
   detect-ort:
     needs: changes

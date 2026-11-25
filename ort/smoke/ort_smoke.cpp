@@ -484,7 +484,13 @@ int main(int argc, char** argv) {
                     }
                 }
                 if (!webgpu_device) {
-                    last_session_error = "WebGpuExecutionProvider device unavailable after RegisterExecutionProviderLibrary";
+                    std::string dev_names;
+                    for (size_t idx = 0; idx < num_ep_devices; ++idx) {
+                        const char* name = api->EpDevice_EpName(ep_devices[idx]);
+                        if (idx) dev_names += ",";
+                        dev_names += (name ? name : "<null>");
+                    }
+                    last_session_error = "WebGpuExecutionProvider device unavailable after RegisterExecutionProviderLibrary (ep_devices=[" + dev_names + "])";
                     api->ReleaseSessionOptions(o);
                     return nullptr;
                 }
