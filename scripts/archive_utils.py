@@ -147,7 +147,7 @@ def safe_read_archive(archive: Path) -> dict[str, bytes]:
                     )
                 seen.add(name)
                 files[name] = data
-    elif archive.suffix == ".zip":
+    elif archive.suffix in (".zip", ".whl"):
         with zipfile.ZipFile(archive, "r") as zf:
             for info in zf.infolist():
                 member_count += 1
@@ -233,7 +233,7 @@ def safe_extract(archive: Path, dest: Path) -> Path:
                 if f is None:
                     continue
                 out.write_bytes(f.read())
-    elif archive.suffix == ".zip":
+    elif archive.suffix in (".zip", ".whl"):
         with zipfile.ZipFile(archive, "r") as zf:
             infos = zf.infolist()
             for info in infos:
@@ -278,7 +278,7 @@ def installed_size(archive: Path) -> int:
             for m in tar.getmembers():
                 if m.isfile():
                     total += m.size
-    elif archive.suffix == ".zip":
+    elif archive.suffix in (".zip", ".whl"):
         with zipfile.ZipFile(archive, "r") as zf:
             for info in zf.infolist():
                 if not info.is_dir():

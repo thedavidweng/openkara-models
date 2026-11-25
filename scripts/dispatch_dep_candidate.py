@@ -8,16 +8,27 @@ import subprocess
 
 
 def dispatch(inputs: dict[str, str], repo: str) -> bool:
-    revision = inputs.get("ort_commit") or inputs.get("model_commit", "")
-    if not re.fullmatch(r"[0-9a-f]{40}", revision):
-        raise ValueError("candidate revision must be a full lowercase commit SHA")
     if "ort_tag" in inputs:
         tag = inputs["ort_tag"]
+        revision = inputs.get("ort_commit", "")
+        if not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise ValueError("candidate revision must be a full lowercase commit SHA")
         if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
             raise ValueError("candidate ORT tag must be a stable version")
         branch = f"deps/candidate-ort-{tag}-{revision}"
+    elif "plugin" in inputs:
+        plugin = inputs["plugin"]
+        version = inputs.get("plugin_version", "")
+        if plugin not in {"webgpu"}:
+            raise ValueError("unsupported candidate plugin")
+        if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            raise ValueError("candidate plugin version must be X.Y.Z")
+        branch = f"deps/candidate-plugin-{plugin}-v{version}"
     else:
         model = inputs["model"]
+        revision = inputs.get("model_commit", "")
+        if not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise ValueError("candidate revision must be a full lowercase commit SHA")
         if model not in {"htdemucs", "htdemucs_ft"}:
             raise ValueError("unsupported candidate model")
         branch = f"deps/candidate-{model}-{revision}"
@@ -42,12 +53,18 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ort-tag")
     group.add_argument("--model", choices=["htdemucs", "htdemucs_ft"])
+    group.add_argument("--plugin", choices=["webgpu"])
     parser.add_argument("--ort-commit")
     parser.add_argument("--model-commit")
+    parser.add_argument("--plugin-version")
     parser.add_argument("--repo", default="thedavidweng/openkara-models")
     args = parser.parse_args()
-    inputs = ({"ort_tag": args.ort_tag, "ort_commit": args.ort_commit or ""}
-              if args.ort_tag else {"model": args.model, "model_commit": args.model_commit or ""})
+    if args.ort_tag:
+        inputs = {"ort_tag": args.ort_tag, "ort_commit": args.ort_commit or ""}
+    elif args.plugin:
+        inputs = {"plugin": args.plugin, "plugin_version": args.plugin_version or ""}
+    else:
+        inputs = {"model": args.model, "model_commit": args.model_commit or ""}
     dispatch(inputs, args.repo)
 
 

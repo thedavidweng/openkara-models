@@ -77,6 +77,20 @@ def _find_lib(dest: Path) -> Path:
     return libraries[0]
 
 
+
+def _find_plugin_lib(dest: Path) -> Path:
+    libraries = [
+        p for p in dest.rglob("*")
+        if p.is_file() and p.name.lower() in {
+            "libonnxruntime_providers_webgpu.so",
+            "libonnxruntime_providers_webgpu.dylib",
+            "onnxruntime_providers_webgpu.dll",
+        }
+    ]
+    if len(libraries) != 1:
+        raise ValueError("plugin archive must contain exactly one WebGPU provider library")
+    return libraries[0]
+
 def _build_harness(ort_source: Path, build_dir: Path) -> Path:
     """Build the C++ smoke harness via CMake. Returns the binary path."""
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -112,7 +126,7 @@ SPECTRAL_OUTPUT_SHAPE = "[1,4,2,2,2048,336];[1,4,2,343980]"
 
 def run_smoke(
     lib_path: Path, model_path: Path, target: str, provider: str,
-    harness: Path, expect_output_shape: str,
+    harness: Path, expect_output_shape: str, plugin_lib_path: Path | None = None,
 ) -> dict[str, Any]:
     """Invoke the harness and return its parsed JSON output."""
     cmd = [
@@ -123,6 +137,8 @@ def run_smoke(
         "--target", target,
         "--expect-output-shape", expect_output_shape,
     ]
+    if plugin_lib_path is not None:
+        cmd.extend(["--plugin", str(plugin_lib_path)])
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     # The harness prints JSON to stdout. Parse it.
     out = r.stdout.strip()
@@ -222,8 +238,10 @@ def main() -> int:
     parser.add_argument("--target", required=True,
                         help="Target triple (e.g. aarch64-apple-darwin).")
     parser.add_argument("--provider", required=True,
-                        choices=["cpu", "coreml", "xnnpack"],
+                        choices=["cpu", "coreml", "xnnpack", "webgpu"],
                         help="Requested execution provider.")
+    parser.add_argument("--plugin", type=Path, default=None,
+                        help="Optional plugin EP wheel (.whl) or shared library path.")
     parser.add_argument("--ort-source", type=Path, default=ROOT / "ort" / "source",
                         help="ORT source checkout (for the C API header).")
     parser.add_argument("--harness-build-dir", type=Path, default=SMOKE_DIR / "build",
@@ -239,6 +257,11 @@ def main() -> int:
         return 1
     if not args.model.is_file():
         print(f"ERROR: model not found: {args.model}", file=sys.stderr)
+        return 1
+    if args.provider == "webgpu" and args.plugin is None:
+        parser.error("--plugin is required when --provider webgpu")
+    if args.plugin is not None and not args.plugin.is_file():
+        print(f"ERROR: plugin archive or library not found: {args.plugin}", file=sys.stderr)
         return 1
     if not args.ort_source.is_dir():
         print(f"ERROR: ORT source not found: {args.ort_source}", file=sys.stderr)
@@ -264,12 +287,25 @@ def main() -> int:
         archive_size, archive_sha = _sha256_file(args.runtime)
         model_size, model_sha = _sha256_file(args.model)
 
+        plugin_lib_path: Path | None = None
+        plugin_meta: dict[str, Any] | None = None
+        if args.plugin is not None:
+            psize, psha = _sha256_file(args.plugin)
+            plugin_meta = {"sha256": psha, "size": psize, "filename": args.plugin.name}
+            if args.plugin.suffix in (".whl", ".zip"):
+                plugin_dest = Path(tmpd) / "plugin"
+                archive_utils.safe_extract(args.plugin, plugin_dest)
+                plugin_lib_path = _find_plugin_lib(plugin_dest)
+            else:
+                plugin_lib_path = args.plugin
+            print(f"  plugin library: {plugin_lib_path}")
+
         # Run the harness.
         expect_output_shape = SPECTRAL_OUTPUT_SHAPE
         print(f"Running smoke: target={args.target} provider={args.provider} "
               f"interface=spectral...")
         result = run_smoke(lib_path, args.model, args.target, args.provider, harness,
-                           expect_output_shape)
+                           expect_output_shape, plugin_lib_path=plugin_lib_path)
 
     # Assemble the final report.
     report = {
@@ -304,6 +340,8 @@ def main() -> int:
         "harness_exit_code": result.get("harness_exit_code"),
     }
 
+    if plugin_meta is not None:
+        report["plugin_archive"] = plugin_meta
     failures = validation_failures(report, args.provider, expect_output_shape)
     report["release_qualified"] = not failures
     args.report.parent.mkdir(parents=True, exist_ok=True)

@@ -110,11 +110,31 @@ def _fake_nuget_archives(packages, generator):
     return lock
 
 
+
+def _fake_plugin_lock(packages: Path, generator, version: str = "0.5.0") -> Path:
+    import zipfile
+    lock = json.loads(generator.PLUGIN_LOCK.read_text())
+    lock["package"]["version"] = version
+    lock["package"]["pypi_url"] = f"https://pypi.org/pypi/onnxruntime-ep-webgpu/{version}/json"
+    for target, cfg in lock["targets"].items():
+        filename = f"onnxruntime_ep_webgpu-{version}-{cfg['wheel_tag']}.whl"
+        whl = packages / filename
+        with zipfile.ZipFile(whl, "w") as z:
+            z.writestr(cfg["library_member"], f"plugin {version} {target}".encode())
+        raw = whl.read_bytes()
+        cfg["filename"] = filename
+        cfg["url"] = f"https://files.pythonhosted.org/packages/ab/cd/{'0' * 60}/{filename}"
+        cfg["size"] = len(raw)
+        cfg["sha256"] = hashlib.sha256(raw).hexdigest()
+    lock_path = packages / "plugin-lock.json"
+    lock_path.write_text(json.dumps(lock))
+    return lock_path
+
 def test_generated_catalog_hosts_nuget_runtimes_and_carries_intel_forward(tmp_path, monkeypatch):
     import generate_catalog_v2 as generator
 
     lock = _fake_nuget_archives(tmp_path, generator)
-    monkeypatch.setattr(generator, "PLUGINS", {})
+    monkeypatch.setattr(generator, "PLUGIN_LOCK", _fake_plugin_lock(tmp_path, generator))
     result = generator.generate(tmp_path, None, "2026-11-25-001", "2026-11-25T00:00:00Z", "a" * 40, "123")
     pointer = json.loads((ROOT / "catalog/channels/stable-v2.json").read_text())
     current = json.loads((ROOT / "catalog/releases" / f"{pointer['release_id']}.json").read_text())
@@ -139,7 +159,7 @@ def test_generated_catalog_rejects_a_different_intel_archive(tmp_path, monkeypat
     import generate_catalog_v2 as generator
 
     _fake_nuget_archives(tmp_path, generator)
-    monkeypatch.setattr(generator, "PLUGINS", {})
+    monkeypatch.setattr(generator, "PLUGIN_LOCK", _fake_plugin_lock(tmp_path, generator))
     intel = tmp_path / "intel.tar.gz"
     intel.write_bytes(b"not the published Intel runtime")
     with pytest.raises(ValueError, match="integrity mismatch"):
@@ -163,7 +183,7 @@ def test_generated_catalog_updates_runtime_version_and_c_api_level_from_lock(tmp
     lock_path = tmp_path / "nuget-lock.json"
     lock_path.write_text(json.dumps(lock))
     monkeypatch.setattr(generator, "NUGET_LOCK", lock_path)
-    monkeypatch.setattr(generator, "PLUGINS", {})
+    monkeypatch.setattr(generator, "PLUGIN_LOCK", _fake_plugin_lock(tmp_path, generator))
 
     header = b"#define ORT_API_VERSION 33\n"
     for target in lock["targets"]:
@@ -187,3 +207,17 @@ def test_generated_catalog_updates_runtime_version_and_c_api_level_from_lock(tmp
         assert runtimes[target]["runtime"]["ort_c_api_level"] == "33"
     assert runtimes["x86_64-apple-darwin"]["runtime"]["version"] == "v1.32.0"
     assert runtimes["x86_64-apple-darwin"]["runtime"]["ort_c_api_level"] == "32"
+
+
+def test_generated_catalog_reads_plugins_from_lock(tmp_path, monkeypatch):
+    import generate_catalog_v2 as generator
+
+    _fake_nuget_archives(tmp_path, generator)
+    plugin_lock = _fake_plugin_lock(tmp_path, generator, version="0.6.0")
+    monkeypatch.setattr(generator, "PLUGIN_LOCK", plugin_lock)
+    result = generator.generate(tmp_path, None, "2026-12-01-002", "2026-12-01T00:00:00Z", "d" * 40, "789")
+    plugins = {p["target_triple"]: p for p in result["artifacts"]["plugins"]}
+    assert set(plugins) == {"aarch64-apple-darwin", "x86_64-pc-windows-msvc"}
+    for p_entry in plugins.values():
+        assert p_entry["version"] == "0.6.0"
+        assert p_entry["artifact_id"].startswith("onnxruntime-webgpu-0.6.0-")

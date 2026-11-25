@@ -196,6 +196,8 @@ def test_main_no_runs_is_failure() -> None:
                       return_value={"status": "current", "lock_tag": "v1.28.0",
                                     "latest_tag": "v1.28.0",
                                     "update_available": False}), \
+         patch.object(h, "check_plugin_lock_stale",
+                      return_value={"status": "current"}), \
          patch.object(h, "check_workflow_recency",
                       return_value={"status": "no_runs",
                                     "reason": "no workflow runs found"}), \
@@ -227,6 +229,8 @@ def test_main_no_runs_not_healthy_message() -> None:
                       return_value={"status": "current", "lock_tag": "v1.28.0",
                                     "latest_tag": "v1.28.0",
                                     "update_available": False}), \
+         patch.object(h, "check_plugin_lock_stale",
+                      return_value={"status": "current"}), \
          patch.object(h, "check_workflow_recency",
                       return_value={"status": "no_runs",
                                     "reason": "no workflow runs found"}), \
@@ -317,6 +321,7 @@ def test_main_newer_ort_remains_actionable() -> None:
     latest = {"tag": "v99.0.0", "commit_sha": "f" * 40,
               "release_url": "", "published_at": "", "name": "", "body": ""}
     with patch.object(detect_ort_release, "detect_latest_stable", return_value=latest), \
+         patch.object(h, "check_plugin_lock_stale", return_value={"status": "current"}), \
          patch.object(h, "check_model_lock_stale", return_value={"status": "current"}), \
          patch.object(h, "check_workflow_recency", return_value={"status": "current"}), \
          patch.object(h, "check_duplicate_candidates", return_value={"status": "clean"}), \
@@ -368,6 +373,7 @@ def test_main_in_progress_exits_zero() -> None:
                       return_value={"status": "in_progress", "lock_tag": "v1.27.1",
                                     "latest_tag": "v1.31.0", "update_available": True,
                                     "candidate_pr": {"number": 138, "branch": "b"}}), \
+         patch.object(h, "check_plugin_lock_stale", return_value={"status": "current"}), \
          patch.object(h, "check_model_lock_stale", return_value={"status": "current"}), \
          patch.object(h, "check_workflow_recency",
                       return_value={"status": "current", "age_days": 1}), \
@@ -381,3 +387,32 @@ def test_main_in_progress_exits_zero() -> None:
         finally:
             _sys.argv = old_argv
     assert exit_code == 0
+
+
+def test_check_plugin_lock_stale_in_progress_when_candidate_open() -> None:
+    import check_dep_automation_health as h
+    import detect_plugin_release
+
+    with patch.object(detect_plugin_release, "detect_latest_stable",
+                      return_value={"version": "0.6.0", "targets": {}}),          patch.object(h, "_open_plugin_candidate_pr",
+                      return_value={"number": 200, "branch": "deps/candidate-plugin-webgpu-v0.6.0"}):
+        in_prog = h.check_plugin_lock_stale("fake-token")
+    assert in_prog["status"] == "in_progress"
+    assert in_prog["candidate_pr"]["number"] == 200
+
+    with patch.object(detect_plugin_release, "detect_latest_stable",
+                      return_value={"version": "0.6.0", "targets": {}}),          patch.object(h, "_open_plugin_candidate_pr", return_value=None):
+        stale = h.check_plugin_lock_stale("fake-token")
+    assert stale["status"] == "stale"
+
+
+def test_duplicate_candidates_keeps_distinct_plugin_versions_separate() -> None:
+    import check_dep_automation_health as h
+
+    branches = [
+        {"name": "deps/candidate-plugin-webgpu-v0.5.0"},
+        {"name": "deps/candidate-plugin-webgpu-v0.6.0"},
+    ]
+    with patch.object(h, "_github_get", return_value=branches):
+        res = h.check_duplicate_candidates("fake-token")
+    assert res["status"] == "clean"

@@ -116,9 +116,9 @@ upstream ORT git repository is available, Intel macOS uses a full-operator
 CPU-only build cross-compiled from pinned source and tested under Rosetta; when
 upstream source is unavailable, `ort-build.yml` degrades clearly by carrying
 forward and Rosetta-smoke-testing the previous verified `stable-v2` Intel
-macOS archive. Windows and
-Apple Silicon can also use the official WebGPU 0.5.0 plugin wheel; Intel macOS
-does not provide this plugin.
+macOS archive. Windows (`x86_64-pc-windows-msvc`) and Apple Silicon (`aarch64-apple-darwin`)
+can also use the official `onnxruntime-ep-webgpu` plugin wheel pinned in
+`ort/plugin-lock.json`; Intel macOS does not provide this plugin.
 
 The catalog identifies each package by URL, size and SHA-256 and declares its
 model compatibility. The native smoke gate loads the model and runs a complete
@@ -139,5 +139,6 @@ the catalog runtime's API level (32 for ORT 1.32.0).
 - `scripts/generate_runtime_catalog_entries.py` — catalog spec fragment (issue #19 PR 5)
 - `.github/workflows/ort-build.yml` — cached Intel macOS build and Rosetta smoke
 - `ort/nuget-lock.json` — pinned NuGet package, signers, and per-file digests
+- `ort/plugin-lock.json` — pinned `onnxruntime-ep-webgpu` wheel URLs, sizes, SHA-256s, and ORT compatibility
 - `scripts/repackage_nuget_runtime.py` — signed NuGet package to catalog archives
 - `.github/workflows/official-runtime-smoke.yml` — repackages the NuGet runtimes and smoke-tests them
