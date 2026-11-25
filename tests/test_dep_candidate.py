@@ -20,17 +20,42 @@ def test_generate_candidate_summary_ort() -> None:
     import generate_dep_candidate as g
     changes = {
         "type": "ort",
-        "old_tag": "v1.27.1",
-        "new_tag": "v1.28.0",
-        "old_commit": "abc123",
-        "new_commit": "def456",
+        "old_tag": "v1.32.0",
+        "new_tag": "v1.33.0",
+        "old_commit": "a" * 40,
+        "new_commit": "b" * 40,
         "lock_path": "ort/source-lock.json",
+        "nuget_lock_path": "ort/nuget-lock.json",
+        "ort_api_version": 33,
+        "source_lock_submodules_refreshed": False,
+        "nuget_package": {
+            "id": "Microsoft.ML.OnnxRuntime",
+            "version": "1.33.0",
+            "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.33.0/microsoft.ml.onnxruntime.1.33.0.nupkg",
+            "size": 12345,
+            "sha256": "c" * 64,
+            "signers": {
+                "author": {"sha256_fingerprint": "A" * 64, "subject": "CN=Microsoft Corporation"},
+                "repository": {"sha256_fingerprint": "B" * 64, "subject": "CN=NuGet.org Repository by Microsoft"},
+            },
+        },
+        "intel_macos": {
+            "status": "carried-forward-on-upstream-unavailable",
+            "has_nuget_osx_x64": False,
+            "previous": {
+                "tag": "v1.32.0",
+                "artifact_id": "onnxruntime-1.32.0-x86_64-apple-darwin-a3b2691f53534069",
+                "archive_digest": "a3b2691f" + "0" * 56,
+            },
+        },
     }
     summary = g.generate_candidate_summary(changes)
-    assert "ONNX Runtime source update" in summary
-    assert "v1.27.1" in summary
-    assert "v1.28.0" in summary
-    assert "Cross-compile and smoke-test the Intel macOS runtime" in summary
+    assert "ONNX Runtime NuGet update" in summary
+    assert "v1.32.0" in summary
+    assert "v1.33.0" in summary
+    assert "does not ship an `osx-x64` binary" in summary
+    assert "Degraded (carried forward if upstream source is unavailable)" in summary
+    assert "official-runtime-smoke.yml" in summary
     assert "Runtime comparison passes" in summary
 
 
@@ -114,62 +139,99 @@ def test_update_model_lock_unknown_model(tmp_path) -> None:
         g.MODEL_LOCK_PATH = original
 
 
-def test_update_ort_lock_refreshes_coupled_pins(tmp_path, monkeypatch) -> None:
-    import base64
+def test_update_ort_lock_refreshes_nuget_and_source_locks_without_github(tmp_path, monkeypatch) -> None:
+    import hashlib
+    import zipfile
     import generate_dep_candidate as g
+    import nuget_package
 
-    work = tmp_path / "source-lock.json"
-    work.write_bytes(g.LOCK_PATH.read_bytes())
-    before = json.loads(work.read_text())
-    monkeypatch.setattr(g, "LOCK_PATH", work)
+    source_work = tmp_path / "source-lock.json"
+    nuget_work = tmp_path / "nuget-lock.json"
+    source_work.write_bytes(g.LOCK_PATH.read_bytes())
+    nuget_work.write_bytes(g.NUGET_LOCK_PATH.read_bytes())
+    before_source = json.loads(source_work.read_text())
+    monkeypatch.setattr(g, "LOCK_PATH", source_work)
+    monkeypatch.setattr(g, "NUGET_LOCK_PATH", nuget_work)
+
     commit = "a" * 40
-    texts = {
-        ".gitmodules": '[submodule "new"]\npath = cmake/external/new\nurl = https://github.com/owner/new.git\n',
-        "cmake/deps.txt": "#Name;Url;SHA1\nnew;https://example.com/new.zip;" + "b" * 40,
+    nupkg = tmp_path / "Microsoft.ML.OnnxRuntime.1.33.0.nupkg"
+    members = {
+        "LICENSE": b"new license",
+        "ThirdPartyNotices.txt": b"new notices",
+        "build/native/include/onnxruntime_c_api.h": b'#define ORT_API_VERSION 33\n#include "onnxruntime_ep_c_api.h"\n',
+        "build/native/include/onnxruntime_ep_c_api.h": b"// ep 33\n",
+        "runtimes/linux-arm64/native/libonnxruntime.so": b"arm64-so-33",
+        "runtimes/linux-arm64/native/libonnxruntime_providers_shared.so": b"arm64-shared-33",
+        "runtimes/linux-x64/native/libonnxruntime.so": b"x64-so-33",
+        "runtimes/linux-x64/native/libonnxruntime_providers_shared.so": b"x64-shared-33",
+        "runtimes/osx-arm64/native/libonnxruntime.dylib": b"dylib Developer ID Application: Microsoft Corporation (UBF8T346G9)",
+        "runtimes/win-x64/native/onnxruntime.dll": b"win-dll-33",
+        "runtimes/win-x64/native/onnxruntime_providers_shared.dll": b"win-shared-33",
     }
-    tree = {"truncated": False, "tree": [
-        {"path": "cmake/external/new", "mode": "160000", "sha": "c" * 40},
-    ]}
+    with zipfile.ZipFile(nupkg, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
 
-    def github_get(url, token):
-        assert commit in url
-        if "/git/trees/" in url:
-            return tree
-        path = url.split("/contents/")[1].split("?")[0]
-        return {"content": base64.b64encode(texts[path].encode()).decode()}
+    author_fp = "A" * 64
+    repo_fp = "B" * 64
+    verify_out = (
+        f"Verifying Microsoft.ML.OnnxRuntime.1.33.0\n"
+        f"Signature type: Author\n"
+        f"  Subject Name: {nuget_package.AUTHOR_SUBJECT}\n"
+        f"  SHA256 hash: {author_fp}\n"
+        f"Signature type: Repository\n"
+        f"Service index: https://api.nuget.org/v3/index.json\n"
+        f"  Subject Name: {nuget_package.REPOSITORY_SUBJECT}\n"
+        f"  SHA256 hash: {repo_fp}\n"
+        f"Successfully verified package 'Microsoft.ML.OnnxRuntime.1.33.0'.\n"
+    )
 
-    with mock.patch.object(g, "_tag_commit_sha", return_value=commit), \
-         mock.patch.object(g, "_github_get", side_effect=github_get):
-        changes = g.update_ort_lock("v1.31.0", commit)
-    updated = json.loads(work.read_text())
-    assert updated["submodules"] == {
-        "cmake/external/new": {"repo": "owner/new", "expected_sha": "c" * 40},
+    with mock.patch.object(nuget_package, "nuspec_commit", return_value=commit), \
+         mock.patch.object(nuget_package, "download_unpinned", return_value=nupkg), \
+         mock.patch.object(nuget_package, "verify_signatures", return_value=verify_out):
+        changes = g.update_ort_lock("v1.33.0", commit, cache_dir=tmp_path)
+
+    updated_source = json.loads(source_work.read_text())
+    updated_nuget = json.loads(nuget_work.read_text())
+    assert updated_source["upstream"]["tag"] == "v1.33.0"
+    assert updated_source["upstream"]["commit_sha"] == commit
+    assert updated_source["upstream"]["release_url"] == "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/1.33.0"
+    assert updated_source["submodules"] == before_source["submodules"]
+    assert updated_source["deps"] == before_source["deps"]
+    assert updated_source["targets"] == before_source["targets"]
+
+    assert updated_nuget["package"]["version"] == "1.33.0"
+    assert updated_nuget["package"]["size"] == nupkg.stat().st_size
+    assert updated_nuget["package"]["sha256"] == hashlib.sha256(nupkg.read_bytes()).hexdigest()
+    assert updated_nuget["package"]["signers"]["author"]["sha256_fingerprint"] == author_fp
+    assert updated_nuget["package"]["signers"]["repository"]["sha256_fingerprint"] == repo_fp
+    assert updated_nuget["targets"]["aarch64-apple-darwin"]["root"] == "onnxruntime-osx-arm64-1.33.0"
+    assert "lib/libonnxruntime.1.33.0.dylib" in updated_nuget["targets"]["aarch64-apple-darwin"]["files"]
+    assert updated_nuget["targets"]["x86_64-unknown-linux-gnu"]["symlinks"]["lib/libonnxruntime.so.1"] == "libonnxruntime.so.1.33.0"
+    assert updated_nuget["members"]["runtimes/linux-x64/native/libonnxruntime.so"] == {
+        "size": len(members["runtimes/linux-x64/native/libonnxruntime.so"]),
+        "sha256": hashlib.sha256(members["runtimes/linux-x64/native/libonnxruntime.so"]).hexdigest(),
     }
-    assert updated["deps"]["entries"] == {
-        "new": {"url": "https://example.com/new.zip", "sha1": "b" * 40},
-    }
-    assert updated["targets"] == before["targets"]
-    assert changes["old_tag"] == before["upstream"]["tag"]
-    assert changes["new_commit"] == commit
+    assert updated_nuget["members"]["runtimes/osx-arm64/native/libonnxruntime.dylib"]["apple_team_id"] == "UBF8T346G9"
+    assert changes["ort_api_version"] == 33
+    assert changes["intel_macos"]["has_nuget_osx_x64"] is False
+    assert changes["intel_macos"]["status"] == "carried-forward-on-upstream-unavailable"
 
-    saved = work.read_bytes()
-    for malformed in ("new;url", "new;url;sha;extra", "new;url;bad", "", "new;url;" + "b" * 40 + "\nnew;url;" + "b" * 40):
-        texts["cmake/deps.txt"] = malformed
-        with mock.patch.object(g, "_tag_commit_sha", return_value=commit), \
-             mock.patch.object(g, "_github_get", side_effect=github_get):
-            with pytest.raises(ValueError):
-                g.update_ort_lock("v1.31.0", commit)
-        assert work.read_bytes() == saved
-    texts[".gitmodules"] = texts[".gitmodules"].replace("cmake/external/new", "cmake/external/missing")
-    with mock.patch.object(g, "_tag_commit_sha", return_value=commit), \
-         mock.patch.object(g, "_github_get", side_effect=github_get):
-        with pytest.raises(ValueError, match="gitlinks disagree"):
-            g.update_ort_lock("v1.31.0", commit)
-    assert work.read_bytes() == saved
-    with mock.patch.object(g, "_tag_commit_sha", return_value="d" * 40):
+    saved_source = source_work.read_bytes()
+    saved_nuget = nuget_work.read_bytes()
+    with mock.patch.object(nuget_package, "nuspec_commit", return_value="d" * 40):
         with pytest.raises(ValueError, match="tag"):
-            g.update_ort_lock("v1.31.0", commit)
-    assert work.read_bytes() == saved
+            g.update_ort_lock("v1.33.0", commit, cache_dir=tmp_path)
+    assert source_work.read_bytes() == saved_source
+    assert nuget_work.read_bytes() == saved_nuget
+
+    with mock.patch.object(nuget_package, "nuspec_commit", return_value=commit), \
+         mock.patch.object(nuget_package, "download_unpinned", return_value=nupkg), \
+         mock.patch.object(nuget_package, "verify_signatures", side_effect=RuntimeError("bad sig")):
+        with pytest.raises(RuntimeError, match="bad sig"):
+            g.update_ort_lock("v1.33.0", commit, cache_dir=tmp_path)
+    assert source_work.read_bytes() == saved_source
+    assert nuget_work.read_bytes() == saved_nuget
 
 
 def test_dispatch_candidate_is_lightweight_and_deduplicated():
@@ -462,3 +524,13 @@ def test_tag_push_still_publishes_the_same_artifact():
 
 
 
+
+
+def test_candidate_and_smoke_workflows_support_nuget_version_updates():
+    candidate = (ROOT / ".github/workflows/dep-candidate.yml").read_text()
+    assert "ort/nuget-lock.json" in candidate
+    assert "git add ort/source-lock.json ort/nuget-lock.json" in candidate
+    assert "repackage_nuget_runtime.py --validate-lock" in candidate
+    smoke = (ROOT / ".github/workflows/official-runtime-smoke.yml").read_text()
+    assert "archive: onnxruntime-1.32.0-" not in smoke
+    assert "repackage_nuget_runtime" in smoke

@@ -72,9 +72,9 @@ jobs:
         with:
           path: ort/packages
           key: ort-intel-${{ steps.source.outputs.commit }}-${{ hashFiles('ort/source-lock.json', 'scripts/build_runtime.py', 'scripts/ort_api_version.py') }}
-      - name: Build full operator runtime
+      - name: Build full operator runtime (or carry forward Intel archive if upstream is unavailable)
         if: steps.runtime-cache.outputs.cache-hit != 'true'
-        run: python scripts/build_runtime.py --locked --target x86_64-apple-darwin
+        run: python scripts/build_runtime.py --locked --target x86_64-apple-darwin --allow-carry-forward --status-json intel-status.json
       # The cached archive was built from the locked commit and ships its C API
       # headers, so a cache hit needs no upstream source checkout.
       - name: Obtain C API headers from the cached runtime on cache hit
@@ -83,6 +83,12 @@ jobs:
           archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)
           test -n "$archive"
           python -c 'import sys; from pathlib import Path; sys.path.insert(0, "scripts"); import archive_utils as o; o.unpack_runtime_headers(Path(sys.argv[1]), Path("ort/source"))' "$archive"
+          python3 -c 'import json, sys; from pathlib import Path; Path("intel-status.json").write_text(json.dumps({"target": "x86_64-apple-darwin", "mode": "cached", "archive": sys.argv[1]}, indent=2) + "\n")' "$archive"
+      - name: Flag carried-forward Intel runtime in workflow summary
+        run: |
+          if [ -f intel-status.json ]; then
+            python3 -c 'import json, os; s = json.load(open("intel-status.json")); tag = s.get("carried_tag"); fname = s.get("filename"); digest = s.get("archive_digest"); msg = f"Intel macOS runtime carried forward from {tag} ({fname}) because upstream ORT source is unavailable."; (print(f"::warning::{msg}"), (open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(f"### Intel macOS degraded (carried forward)\n\n- {msg}\n- SHA-256: `{digest}`\n") if os.environ.get("GITHUB_STEP_SUMMARY") else None)) if s.get("mode") == "carried-forward" else None'
+          fi
       - name: Check Intel runtime deployment target
         run: |
           archive=$(find ort/packages -name '*x86_64-apple-darwin.tar.gz' -print -quit)
@@ -110,6 +116,7 @@ jobs:
           path: |
             ort/packages/*x86_64-apple-darwin.tar.gz
             smoke-intel.json
+            intel-status.json
           if-no-files-found: error
           retention-days: 30
   gate:

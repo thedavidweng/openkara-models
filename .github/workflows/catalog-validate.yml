@@ -47,7 +47,7 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
           else
             files=$(gh api --paginate --jq '.[].filename' "repos/$GITHUB_REPOSITORY/pulls/$PR/files")
-            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|catalog/|ort/source-lock\.json|scripts/(catalog_|validate_catalog|generate_catalog|generate_supply_chain|verify_supply_chain|publish_catalog)|tests/test_(catalog|supply_chain|publish_catalog))'; then
+            if printf '%s\n' "$files" | grep -Eq '^(.github/workflows/|catalog/|ort/(source|nuget)-lock\.json|scripts/(catalog_|validate_catalog|generate_catalog|generate_supply_chain|verify_supply_chain|publish_catalog)|tests/test_(catalog|supply_chain|publish_catalog))'; then
               echo 'run=true' >> "$GITHUB_OUTPUT"
             else
               echo 'run=false' >> "$GITHUB_OUTPUT"

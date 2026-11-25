@@ -95,8 +95,24 @@ in place, creates one only if none exists, and closes it when healthy.
 A newer stable ORT remains stale and actionable until the lock is upgraded;
 there is no update hold or alert suppression.
 
-ORT candidates resolve the tag to the requested commit and refresh every
-submodule gitlink and `cmake/deps.txt` archive pin from that exact commit before
-writing the lock. A mismatched tag, incomplete tree, or invalid dependency list
-fails without changing the lock. This preparation is not native compatibility
-or runtime validation: supported C API validation, native smoke tests, and runtime differential checks must pass before promotion.
+ORT candidates verify `(tag, commit_sha)` against `nuget.org` via the package
+nuspec (without calling the GitHub API), download `Microsoft.ML.OnnxRuntime`
+from `nuget.org`, run `dotnet nuget verify --all` (requiring both Microsoft
+Corporation author signature and nuget.org repository countersignature), and
+refresh both `ort/nuget-lock.json` (package URL, size, SHA-256, signers, targets,
+and every used member digest) and `ort/source-lock.json` (preserving existing
+`submodules` and `deps.entries` when GitHub is unavailable). A mismatched
+commit, failed signature verification, or missing member fails without changing
+either lock.
+
+Because `Microsoft.ML.OnnxRuntime` on nuget.org does not ship an `osx-x64`
+(`x86_64-apple-darwin`) binary (Microsoft dropped `osx-x64` after 1.23.2),
+`ort-build.yml` invokes `scripts/build_runtime.py --allow-carry-forward`. If the
+upstream ORT git repository is reachable, it builds `x86_64-apple-darwin` from
+source and fails loudly on any build or lock-verification error. Only when
+upstream git clone/fetch fails does it degrade by downloading and digest-verifying
+the previous `stable-v2` Intel macOS archive, running Rosetta smoke against it,
+and flagging the carry-forward in `candidate-summary.md` and the workflow summary.
+This preparation is not native compatibility or runtime validation: supported C
+API validation, native smoke tests, and runtime differential checks must pass
+before promotion.
