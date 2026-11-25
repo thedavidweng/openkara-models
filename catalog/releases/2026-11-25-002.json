@@ -1,0 +1,734 @@
+{
+  "artifacts": {
+    "bundles": [],
+    "models": [
+      {
+        "arch": null,
+        "archive_digest": "c3395410b1319976683bc874d97461655a9ea6089bbb0f3bd163d3829db13d02",
+        "artifact_id": "htdemucs.spectral.fp32.onnx",
+        "byte_size": 209469333,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-spectral-v1.0.0/htdemucs.spectral.onnx",
+        "extracted_file_digests": {
+          "htdemucs.spectral.onnx": {
+            "sha256": "c3395410b1319976683bc874d97461655a9ea6089bbb0f3bd163d3829db13d02",
+            "size": 209469333
+          }
+        },
+        "filename": "htdemucs.spectral.onnx",
+        "kind": "model",
+        "model": {
+          "cache_key": "htdemucs-spectral-fp32-model-spectral-v1.0.0",
+          "compatible_runtime_ids": [
+            "onnxruntime-1.32.0-aarch64-apple-darwin-98f8aa4d830354f9",
+            "onnxruntime-1.32.0-aarch64-unknown-linux-gnu-adc292766ca900b1",
+            "onnxruntime-1.32.0-x86_64-pc-windows-msvc-4e498a8fdc64385d",
+            "onnxruntime-1.32.0-x86_64-unknown-linux-gnu-e6fe5517ae83d36e",
+            "onnxruntime-1.32.0-x86_64-apple-darwin-a3b2691f53534069"
+          ],
+          "format": "onnx",
+          "input_semantics": "spectral=[1,2,2,2048,336] contract-v1 spec(mix); mix=[1,2,343980] stereo 44.1 kHz waveform",
+          "ir_version": 8,
+          "opset": 17,
+          "output_semantics": "spectral_out=[1,4,2,2,2048,336] pre-ISTFT (de-normalized) drums/bass/other/vocals; time_out=[1,4,2,343980] time-branch waveform; stems[s] = ispec(spectral_out[:,s], 343980) + time_out[:,s]",
+          "precision": "fp32",
+          "sample_rate": 44100,
+          "segment_frames": 343980,
+          "stem_profile": "four-stem",
+          "tensor_interface": "spectral-core"
+        },
+        "os": null,
+        "profile": "balanced",
+        "supply_chain": {
+          "license": {
+            "digest_algorithm": "sha256",
+            "kind": "license-file",
+            "sha256": "02d7a40913647c7755c74e307b822bba33b5c238191658dfbca7c4fc30947d78",
+            "size": 1061,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/LICENSE"
+          },
+          "notice": {
+            "digest_algorithm": "sha256",
+            "kind": "notice-file",
+            "sha256": "7fc27d2c3dbdc265676afbda4a482c39dbc52400cdccf84d3e958f895148748b",
+            "size": 439,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/NOTICE"
+          },
+          "provenance": {
+            "digest_algorithm": "sha256",
+            "kind": "commit-provenance",
+            "sha256": "5dfe7486517454d42ca92aa71cd7e2840355b6d53c1825a9f2b7b8d9ab157497",
+            "size": 6821,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/provenance.json"
+          },
+          "sbom": {
+            "digest_algorithm": "sha256",
+            "kind": "spdx-json",
+            "sha256": "3928436718b0cb285bd82d38674d13e701965ce98c8cedd157319b415426a15b",
+            "size": 13026,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/sbom.spdx.json"
+          }
+        },
+        "target_triple": null,
+        "upstream": {
+          "project": "openkara-models",
+          "tag": "model-spectral-v1.0.0"
+        },
+        "variant": "htdemucs"
+      },
+      {
+        "arch": null,
+        "archive_digest": "af604e3cceb04f1537547bb2edde16fed7cb065d2c8659a0b348bdd9ac16c3a4",
+        "artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+        "byte_size": 839009018,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/model-ft-spectral-v1.0.0/htdemucs_ft.spectral.onnx",
+        "extracted_file_digests": {
+          "htdemucs_ft.spectral.onnx": {
+            "sha256": "af604e3cceb04f1537547bb2edde16fed7cb065d2c8659a0b348bdd9ac16c3a4",
+            "size": 839009018
+          }
+        },
+        "filename": "htdemucs_ft.spectral.onnx",
+        "kind": "model",
+        "model": {
+          "cache_key": "htdemucs-ft-spectral-fp32-model-ft-spectral-v1.0.0",
+          "compatible_runtime_ids": [
+            "onnxruntime-1.32.0-aarch64-apple-darwin-98f8aa4d830354f9",
+            "onnxruntime-1.32.0-aarch64-unknown-linux-gnu-adc292766ca900b1",
+            "onnxruntime-1.32.0-x86_64-pc-windows-msvc-4e498a8fdc64385d",
+            "onnxruntime-1.32.0-x86_64-unknown-linux-gnu-e6fe5517ae83d36e",
+            "onnxruntime-1.32.0-x86_64-apple-darwin-a3b2691f53534069"
+          ],
+          "format": "onnx",
+          "input_semantics": "spectral=[1,2,2,2048,336] contract-v1 spec(mix); mix=[1,2,343980] stereo 44.1 kHz waveform",
+          "ir_version": 8,
+          "opset": 17,
+          "output_semantics": "spectral_out=[1,4,2,2,2048,336] pre-ISTFT (de-normalized) drums/bass/other/vocals; time_out=[1,4,2,343980] time-branch waveform; stems[s] = ispec(spectral_out[:,s], 343980) + time_out[:,s]",
+          "precision": "fp32",
+          "sample_rate": 44100,
+          "segment_frames": 343980,
+          "stem_profile": "four-stem",
+          "tensor_interface": "spectral-core"
+        },
+        "os": null,
+        "profile": "quality",
+        "supply_chain": {
+          "license": {
+            "digest_algorithm": "sha256",
+            "kind": "license-file",
+            "sha256": "02d7a40913647c7755c74e307b822bba33b5c238191658dfbca7c4fc30947d78",
+            "size": 1061,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/LICENSE"
+          },
+          "notice": {
+            "digest_algorithm": "sha256",
+            "kind": "notice-file",
+            "sha256": "7fc27d2c3dbdc265676afbda4a482c39dbc52400cdccf84d3e958f895148748b",
+            "size": 439,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/NOTICE"
+          },
+          "provenance": {
+            "digest_algorithm": "sha256",
+            "kind": "commit-provenance",
+            "sha256": "5dfe7486517454d42ca92aa71cd7e2840355b6d53c1825a9f2b7b8d9ab157497",
+            "size": 6821,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/provenance.json"
+          },
+          "sbom": {
+            "digest_algorithm": "sha256",
+            "kind": "spdx-json",
+            "sha256": "3928436718b0cb285bd82d38674d13e701965ce98c8cedd157319b415426a15b",
+            "size": 13026,
+            "url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-08-12-001/sbom.spdx.json"
+          }
+        },
+        "target_triple": null,
+        "upstream": {
+          "project": "openkara-models",
+          "tag": "model-ft-spectral-v1.0.0"
+        },
+        "variant": "htdemucs_ft"
+      }
+    ],
+    "plugins": [
+      {
+        "archive_digest": "a4cb7f57f74dcebf6b420413dbc6c7624fa8153ff546dbff2a21109935274cc5",
+        "artifact_id": "onnxruntime-webgpu-0.6.0-aarch64-apple-darwin",
+        "byte_size": 5069045,
+        "download_url": "https://files.pythonhosted.org/packages/b7/36/87398c782af00f7f49efbff0b2e17f650b22788939e9b440a3e576ff73db/onnxruntime_ep_webgpu-0.6.0-py3-none-macosx_14_0_universal2.whl",
+        "extracted_file_digests": {
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/METADATA": {
+            "sha256": "9d4b956e62924c25ec0bfe33364a781e530b486825c43dc9072877494beba37f",
+            "size": 5312
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/RECORD": {
+            "sha256": "c887bddfd4e511c0f28940127045729946b961fc5bea7531c09d5a286c1f538b",
+            "size": 891
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/WHEEL": {
+            "sha256": "0b8f9ce78a68ed6cde26c2fb18fdc1d1e2f70506dc29d9d62597702a438bbd1a",
+            "size": 111
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/licenses/LICENSE": {
+            "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+            "size": 1073
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/licenses/ThirdPartyNotices.txt": {
+            "sha256": "d8696258afcf9df7827a5e01d6b6d55ee9b461b4e82020f5f48242deb9cc2270",
+            "size": 334795
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/top_level.txt": {
+            "sha256": "48bf8a29991b60c2b1c4bb494a0688acf68742afbd350542c56b9fc5166dbf3d",
+            "size": 22
+          },
+          "onnxruntime_ep_webgpu/README.md": {
+            "sha256": "4f2de475c621ee6effebb544c821ec0cc62c5d4a82333fa66b346ea34ad13c6c",
+            "size": 3939
+          },
+          "onnxruntime_ep_webgpu/__init__.py": {
+            "sha256": "f9b470319713f3b2db8315f023de9cc2a3325a3314e0c0ee5ac0269f20022462",
+            "size": 1301
+          },
+          "onnxruntime_ep_webgpu/libonnxruntime_providers_webgpu.dylib": {
+            "sha256": "5a52ebaa356ccee1e3ce115793466839571ea906b4b37cbc68aef579f4464792",
+            "size": 15024432
+          }
+        },
+        "filename": "onnxruntime_ep_webgpu-0.6.0-py3-none-macosx_14_0_universal2.whl",
+        "provider": "webgpu",
+        "target_triple": "aarch64-apple-darwin",
+        "version": "0.6.0"
+      },
+      {
+        "archive_digest": "00853e242f74f4b9072e1620bce9222547c2f988265eb674b5749680c8d62fb9",
+        "artifact_id": "onnxruntime-webgpu-0.6.0-x86_64-pc-windows-msvc",
+        "byte_size": 18122790,
+        "download_url": "https://files.pythonhosted.org/packages/0e/12/25312b2220bdf969a6cdc937e0faad9d6456cadbd602e88bced36f1011af/onnxruntime_ep_webgpu-0.6.0-py3-none-win_amd64.whl",
+        "extracted_file_digests": {
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/METADATA": {
+            "sha256": "53429d944d8e7a3953f1febfbd6503d9aa98ce58ec9f037771a6b6e9de39a5c8",
+            "size": 5430
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/RECORD": {
+            "sha256": "57a9d560542f36735597998c4bbda9518825ec2115d77099a383b8b1d76d75fe",
+            "size": 1189
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/WHEEL": {
+            "sha256": "efd042ceb5c124e6b6615eae80aacae7d76a5a27cc1a302481577fe8042ba9b5",
+            "size": 98
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/licenses/LICENSE": {
+            "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+            "size": 1094
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/licenses/ThirdPartyNotices.txt": {
+            "sha256": "bf8073fd6a112ac2a656bb60799652127e881689e51d37ad20df446cd5188b2d",
+            "size": 341120
+          },
+          "onnxruntime_ep_webgpu-0.6.0.dist-info/top_level.txt": {
+            "sha256": "48bf8a29991b60c2b1c4bb494a0688acf68742afbd350542c56b9fc5166dbf3d",
+            "size": 22
+          },
+          "onnxruntime_ep_webgpu/D3D12/D3D12Core.dll": {
+            "sha256": "97e081df6724064c1d1a6cc9de0e9cf5817ada128eca6e0e8201e79be15a4f9a",
+            "size": 5814072
+          },
+          "onnxruntime_ep_webgpu/D3D12/d3d12SDKLayers.dll": {
+            "sha256": "67d4065b544f19419ee765c305f5b5e6d127b126fb7e52d1958c57bbd243ee39",
+            "size": 5680992
+          },
+          "onnxruntime_ep_webgpu/README.md": {
+            "sha256": "42b6bc32fecd3a9ffaf4aacbd469200d897a3e0780d6e5ed9f8e1b43232f2d21",
+            "size": 4026
+          },
+          "onnxruntime_ep_webgpu/__init__.py": {
+            "sha256": "83a1c43c4548e5f38151148b408477606014699e50bb95cbcb9568288cc1f1bf",
+            "size": 1347
+          },
+          "onnxruntime_ep_webgpu/dxcompiler.dll": {
+            "sha256": "d833eb71611ae86bcfe73092f8daf5d89c1c084f3b31719b53f9884da64842ba",
+            "size": 17986360
+          },
+          "onnxruntime_ep_webgpu/onnxruntime_providers_webgpu.dll": {
+            "sha256": "6bf102c322d6bad5b1b5a04b0b0c3d43191f70f428ad1d6b4c43719674fc57d9",
+            "size": 14026040
+          }
+        },
+        "filename": "onnxruntime_ep_webgpu-0.6.0-py3-none-win_amd64.whl",
+        "provider": "webgpu",
+        "target_triple": "x86_64-pc-windows-msvc",
+        "version": "0.6.0"
+      }
+    ],
+    "runtimes": [
+      {
+        "arch": "aarch64",
+        "archive_digest": "98f8aa4d830354f9611406193486306aee42db3255d0c340eb31565ba0b03308",
+        "artifact_id": "onnxruntime-1.32.0-aarch64-apple-darwin-98f8aa4d830354f9",
+        "byte_size": 13567905,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-11-25-002/onnxruntime-1.32.0-openkara-aarch64-apple-darwin.tar.gz",
+        "extracted_file_digests": {
+          "onnxruntime-osx-arm64-1.32.0/LICENSE": {
+            "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+            "size": 1094
+          },
+          "onnxruntime-osx-arm64-1.32.0/ThirdPartyNotices.txt": {
+            "sha256": "bf8073fd6a112ac2a656bb60799652127e881689e51d37ad20df446cd5188b2d",
+            "size": 341120
+          },
+          "onnxruntime-osx-arm64-1.32.0/build-manifest.json": {
+            "sha256": "a0f84a1b1ce2b178b891972ddf5b60c45d7e66d77ec66216703e82d3f85fed63",
+            "size": 2461
+          },
+          "onnxruntime-osx-arm64-1.32.0/include/onnxruntime_c_api.h": {
+            "sha256": "46b146f79b611682cff95e000a3f9b58983e7a915687159e12d0e9a29f0d948c",
+            "size": 442638
+          },
+          "onnxruntime-osx-arm64-1.32.0/include/onnxruntime_ep_c_api.h": {
+            "sha256": "2e6c2de471dedfda120e8579c4a5e23052a4883d45ce8848c40dd0f5b7f896a1",
+            "size": 173074
+          },
+          "onnxruntime-osx-arm64-1.32.0/include/onnxruntime_error_code.h": {
+            "sha256": "6690bf0df3f7a7a9c4f38597dc3232042e432b48ea166cb5672f72a49d32b742",
+            "size": 2873
+          },
+          "onnxruntime-osx-arm64-1.32.0/lib/libonnxruntime.1.32.0.dylib": {
+            "sha256": "21ff304871400e846a30c8a1165d15173add56598afb45f98227e2dfc716a497",
+            "size": 47622768
+          }
+        },
+        "filename": "onnxruntime-1.32.0-openkara-aarch64-apple-darwin.tar.gz",
+        "kind": "runtime",
+        "os": "macos",
+        "runtime": {
+          "companion_files": [],
+          "deployment_target": "14.0",
+          "execution_providers": [
+            "cpu",
+            "coreml"
+          ],
+          "ort_c_api_level": "32",
+          "supported_model_artifact_ids": [
+            "htdemucs.spectral.fp32.onnx",
+            "htdemucs_ft.spectral.fp32.onnx"
+          ],
+          "version": "v1.32.0"
+        },
+        "target_triple": "aarch64-apple-darwin",
+        "toolchain": {
+          "cmake_flags": [],
+          "compiler": "Microsoft official build",
+          "image": "nuget.org Microsoft.ML.OnnxRuntime 1.32.0"
+        },
+        "upstream": {
+          "commit_sha": "fab30a46491a40f5e4c968b80e8a59acbbb91b53",
+          "project": "microsoft/onnxruntime",
+          "tag": "v1.32.0"
+        },
+        "variant": "onnxruntime"
+      },
+      {
+        "arch": "aarch64",
+        "archive_digest": "adc292766ca900b17fe547d9e332f820b3ec2a832fc57fd99d7284ca3d0d46c4",
+        "artifact_id": "onnxruntime-1.32.0-aarch64-unknown-linux-gnu-adc292766ca900b1",
+        "byte_size": 11043605,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-11-25-002/onnxruntime-1.32.0-openkara-aarch64-unknown-linux-gnu.tar.gz",
+        "extracted_file_digests": {
+          "onnxruntime-linux-aarch64-1.32.0/LICENSE": {
+            "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+            "size": 1094
+          },
+          "onnxruntime-linux-aarch64-1.32.0/ThirdPartyNotices.txt": {
+            "sha256": "bf8073fd6a112ac2a656bb60799652127e881689e51d37ad20df446cd5188b2d",
+            "size": 341120
+          },
+          "onnxruntime-linux-aarch64-1.32.0/build-manifest.json": {
+            "sha256": "ee2852ca9c4b85f0c4683e43dafaea80c2f155a18984e4b929d3a19bdfa5081e",
+            "size": 2692
+          },
+          "onnxruntime-linux-aarch64-1.32.0/include/onnxruntime_c_api.h": {
+            "sha256": "46b146f79b611682cff95e000a3f9b58983e7a915687159e12d0e9a29f0d948c",
+            "size": 442638
+          },
+          "onnxruntime-linux-aarch64-1.32.0/include/onnxruntime_ep_c_api.h": {
+            "sha256": "2e6c2de471dedfda120e8579c4a5e23052a4883d45ce8848c40dd0f5b7f896a1",
+            "size": 173074
+          },
+          "onnxruntime-linux-aarch64-1.32.0/include/onnxruntime_error_code.h": {
+            "sha256": "6690bf0df3f7a7a9c4f38597dc3232042e432b48ea166cb5672f72a49d32b742",
+            "size": 2873
+          },
+          "onnxruntime-linux-aarch64-1.32.0/lib/libonnxruntime.so.1.32.0": {
+            "sha256": "fd1db07c49cb1ad11370ef4393a405eef959fa9622fb5b2880f85d025757e719",
+            "size": 27165936
+          },
+          "onnxruntime-linux-aarch64-1.32.0/lib/libonnxruntime_providers_shared.so": {
+            "sha256": "f91fa2b0a2b8dba9cbc319254d342fa8201fd94b5912b9ce717f82e2207ee3d5",
+            "size": 198792
+          }
+        },
+        "filename": "onnxruntime-1.32.0-openkara-aarch64-unknown-linux-gnu.tar.gz",
+        "kind": "runtime",
+        "os": "linux",
+        "runtime": {
+          "companion_files": [],
+          "deployment_target": "n/a",
+          "execution_providers": [
+            "cpu"
+          ],
+          "ort_c_api_level": "32",
+          "supported_model_artifact_ids": [
+            "htdemucs.spectral.fp32.onnx",
+            "htdemucs_ft.spectral.fp32.onnx"
+          ],
+          "version": "v1.32.0"
+        },
+        "target_triple": "aarch64-unknown-linux-gnu",
+        "toolchain": {
+          "cmake_flags": [],
+          "compiler": "Microsoft official build",
+          "image": "nuget.org Microsoft.ML.OnnxRuntime 1.32.0"
+        },
+        "upstream": {
+          "commit_sha": "fab30a46491a40f5e4c968b80e8a59acbbb91b53",
+          "project": "microsoft/onnxruntime",
+          "tag": "v1.32.0"
+        },
+        "variant": "onnxruntime"
+      },
+      {
+        "arch": "x86_64",
+        "archive_digest": "4e498a8fdc64385dbfbd19640bba3c11cb12b73c41d031806b4b0c0c348bb3d4",
+        "artifact_id": "onnxruntime-1.32.0-x86_64-pc-windows-msvc-4e498a8fdc64385d",
+        "byte_size": 7358317,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-11-25-002/onnxruntime-1.32.0-openkara-x86_64-pc-windows-msvc.zip",
+        "extracted_file_digests": {
+          "onnxruntime-win-x64-1.32.0/LICENSE": {
+            "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+            "size": 1094
+          },
+          "onnxruntime-win-x64-1.32.0/ThirdPartyNotices.txt": {
+            "sha256": "bf8073fd6a112ac2a656bb60799652127e881689e51d37ad20df446cd5188b2d",
+            "size": 341120
+          },
+          "onnxruntime-win-x64-1.32.0/build-manifest.json": {
+            "sha256": "36e80d586b903f795a1259b933e40b232cf48802697ccc1d0d3551e1076aa8b2",
+            "size": 2552
+          },
+          "onnxruntime-win-x64-1.32.0/include/onnxruntime_c_api.h": {
+            "sha256": "46b146f79b611682cff95e000a3f9b58983e7a915687159e12d0e9a29f0d948c",
+            "size": 442638
+          },
+          "onnxruntime-win-x64-1.32.0/include/onnxruntime_ep_c_api.h": {
+            "sha256": "2e6c2de471dedfda120e8579c4a5e23052a4883d45ce8848c40dd0f5b7f896a1",
+            "size": 173074
+          },
+          "onnxruntime-win-x64-1.32.0/include/onnxruntime_error_code.h": {
+            "sha256": "6690bf0df3f7a7a9c4f38597dc3232042e432b48ea166cb5672f72a49d32b742",
+            "size": 2873
+          },
+          "onnxruntime-win-x64-1.32.0/lib/onnxruntime.dll": {
+            "sha256": "348c3d29d6995eee37e3451825eaddb7ea7400be3afda6ca2286b12bc775f042",
+            "size": 20602168
+          },
+          "onnxruntime-win-x64-1.32.0/lib/onnxruntime_providers_shared.dll": {
+            "sha256": "6caf57ac07c9cf72fb4e73c5bb0fe156f02dd60bbbd7385530c9a5654f10f950",
+            "size": 21816
+          }
+        },
+        "filename": "onnxruntime-1.32.0-openkara-x86_64-pc-windows-msvc.zip",
+        "kind": "runtime",
+        "os": "windows",
+        "runtime": {
+          "companion_files": [],
+          "deployment_target": "n/a",
+          "execution_providers": [
+            "cpu"
+          ],
+          "ort_c_api_level": "32",
+          "supported_model_artifact_ids": [
+            "htdemucs.spectral.fp32.onnx",
+            "htdemucs_ft.spectral.fp32.onnx"
+          ],
+          "version": "v1.32.0"
+        },
+        "target_triple": "x86_64-pc-windows-msvc",
+        "toolchain": {
+          "cmake_flags": [],
+          "compiler": "Microsoft official build",
+          "image": "nuget.org Microsoft.ML.OnnxRuntime 1.32.0"
+        },
+        "upstream": {
+          "commit_sha": "fab30a46491a40f5e4c968b80e8a59acbbb91b53",
+          "project": "microsoft/onnxruntime",
+          "tag": "v1.32.0"
+        },
+        "variant": "onnxruntime"
+      },
+      {
+        "arch": "x86_64",
+        "archive_digest": "e6fe5517ae83d36e9460e290d847d2f08034e48651dc27d51a6da9ff7da85db1",
+        "artifact_id": "onnxruntime-1.32.0-x86_64-unknown-linux-gnu-e6fe5517ae83d36e",
+        "byte_size": 13257884,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-11-25-002/onnxruntime-1.32.0-openkara-x86_64-unknown-linux-gnu.tar.gz",
+        "extracted_file_digests": {
+          "onnxruntime-linux-x64-1.32.0/LICENSE": {
+            "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+            "size": 1094
+          },
+          "onnxruntime-linux-x64-1.32.0/ThirdPartyNotices.txt": {
+            "sha256": "bf8073fd6a112ac2a656bb60799652127e881689e51d37ad20df446cd5188b2d",
+            "size": 341120
+          },
+          "onnxruntime-linux-x64-1.32.0/build-manifest.json": {
+            "sha256": "c2c6b5f8809cef5db620ea2e66b9e34cc1869b3e5035bbd2dac264b1a6395e59",
+            "size": 2686
+          },
+          "onnxruntime-linux-x64-1.32.0/include/onnxruntime_c_api.h": {
+            "sha256": "46b146f79b611682cff95e000a3f9b58983e7a915687159e12d0e9a29f0d948c",
+            "size": 442638
+          },
+          "onnxruntime-linux-x64-1.32.0/include/onnxruntime_ep_c_api.h": {
+            "sha256": "2e6c2de471dedfda120e8579c4a5e23052a4883d45ce8848c40dd0f5b7f896a1",
+            "size": 173074
+          },
+          "onnxruntime-linux-x64-1.32.0/include/onnxruntime_error_code.h": {
+            "sha256": "6690bf0df3f7a7a9c4f38597dc3232042e432b48ea166cb5672f72a49d32b742",
+            "size": 2873
+          },
+          "onnxruntime-linux-x64-1.32.0/lib/libonnxruntime.so.1.32.0": {
+            "sha256": "4213d6d8c42ac4754865849cb139d31fc39127db6a326babf90bbc81a6eb52fc",
+            "size": 34824680
+          },
+          "onnxruntime-linux-x64-1.32.0/lib/libonnxruntime_providers_shared.so": {
+            "sha256": "8ef51f6bf2c621fc129f625b22241fa6f9a5870bc08eaf2fdd279169ec40d09a",
+            "size": 14632
+          }
+        },
+        "filename": "onnxruntime-1.32.0-openkara-x86_64-unknown-linux-gnu.tar.gz",
+        "kind": "runtime",
+        "os": "linux",
+        "runtime": {
+          "companion_files": [],
+          "deployment_target": "n/a",
+          "execution_providers": [
+            "cpu"
+          ],
+          "ort_c_api_level": "32",
+          "supported_model_artifact_ids": [
+            "htdemucs.spectral.fp32.onnx",
+            "htdemucs_ft.spectral.fp32.onnx"
+          ],
+          "version": "v1.32.0"
+        },
+        "target_triple": "x86_64-unknown-linux-gnu",
+        "toolchain": {
+          "cmake_flags": [],
+          "compiler": "Microsoft official build",
+          "image": "nuget.org Microsoft.ML.OnnxRuntime 1.32.0"
+        },
+        "upstream": {
+          "commit_sha": "fab30a46491a40f5e4c968b80e8a59acbbb91b53",
+          "project": "microsoft/onnxruntime",
+          "tag": "v1.32.0"
+        },
+        "variant": "onnxruntime"
+      },
+      {
+        "arch": "x86_64",
+        "archive_digest": "a3b2691f53534069f10b3a64a208f18df3711d2a841b1ecf01311b1ef39d3930",
+        "artifact_id": "onnxruntime-1.32.0-x86_64-apple-darwin-a3b2691f53534069",
+        "byte_size": 9325494,
+        "deprecation": {
+          "deprecated": false,
+          "replacement_artifact_id": null,
+          "sunset_generation": null
+        },
+        "download_url": "https://github.com/thedavidweng/openkara-models/releases/download/infra-2026-11-17-001/onnxruntime-1.32.0-openkara-x86_64-apple-darwin.tar.gz",
+        "extracted_file_digests": {
+          "onnxruntime-osx-x64-1.32.0/LICENSE": {
+            "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+            "size": 1073
+          },
+          "onnxruntime-osx-x64-1.32.0/ThirdPartyNotices.txt": {
+            "sha256": "d8696258afcf9df7827a5e01d6b6d55ee9b461b4e82020f5f48242deb9cc2270",
+            "size": 334795
+          },
+          "onnxruntime-osx-x64-1.32.0/build-manifest.json": {
+            "sha256": "ae9b4d9cadb307ef2add66856b07247a9d273165b0cc35d3a4cb19123a99b305",
+            "size": 2825
+          },
+          "onnxruntime-osx-x64-1.32.0/include/onnxruntime_c_api.h": {
+            "sha256": "4a8df643e1667147db6a9de16570aac452cc17fb2423984530c964363d6ff5f8",
+            "size": 433257
+          },
+          "onnxruntime-osx-x64-1.32.0/include/onnxruntime_ep_c_api.h": {
+            "sha256": "7ca769301114baeb8cb7e0aed901b44a0b3726079fd908daada68fb47bd33bb2",
+            "size": 169708
+          },
+          "onnxruntime-osx-x64-1.32.0/include/onnxruntime_error_code.h": {
+            "sha256": "5ce3b054e798eced8d14f5b86e98692fd33470463f96194ce0700a2d53dd8721",
+            "size": 2775
+          },
+          "onnxruntime-osx-x64-1.32.0/lib/libonnxruntime.1.32.0.dylib": {
+            "sha256": "f7e8f76bd0fdd9122be999ed1c3af8c42948834481b88b66ccee185ed3308944",
+            "size": 30486352
+          }
+        },
+        "filename": "onnxruntime-1.32.0-openkara-x86_64-apple-darwin.tar.gz",
+        "kind": "runtime",
+        "os": "macos",
+        "runtime": {
+          "companion_files": [],
+          "deployment_target": "14.0",
+          "execution_providers": [
+            "cpu"
+          ],
+          "ort_c_api_level": "32",
+          "supported_model_artifact_ids": [
+            "htdemucs.spectral.fp32.onnx",
+            "htdemucs_ft.spectral.fp32.onnx"
+          ],
+          "version": "v1.32.0"
+        },
+        "target_triple": "x86_64-apple-darwin",
+        "toolchain": {
+          "cmake_flags": [],
+          "compiler": "Apple clang",
+          "image": "macos-latest"
+        },
+        "upstream": {
+          "commit_sha": "fab30a46491a40f5e4c968b80e8a59acbbb91b53",
+          "project": "microsoft/onnxruntime",
+          "tag": "v1.32.0"
+        },
+        "variant": "onnxruntime"
+      }
+    ]
+  },
+  "compatibility": [
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-aarch64-apple-darwin-98f8aa4d830354f9",
+      "status": "supported",
+      "target_triple": "aarch64-apple-darwin"
+    },
+    {
+      "execution_provider": "coreml",
+      "model_artifact_id": "htdemucs.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-aarch64-apple-darwin-98f8aa4d830354f9",
+      "status": "supported",
+      "target_triple": "aarch64-apple-darwin"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-aarch64-unknown-linux-gnu-adc292766ca900b1",
+      "status": "supported",
+      "target_triple": "aarch64-unknown-linux-gnu"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-x86_64-pc-windows-msvc-4e498a8fdc64385d",
+      "status": "supported",
+      "target_triple": "x86_64-pc-windows-msvc"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-x86_64-unknown-linux-gnu-e6fe5517ae83d36e",
+      "status": "supported",
+      "target_triple": "x86_64-unknown-linux-gnu"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-x86_64-apple-darwin-a3b2691f53534069",
+      "status": "supported",
+      "target_triple": "x86_64-apple-darwin"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-aarch64-apple-darwin-98f8aa4d830354f9",
+      "status": "supported",
+      "target_triple": "aarch64-apple-darwin"
+    },
+    {
+      "execution_provider": "coreml",
+      "model_artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-aarch64-apple-darwin-98f8aa4d830354f9",
+      "status": "supported",
+      "target_triple": "aarch64-apple-darwin"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-aarch64-unknown-linux-gnu-adc292766ca900b1",
+      "status": "supported",
+      "target_triple": "aarch64-unknown-linux-gnu"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-x86_64-pc-windows-msvc-4e498a8fdc64385d",
+      "status": "supported",
+      "target_triple": "x86_64-pc-windows-msvc"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-x86_64-unknown-linux-gnu-e6fe5517ae83d36e",
+      "status": "supported",
+      "target_triple": "x86_64-unknown-linux-gnu"
+    },
+    {
+      "execution_provider": "cpu",
+      "model_artifact_id": "htdemucs_ft.spectral.fp32.onnx",
+      "runtime_artifact_id": "onnxruntime-1.32.0-x86_64-apple-darwin-a3b2691f53534069",
+      "status": "supported",
+      "target_triple": "x86_64-apple-darwin"
+    }
+  ],
+  "created_at": "2026-11-25T11:35:59Z",
+  "generation": 19,
+  "producer": {
+    "commit_sha": "84aa39247c983c8ccc15698fe1e95fd3df56a0cb",
+    "repo": "thedavidweng/openkara-models",
+    "run_id": "45605192933",
+    "workflow": "Publish v2 catalog"
+  },
+  "release_id": "2026-11-25-002",
+  "schema_version": "openkara.catalog/release-v2"
+}
