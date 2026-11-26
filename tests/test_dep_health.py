@@ -394,14 +394,14 @@ def test_check_plugin_lock_stale_in_progress_when_candidate_open() -> None:
     import detect_plugin_release
 
     with patch.object(detect_plugin_release, "detect_latest_stable",
-                      return_value={"version": "0.6.0", "targets": {}}),          patch.object(h, "_open_plugin_candidate_pr",
-                      return_value={"number": 200, "branch": "deps/candidate-plugin-webgpu-v0.6.0"}):
+                      return_value={"version": "99.99.99", "targets": {}}),          patch.object(h, "_open_plugin_candidate_pr",
+                      return_value={"number": 200, "branch": "deps/candidate-plugin-webgpu-v99.99.99"}):
         in_prog = h.check_plugin_lock_stale("fake-token")
     assert in_prog["status"] == "in_progress"
     assert in_prog["candidate_pr"]["number"] == 200
 
     with patch.object(detect_plugin_release, "detect_latest_stable",
-                      return_value={"version": "0.6.0", "targets": {}}),          patch.object(h, "_open_plugin_candidate_pr", return_value=None):
+                      return_value={"version": "99.99.99", "targets": {}}),          patch.object(h, "_open_plugin_candidate_pr", return_value=None):
         stale = h.check_plugin_lock_stale("fake-token")
     assert stale["status"] == "stale"
 
